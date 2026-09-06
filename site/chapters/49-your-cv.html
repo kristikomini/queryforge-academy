@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>49 &middot; Your CV, LinkedIn and this project &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="49-your-cv">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 8 — The human requirements <span>&rsaquo;</span> Chapter 49</p>
+<h1>Your CV, LinkedIn and this project</h1>
+<p class="lede">Italian CV conventions, the GDPR consent line, and how to write a bullet that contains a fact.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">The advert never asks for a good CV. The filter that reads it does.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="reader">Who reads it, and for how long</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    The first person to look at your CV is not the person you would work for. They have forty of
+    them, they are looking for reasons to make the pile smaller, and they will spend less than a
+    minute on yours. Everything below is about surviving that minute.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Three readers, three different jobs</div>
+  <ol style="margin-bottom:0">
+    <li><strong>An ATS or a keyword search.</strong> Which is why the exact words from the advert
+      matter, and why a two-column PDF with the skills in a sidebar sometimes parses to nothing.</li>
+    <li><strong>A recruiter,</strong> matching against a checklist. They are not evaluating your
+      SQL; they are checking whether the words are present and whether you are plausibly available.</li>
+    <li><strong>The technical manager,</strong> who reads it for two minutes before the interview
+      and takes their questions from it. <strong>Everything on your CV is an invitation.</strong>
+      Do not write anything you would not enjoy being asked about.</li>
+  </ol>
+</div>
+
+<h2 id="italian">The Italian conventions</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Convention</th><th>Detail</th></tr></thead>
+<tbody>
+<tr><td><strong>Length</strong></td><td>One page for a junior. Two only with real experience</td></tr>
+<tr><td><strong>Photo</strong></td><td>Still common in Italy and generally expected. Neutral, recent, plain background — or omit it and lose nothing</td></tr>
+<tr><td><strong>Date of birth</strong></td><td>Common locally, and not required. Your choice</td></tr>
+<tr><td><strong>GDPR consent line</strong></td><td><strong>Include it.</strong> Its absence is noticed. See below</td></tr>
+<tr><td><strong>Language levels</strong></td><td>CEFR: A1–C2. “Inglese: B2 (letto/scritto C1)” beats “buono”</td></tr>
+<tr><td><strong>Format</strong></td><td>PDF, named <code>CV_Nome_Cognome.pdf</code>. Never a bare <code>cv.pdf</code></td></tr>
+<tr><td><strong>Europass</strong></td><td>Accepted, verbose, and it makes everyone look identical. A clean one-page CV is better</td></tr>
+<tr><td><strong>Patente B</strong></td><td>Worth a line for jobs outside a city centre. Genuinely relevant in Emilia-Romagna</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box note">
+  <div class="box-title">The consent line, verbatim</div>
+  <p style="margin-bottom:0">
+    <em>“Autorizzo il trattamento dei miei dati personali ai sensi del Regolamento UE 2016/679
+    (GDPR) e del D.Lgs. 196/2003 come modificato dal D.Lgs. 101/2018.”</em><br>
+    Small print, at the bottom. Strictly it is not legally required for a CV you sent voluntarily —
+    but its absence is read as unfamiliarity with local convention, which is exactly the impression
+    you do not want to give in the first thirty seconds. It costs one line.
+  </p>
+</div>
+
+<h2 id="bullets">The bullet that contains a fact</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Presence, action, result</div>
+  <p>
+    Almost every weak CV bullet describes <strong>presence</strong> — that you were there and the
+    technology existed nearby. A strong one describes a <strong>result</strong>, with a number.
+  </p>
+</div>
+
+<pre><code>❌ "Utilizzo di SQL Server per la gestione di database aziendali"
+   (Presence. Says nothing. Could be written by anyone who has seen SSMS.)
+
+⚠  "Ottimizzazione di query e stored procedure"
+   (Action, no result. Better, still unfalsifiable.)
+
+✅ "Ridotto il tempo di apertura del report vendite da 40 s a 1,2 s
+    riprogettando la vista sottostante e aggiungendo un indice covering
+    (SQL Server, 12M righe)."
+   (Result, number, method, scale. And it invites exactly the question
+    you want to be asked.)</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ Where a junior finds numbers</div>
+  <p style="margin-bottom:0">
+    You do not need commercial experience to have numbers. <em>Row counts</em> in a project
+    database. <em>Query time before and after.</em> <em>Number of tables in a schema you
+    designed.</em> <em>Questions in a course you completed.</em> Any specific quantity beats every
+    adjective — and the honest framing (“personal project”) costs you nothing, because the reader's
+    question is whether you can talk about it, not whether you were paid.
+  </p>
+</div>
+
+<h2 id="structure">A structure that works</h2>
+
+<pre><code>NOME COGNOME
+Database Developer  ·  Modena  ·  email  ·  telefono  ·  github.com/…  ·  linkedin.com/in/…
+
+PROFILO                                                    (3 righe, non 8)
+Sviluppatore SQL con solide basi in modellazione relazionale, tuning delle query e
+T-SQL. Progetto personale: un database di order fulfilment con macchina a stati,
+concorrenza ottimistica e outbox transazionale (link). Cerco un ruolo junior in
+Emilia-Romagna.
+
+COMPETENZE TECNICHE                              (raggruppate, con il livello)
+  SQL          SELECT avanzato, window functions, CTE ricorsive, tuning, piani di esecuzione
+  Motori       SQL Server (T-SQL, SSMS) · PostgreSQL · SQLite · nozioni di Oracle/PL-SQL
+  Modellazione Normalizzazione, vincoli, indici, star schema
+  Strumenti    Git, Docker, SSIS (basi), Power BI (basi)
+
+PROGETTI                                          (per un junior: PRIMA dell'esperienza)
+  Order fulfilment database — github.com/…
+  · Schema di 11 tabelle con macchina a stati sugli ordini applicata tramite CHECK
+  · Concorrenza ottimistica con colonna version; outbox transazionale per gli eventi
+  · Suite di test su PostgreSQL reale in container; migrazioni versionate
+  · 1 800 ordini di dati deterministici per rendere i test riproducibili
+
+ESPERIENZA / FORMAZIONE / LINGUE / PATENTE
+Inglese B2 (tecnico C1) · Italiano madrelingua · Patente B
+
+Autorizzo il trattamento dei miei dati personali ai sensi del Reg. UE 2016/679 …</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Never use a self-rating bar</div>
+  <p style="margin-bottom:0">
+    The five-star or 80%-filled-circle skill graphic is the single most disliked convention among
+    technical readers. It communicates nothing — 80% of what? — and it invites the interviewer to
+    disprove it. Write the level in words with a concrete claim attached instead.
+  </p>
+</div>
+
+<h2 id="project">The project section is the whole point</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Why a junior CV should lead with a project</div>
+  <p style="margin-bottom:0">
+    “No commercial experience” is answered by <em>something you built that can be questioned</em>.
+    Not a tutorial you followed — a thing with decisions in it that you can defend. The
+    <a href="../index.html">reference database</a> shipped with this course exists precisely for
+    this: a schema with a state machine, optimistic concurrency, a transactional outbox, deterministic
+    seed data and tests against a real engine. Every one of those is a decision an interviewer can
+    ask about, and having an answer is what commercial experience is a proxy for.
+  </p>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Make it three minutes from CV to running</div>
+  <p style="margin-bottom:0">
+    A README with a one-command setup, a diagram, and three sentences on <em>why</em> each
+    non-obvious decision was made. Interviewers do look — and the ones who do are the ones you want
+    to work for. A repository they cannot run in three minutes is a repository they will not run.
+  </p>
+</div>
+
+<h2 id="linkedin">LinkedIn, briefly</h2>
+
+<ul>
+  <li><strong>Headline:</strong> the role, not the aspiration. “Database Developer · SQL Server ·
+    T-SQL” — not “Passionate about data”.</li>
+  <li><strong>Location set to the target area.</strong> Recruiters filter by it, hard. If you are
+    willing to move to Bologna, say Bologna.</li>
+  <li><strong>“Open to work”</strong> — the recruiters-only setting is worth switching on; it is
+    genuinely how a lot of first contact happens in Italy.</li>
+  <li><strong>Skills section</strong> matching the advert vocabulary, because search runs on it.</li>
+  <li>An <strong>Italian profile</strong>, or bilingual. The recruiters searching for you are
+    searching in Italian.</li>
+</ul>
+
+<h2 id="letter">The cover letter</h2>
+
+<div class="box note">
+  <div class="box-title">Short, specific, and about them</div>
+  <p style="margin-bottom:0">
+    Three paragraphs. <strong>Why this company</strong> — one specific, checkable sentence proving
+    you read something. <strong>Why you</strong> — the one or two requirements you match best, with
+    the evidence. <strong>What next</strong> — availability and a clear closing line. Under 200
+    words. A generic letter is worse than none, because it demonstrates the thing it claims to
+    disprove.
+  </p>
+</div>
+
+<div class="tryit">
+  <p>
+    The <a href="../cv.html">CV builder</a> in this site generates an Italian CV and cover letter
+    from your details and then <strong>lints them against the rules above</strong>: the consent
+    line, CEFR levels, bullets with no number in them, one page. It is not an AI that writes your
+    CV — it can only tell you when a bullet contains no facts. That is a smaller claim and a true
+    one.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Three readers: a keyword search, a recruiter with a checklist, and the manager who takes their questions from it.</li>
+    <li>Everything on your CV is an invitation. Do not write what you would not enjoy being asked.</li>
+    <li>One page for a junior. PDF, named with your name.</li>
+    <li>Include the GDPR consent line. Its absence is noticed.</li>
+    <li>CEFR levels, not “buono”.</li>
+    <li>Presence, action, result — write the result, with a number.</li>
+    <li>A junior's numbers come from row counts, timings and schema sizes. Any quantity beats every adjective.</li>
+    <li>Never use a self-rating bar. It says nothing and invites disproof.</li>
+    <li>Lead with a project that has defensible decisions in it, runnable in three minutes.</li>
+    <li>Set LinkedIn to the target city and write it in Italian; that is how recruiters search.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Tell me about this project on your CV.</p>
+  <p class="a">The question every project line invites, which is why every project line must be
+    defensible. Two sentences on what it is, then go straight to a decision and its trade-off —
+    “orders use optimistic concurrency with a version column rather than locking, because the
+    editing is done by people and I did not want a lock held across someone's thinking time”.</p>
+</div>
+
+<div class="qa">
+  <p class="q">You have no commercial experience. Why should we take you?</p>
+  <p class="a">Point at something concrete and invite them into it: a schema with a state machine,
+    optimistic concurrency and a transactional outbox, tested against a real engine in CI. The
+    claim is not that it equals commercial experience — it is that every decision in it can be
+    questioned, and being able to answer is what the experience requirement is a proxy for.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How would you rate your SQL, one to ten?</p>
+  <p class="a">Refuse the number politely and replace it with scope: “I am comfortable with joins,
+    window functions, CTEs and reading an execution plan, and I have tuned queries by making an
+    index cover them. What I have not done is administer a production instance — backups and high
+    availability I know in theory only.” A boundary is more credible than a score.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

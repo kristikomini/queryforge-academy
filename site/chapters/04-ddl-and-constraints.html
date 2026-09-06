@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>04 &middot; DDL and constraints: the database defends itself &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="04-ddl-and-constraints">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 1 — The relational foundation <span>&rsaquo;</span> Chapter 04</p>
+<h1>DDL and constraints: the database defends itself</h1>
+<p class="lede">PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK, NOT NULL, DEFAULT — the cheapest bugs you will ever prevent.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Progettazione e modellazione di basi dati relazionali&rdquo;</em> &mdash; “modelling” in practice means
+  writing constraints. A model that is only a diagram enforces nothing.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="why">Constraints are the cheapest tests you will ever write</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Think of a form with boxes that will not let you write in them wrongly. The date box only
+    accepts dates. The “how many” box refuses negative numbers. You cannot post the form without
+    filling in your name. The form is not being annoying — it is making it impossible to send back
+    something nobody can use.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    A constraint is an invariant enforced by the engine, so it holds regardless of which
+    application, script, ETL job, migration or DBA-at-2am is writing. Application-level validation
+    is the same rule written in a place that can be bypassed — and over a system's life it
+    <em>will</em> be bypassed: by the import job, by the hotfix, by the second application nobody
+    told you about. The constraint is also the only version that is true for the data that is
+    <em>already there</em>.
+  </p>
+</div>
+
+<h2 id="the-six">The six constraints, and what each one is for</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Constraint</th><th>Prevents</th><th>Cost</th></tr></thead>
+<tbody>
+<tr><td><code>NOT NULL</code></td><td>Unknown where unknown is not a valid state</td><td>Free</td></tr>
+<tr><td><code>PRIMARY KEY</code></td><td>Duplicate or unidentifiable rows</td><td>Creates an index; usually decides physical order</td></tr>
+<tr><td><code>UNIQUE</code></td><td>Two customers with one VAT number</td><td>Creates an index; a write must check it</td></tr>
+<tr><td><code>FOREIGN KEY</code></td><td>An order line pointing at an order that never existed</td><td>A lookup per write; <strong>index the child column yourself</strong></td></tr>
+<tr><td><code>CHECK</code></td><td>Negative quantities, a ship date before the order date</td><td>An expression per write. Usually negligible</td></tr>
+<tr><td><code>DEFAULT</code></td><td>Every caller having to remember <code>created_at</code></td><td>Free</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the one that costs real money</div>
+  <p style="margin-bottom:0">
+    <strong>A foreign key does not create an index on the child column.</strong> The parent side
+    is indexed because it is a key; the child side is not, in any major engine except MySQL, which
+    creates one silently. So <code>DELETE FROM orders WHERE id = ?</code> has to scan
+    <em>the whole of</em> <code>order_lines</code> to check nothing references it — and it holds
+    locks while it does. This is one of the most common causes of mysterious delete-and-blocking
+    incidents in the field. Index every foreign key column.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>CREATE TABLE orders (
+  id           INTEGER PRIMARY KEY,
+  customer_id  INTEGER NOT NULL REFERENCES customers(id),
+  status       VARCHAR(12) NOT NULL DEFAULT 'draft',
+  placed_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  shipped_at   TIMESTAMP   NULL,
+  total_cents  BIGINT      NOT NULL DEFAULT 0,
+
+  -- The state machine, enforced where it cannot be bypassed.
+  CONSTRAINT ck_orders_status CHECK (status IN
+    ('draft','submitted','confirmed','shipped','delivered','cancelled')),
+  -- A total can be zero but never negative.
+  CONSTRAINT ck_orders_total CHECK (total_cents &gt;= 0),
+  -- Shipped implies a ship date, and it cannot precede the order.
+  CONSTRAINT ck_orders_shipped CHECK (
+    (status &lt;&gt; 'shipped' AND status &lt;&gt; 'delivered')
+    OR (shipped_at IS NOT NULL AND shipped_at &gt;= placed_at))
+);
+
+-- The index the foreign key did NOT create for you:
+CREATE INDEX ix_orders_customer ON orders (customer_id);</code></pre>
+</div>
+
+<h2 id="cascade">ON DELETE: the four options and when each is right</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Action</th><th>Behaviour</th><th>Right for</th></tr></thead>
+<tbody>
+<tr><td><code>NO ACTION</code> / <code>RESTRICT</code></td><td>Refuse the delete</td><td><strong>The default you should want.</strong> Anything financial or legal</td></tr>
+<tr><td><code>CASCADE</code></td><td>Delete the children too</td><td>Genuine ownership: an order and its lines, a user and their sessions</td></tr>
+<tr><td><code>SET NULL</code></td><td>Orphan the children</td><td>An optional link — a task whose assignee left</td></tr>
+<tr><td><code>SET DEFAULT</code></td><td>Point them at a fallback row</td><td>Rare. A “deleted user” placeholder</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Cascade is a loaded weapon</div>
+  <p style="margin-bottom:0">
+    <code>ON DELETE CASCADE</code> means one statement can silently remove rows from tables that
+    are not named in it, through chains several levels deep, with no row count that reflects the
+    damage. Use it where the child genuinely has no independent existence, and nowhere else. For
+    business records the honest pattern is usually <strong>soft delete</strong> — a
+    <code>deleted_at</code> column and a filtered index — because “delete the customer” almost
+    never really means “destroy seven years of invoices”, and a tax authority may disagree with
+    you about whether it did.
+  </p>
+</div>
+
+<h2 id="naming">Name your constraints</h2>
+
+<p>
+  An unnamed constraint gets a generated name like <code>CK__orders__7A672E12</code>. That name is
+  different in every environment, so a migration that drops it cannot be written portably, and an
+  error message that mentions it tells the support engineer nothing.
+</p>
+
+<pre><code>-- Not this:
+ALTER TABLE orders ADD CHECK (total_cents &gt;= 0);
+
+-- This. The error message now reads "ck_orders_total_nonneg", which is a sentence.
+ALTER TABLE orders ADD CONSTRAINT ck_orders_total_nonneg CHECK (total_cents &gt;= 0);</code></pre>
+
+<p>
+  A convention that survives contact with a real team:
+  <code>pk_</code>, <code>fk_&lt;child&gt;_&lt;parent&gt;</code>, <code>uq_&lt;table&gt;_&lt;cols&gt;</code>,
+  <code>ck_&lt;table&gt;_&lt;rule&gt;</code>, <code>ix_&lt;table&gt;_&lt;cols&gt;</code>.
+</p>
+
+<h2 id="trust">Constraints the optimiser can use</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 A constraint is information, not just a rule</div>
+  <p style="margin-bottom:0">
+    The optimiser reads your constraints. A <code>CHECK (status IN (...))</code> lets it discard a
+    branch querying for a status that cannot exist. A <code>NOT NULL</code> lets it skip null
+    handling. A <code>UNIQUE</code> tells it a join cannot multiply rows, which changes the join
+    algorithm it picks. In SQL Server a constraint added <code>WITH NOCHECK</code> is marked
+    <em>untrusted</em> and stops being used for any of this — a genuinely obscure fact that shows
+    up as a plan regression after someone bulk-loads data. Add constraints
+    <code>WITH CHECK</code> and verify with <code>sys.check_constraints.is_not_trusted</code>.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>A constraint is an invariant that holds no matter who is writing. Application validation is the same rule in a bypassable place.</li>
+    <li>Foreign keys do not index the child column. Index it yourself, or deletes on the parent will scan the child.</li>
+    <li>Default to <code>RESTRICT</code>; use <code>CASCADE</code> only where the child cannot exist alone.</li>
+    <li>For business records, prefer soft delete to cascade. “Delete the customer” rarely means “destroy the invoices”.</li>
+    <li>Name every constraint. The generated name differs per environment and tells nobody anything.</li>
+    <li><code>CHECK</code> is the cheapest place to put a business rule that must never be false.</li>
+    <li>Constraints are information the optimiser uses. An untrusted constraint enforces the rule but stops helping the plan.</li>
+    <li>Write <code>NOT NULL</code> unless there is a genuine business state that is unknown.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Should business rules live in the database or the application?</p>
+  <p class="a">Invariants — things that must never be false about the data — belong in the
+    database, because it is the only layer every writer passes through. Policy that changes with
+    the business, involves external systems, or needs a human-readable error belongs in the
+    application. “A quantity is never negative” is a constraint; “gold customers get free
+    shipping over &euro;50” is not.</p>
+</div>
+
+<div class="qa">
+  <p class="q">A delete on the parent table is suddenly very slow. Why?</p>
+  <p class="a">Almost always an unindexed foreign key on a child table: the engine has to scan the
+    child to prove nothing references the row, and holds locks while it does. Find every FK column
+    without a leading index on it and add one.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What does <code>ON DELETE CASCADE</code> do, and when would you avoid it?</p>
+  <p class="a">It deletes referencing rows automatically, recursively. I avoid it for anything with
+    legal or financial meaning, because a single statement can then destroy rows in tables it does
+    not name and the row count gives no clue. Ownership relationships — an order and its lines —
+    are where it is genuinely right.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

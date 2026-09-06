@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>14 &middot; Frames, running totals, gaps and islands &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="14-frames-and-islands">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 14</p>
+<h1>Frames, running totals, gaps and islands</h1>
+<p class="lede">ROWS and RANGE are not the same thing. Plus LAG/LEAD and the classic interview problem, solved three ways.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">No advert names it, but “find the consecutive runs” and “running balance” appear in most technical screens.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="frame">The frame: the part everyone skips</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Line the rows up in order. The <em>frame</em> is how far you can see from where you are
+    standing: everything behind you, or three rows either side, or the whole line. Change how far
+    you can see and the same question gives a different answer.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p>
+    Inside <code>OVER (…)</code>, after <code>PARTITION BY</code> and <code>ORDER BY</code>, comes
+    the <strong>frame</strong>: which rows of the ordered partition the function actually sees.
+  </p>
+  <ul style="margin-bottom:0">
+    <li><strong>No <code>ORDER BY</code></strong> → the frame is the whole partition. That is why
+      <code>SUM(x) OVER (PARTITION BY c)</code> is a partition total.</li>
+    <li><strong>With <code>ORDER BY</code> and no explicit frame</strong> → the default is
+      <code>RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW</code>. That gives a running total —
+      which is why adding an <code>ORDER BY</code> silently changes a total into a running total,
+      the most surprising behaviour in the whole feature.</li>
+  </ul>
+</div>
+
+<h2 id="rows-range">ROWS and RANGE are not the same thing</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the default is the slow, surprising one</div>
+  <p>
+    <code>ROWS</code> counts <em>physical rows</em>. <code>RANGE</code> counts
+    <em>peer rows</em> — every row with the same <code>ORDER BY</code> value is included together.
+  </p>
+  <p style="margin-bottom:0">
+    So with three orders on the same day, <code>RANGE … CURRENT ROW</code> includes all three in
+    every one of their running totals; <code>ROWS … CURRENT ROW</code> includes one, two, three
+    respectively. If your running total "jumps" on days with several rows, this is why. And
+    <code>RANGE</code> is the <strong>default</strong>, and is generally slower. Write
+    <code>ROWS</code> explicitly unless you specifically want peer semantics.
+  </p>
+</div>
+
+<pre><code>-- amounts on the same date: 10, 20, 30
+SUM(x) OVER (ORDER BY d)                                  -- RANGE:  60, 60, 60
+SUM(x) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING)         -- ROWS:   10, 30, 60
+
+-- A 7-day moving average, done right:
+SELECT d, amount,
+       AVG(amount) OVER (ORDER BY d ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS ma7
+FROM daily;</code></pre>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Frame</th><th>Means</th></tr></thead>
+<tbody>
+<tr><td><code>ROWS UNBOUNDED PRECEDING</code></td><td>Start of partition → here. Running total</td></tr>
+<tr><td><code>ROWS BETWEEN 6 PRECEDING AND CURRENT ROW</code></td><td>A 7-row sliding window</td></tr>
+<tr><td><code>ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING</code></td><td>Neighbours either side. Smoothing</td></tr>
+<tr><td><code>ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING</code></td><td>Here → end. “How much is still to come”</td></tr>
+<tr><td><code>RANGE BETWEEN INTERVAL '7 days' PRECEDING AND CURRENT ROW</code></td><td>A true time window, gaps and all</td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="small muted">
+  That last row is the one case where <code>RANGE</code> is clearly better than
+  <code>ROWS</code>: “the last seven <em>days</em>” is not “the last seven <em>rows</em>” when some
+  days have no data. PostgreSQL and Oracle support it; SQL Server does not.
+</p>
+
+<h2 id="lag">LAG, LEAD and the value-at functions</h2>
+
+<pre><code>SELECT d, amount,
+       LAG(amount)      OVER (ORDER BY d)        AS prev_day,
+       LEAD(amount)     OVER (ORDER BY d)        AS next_day,
+       amount - LAG(amount, 1, 0) OVER (ORDER BY d) AS delta,   -- 3rd arg = default
+       FIRST_VALUE(amount) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING) AS first_ever
+FROM daily;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — <code>LAST_VALUE</code> almost never does what you expect</div>
+  <p style="margin-bottom:0">
+    With the default frame, "the last value" is the current row, so
+    <code>LAST_VALUE(x) OVER (ORDER BY d)</code> just returns <code>x</code>. You must extend the
+    frame: <code>LAST_VALUE(x) OVER (ORDER BY d ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED
+    FOLLOWING)</code>. In practice <code>FIRST_VALUE</code> over a reversed <code>ORDER BY</code>
+    is easier to read and harder to get wrong.
+  </p>
+</div>
+
+<h2 id="islands">Gaps and islands</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    You have a list of days somebody came to work: 1, 2, 3, 7, 8, 12. The <em>islands</em> are the
+    runs of consecutive days — 1–3, 7–8, 12 — and the <em>gaps</em> are the holes between them.
+    The trick to finding them is beautiful: subtract each day's <em>position in the list</em> from
+    the day itself. Inside a run, that difference never changes.
+  </p>
+</div>
+
+<pre><code>-- day: 1 2 3 7 8 12
+-- rn:  1 2 3 4 5  6
+-- d-rn:0 0 0 3 3  6   ← constant within each island. Group by it.
+
+WITH numbered AS (
+  SELECT d, ROW_NUMBER() OVER (ORDER BY d) AS rn FROM attendance
+),
+grouped AS (
+  SELECT d, d - rn AS grp FROM numbered          -- integer days; use date arithmetic otherwise
+)
+SELECT MIN(d) AS island_start, MAX(d) AS island_end, COUNT(*) AS length
+FROM grouped
+GROUP BY grp
+ORDER BY island_start;</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 The general version: a gap flag and a running sum</div>
+  <p>
+    The subtraction trick only works for a fixed step. The portable technique — and the one to
+    show in an interview — is to mark where a new group <em>starts</em> and then take a running
+    sum of those marks. It works for sessions, status runs, anything.
+  </p>
+  <pre style="margin-bottom:0"><code>WITH flagged AS (
+  SELECT *,
+         CASE WHEN LAG(ended_at) OVER (PARTITION BY user_id ORDER BY started_at)
+                   &gt;= started_at - INTERVAL '30 minutes'
+              THEN 0 ELSE 1 END AS is_new_session
+  FROM events
+),
+sessions AS (
+  SELECT *, SUM(is_new_session) OVER (PARTITION BY user_id ORDER BY started_at
+                                      ROWS UNBOUNDED PRECEDING) AS session_id
+  FROM flagged
+)
+SELECT user_id, session_id, MIN(started_at), MAX(ended_at), COUNT(*)
+FROM sessions GROUP BY user_id, session_id;</code></pre>
+</div>
+
+<div class="tryit">
+  <pre><code>-- Find every customer's longest run of consecutive months with at least one order.
+-- This is gaps-and-islands with a month grain. Try it before reading the solution
+-- in course/SOLUTIONS.md.</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>No <code>ORDER BY</code> in <code>OVER</code> means the frame is the whole partition — a total, not a running total.</li>
+    <li>Adding <code>ORDER BY</code> silently changes the default frame to “start of partition → current row”.</li>
+    <li><code>ROWS</code> counts physical rows; <code>RANGE</code> includes all peers with the same ordering value.</li>
+    <li><code>RANGE</code> is the default and is usually not what you meant. Write <code>ROWS</code>.</li>
+    <li><code>RANGE</code> with an <code>INTERVAL</code> is the one place it wins: a true time window across missing days.</li>
+    <li><code>LAST_VALUE</code> needs an explicit frame to the end of the partition, or it returns the current row.</li>
+    <li>Islands of consecutive integers: group by <code>value − ROW_NUMBER()</code>.</li>
+    <li>The general form: flag where a new group starts, then take a running <code>SUM</code> of the flag as the group id.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Difference between <code>ROWS</code> and <code>RANGE</code>?</p>
+  <p class="a"><code>ROWS</code> counts physical rows; <code>RANGE</code> includes every peer row
+    sharing the current row's <code>ORDER BY</code> value. With duplicate ordering values they give
+    different answers, and <code>RANGE</code> — the default — is also usually slower.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Compute a running total.</p>
+  <p class="a"><code>SUM(amount) OVER (PARTITION BY account ORDER BY d ROWS UNBOUNDED
+    PRECEDING)</code>. The explicit <code>ROWS</code> matters: with the default
+    <code>RANGE</code>, several rows on the same date all get the same day-end total.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Find runs of consecutive days.</p>
+  <p class="a">Gaps and islands. Number the rows in date order and group by
+    <code>date − row_number</code>, which is constant inside a run. For irregular steps, flag each
+    row where the gap from the previous exceeds the threshold and take a running sum of that flag
+    as a group id.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

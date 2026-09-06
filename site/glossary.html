@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Glossary — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="glossary">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main wide" id="main">
+
+<p class="crumbs">Reference</p>
+<h1>Glossary</h1>
+<p class="lede">
+  Two kinds of word, and they are different problems.
+</p>
+
+<div class="grid-2" style="margin-bottom:20px">
+  <div class="box note">
+    <div class="box-title">Technical terms stay English</div>
+    <p style="margin-bottom:0">
+      <em>la query, il deploy, fare il merge, il backup, l'indice, il join.</em> Translating them
+      marks somebody who learned the language from a textbook rather than from a team. The trap is
+      the small number that <strong>are</strong> translated — <em>collaudo</em>, <em>avvio in
+      produzione</em>, <em>presa in carico</em> — where using the English word marks you just as
+      clearly.
+    </p>
+  </div>
+  <div class="box trap">
+    <div class="box-title">⚠ Process and contract vocabulary is where interviews are lost</div>
+    <p style="margin-bottom:0">
+      It is entirely Italian, it appears in adverts and contracts, and nobody teaches it. A
+      candidate who can tune a query but does not know what <em>RAL</em>, <em>CCNL</em> or
+      <em>apprendistato</em> mean is at a real disadvantage in a conversation that decides their
+      salary.
+    </p>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:18px">
+  <label class="field" style="margin-bottom:0">
+    <span>Search</span>
+    <input type="search" id="q" placeholder="Type an English or Italian term, or a definition…" autocomplete="off">
+  </label>
+  <div class="row" id="cats" style="margin-top:12px"></div>
+</div>
+
+<div id="out"></div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/glossary.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+(function () {
+  var G = window.GLOSSARY || [], CH = window.CHAPTERS || [];
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+  var cats = [];
+  G.forEach(function (g) { if (cats.indexOf(g.cat) < 0) cats.push(g.cat); });
+  var active = "";
+
+  var catBox = document.getElementById("cats");
+  function drawCats() {
+    catBox.innerHTML = "";
+    var all = el("button", "tb-btn" + (active === "" ? " on" : ""), "All (" + G.length + ")");
+    all.onclick = function () { active = ""; drawCats(); render(); };
+    catBox.appendChild(all);
+    cats.forEach(function (c) {
+      var n = G.filter(function (g) { return g.cat === c; }).length;
+      var b = el("button", "tb-btn" + (active === c ? " on" : ""), c + " (" + n + ")");
+      b.onclick = function () { active = active === c ? "" : c; drawCats(); render(); };
+      catBox.appendChild(b);
+    });
+  }
+
+  function render() {
+    var q = document.getElementById("q").value.trim().toLowerCase();
+    var out = document.getElementById("out");
+    out.innerHTML = "";
+
+    var list = G.filter(function (g) {
+      if (active && g.cat !== active) return false;
+      if (!q) return true;
+      return (g.en + " " + g.it + " " + g.def + " " + g.cat).toLowerCase().indexOf(q) >= 0;
+    });
+
+    if (!list.length) {
+      out.appendChild(el("p", "muted", "Nothing matches “" + q + "”."));
+      return;
+    }
+
+    var groups = {};
+    list.forEach(function (g) { (groups[g.cat] = groups[g.cat] || []).push(g); });
+
+    Object.keys(groups).forEach(function (cat) {
+      out.appendChild(el("h2", "", cat));
+      var wrap = el("div", "table-wrap");
+      var table = el("table");
+      var thead = el("thead");
+      var tr = el("tr");
+      ["English", "In an Italian team", "What it means", "Ch."].forEach(function (h, i) {
+        var th = el("th", "", h);
+        if (i === 3) th.style.width = "48px";
+        if (i === 0) th.style.width = "20%";
+        if (i === 1) th.style.width = "22%";
+        tr.appendChild(th);
+      });
+      thead.appendChild(tr);
+      table.appendChild(thead);
+      var tb = el("tbody");
+      groups[cat].forEach(function (g) {
+        var r = el("tr");
+        var t1 = el("td");
+        t1.appendChild(el("strong", "", g.en));
+        r.appendChild(t1);
+        var t2 = el("td");
+        var it = el("em", "", g.it);
+        t2.appendChild(it);
+        r.appendChild(t2);
+        r.appendChild(el("td", "small", g.def));
+        var t4 = el("td", "mono");
+        if (g.where) {
+          var ch = CH.filter(function (c) { return c.n === g.where; })[0];
+          if (ch) {
+            var a = el("a", "", g.where);
+            a.href = "chapters/" + ch.id + ".html";
+            a.title = ch.title;
+            t4.appendChild(a);
+          } else t4.textContent = g.where;
+        }
+        r.appendChild(t4);
+        tb.appendChild(r);
+      });
+      table.appendChild(tb);
+      wrap.appendChild(table);
+      out.appendChild(wrap);
+    });
+  }
+
+  document.getElementById("q").addEventListener("input", render);
+  drawCats();
+  render();
+})();
+</script>
+</body>
+</html>

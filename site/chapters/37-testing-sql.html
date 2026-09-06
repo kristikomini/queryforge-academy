@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>37 &middot; Testing SQL, and CI against a real engine &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="37-testing-sql">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 5 — Building it properly <span>&rsaquo;</span> Chapter 37</p>
+<h1>Testing SQL, and CI against a real engine</h1>
+<p class="lede">Fixtures, transactional rollback, tSQLt and pgTAP, and why an in-memory fake is not a database.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">The thing that separates “writes SQL” from “ships SQL”. No junior advert asks. Every senior interview does.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="what">What is worth testing</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    You do not need to test that the database can add up. You need to test the things <em>you</em>
+    decided: that the wrong data is refused, that the rule about who can see what still holds, and
+    that the report agrees with the invoice.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Test</th><th>Worth it?</th></tr></thead>
+<tbody>
+<tr><td><strong>Constraints reject bad data</strong></td><td>✅ Yes. It is your specification, executable</td></tr>
+<tr><td><strong>A view or report returns the right numbers for known input</strong></td><td>✅ Yes. This is where the money is</td></tr>
+<tr><td><strong>A stored procedure's behaviour, including its error paths</strong></td><td>✅ Yes. It is code with no other tests</td></tr>
+<tr><td><strong>Migrations apply cleanly to a real, populated schema</strong></td><td>✅ Yes. And that they are re-runnable</td></tr>
+<tr><td><strong>Row-level security actually isolates tenants</strong></td><td>✅ Yes. Nothing else will tell you</td></tr>
+<tr><td><strong>That an index is used</strong></td><td>⚠ Fragile — the plan legitimately changes with data volume. Test the outcome, not the plan</td></tr>
+<tr><td><strong>That <code>SELECT 1 + 1</code> is 2</strong></td><td>❌ No</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="isolation">Making tests independent</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Three strategies, in increasing order of cost and fidelity</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Transaction rollback.</strong> Each test runs inside a transaction that is always
+      rolled back. Fast, and the isolation is perfect. Its one limitation is real: you cannot test
+      anything <em>about</em> transactions or concurrency, because you are already inside one.</li>
+    <li><strong>Truncate and reseed.</strong> Slower, and it lets a test commit — so deadlocks,
+      isolation levels and triggers that depend on commit are testable.</li>
+    <li><strong>A fresh container per suite.</strong> Testcontainers or an equivalent starts a real
+      engine, applies the migrations and destroys it. The slowest and the only one that also tests
+      the migrations themselves.</li>
+  </ol>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the in-memory fake is not a database</div>
+  <p style="margin-bottom:0">
+    Testing against an in-memory provider, or SQLite when you deploy PostgreSQL, cheerfully passes
+    tests that fail against anything you would ship. It has different type coercion, different
+    <code>NULL</code> and collation behaviour, different transaction semantics, and it does not
+    implement most of the SQL you actually wrote. <strong>Test against the engine you deploy</strong>,
+    at the version you deploy — a container makes this cheap enough that there is no longer an
+    excuse. (This site's own accounts service runs SQLite in <em>production</em>, so its tests use
+    SQLite honestly — which is the same principle, not an exception to it.)
+  </p>
+</div>
+
+<h2 id="frameworks">The frameworks</h2>
+
+<pre><code>-- tSQLt (SQL Server) — tests are stored procedures, and it can FAKE a table so a
+-- test does not depend on foreign keys or on data it did not create.
+EXEC tSQLt.NewTestClass 'OrdersTests';
+GO
+CREATE PROCEDURE OrdersTests.[test cancelling a shipped order is rejected]
+AS
+BEGIN
+  EXEC tSQLt.FakeTable 'dbo.orders';
+  INSERT INTO dbo.orders (id, status) VALUES (1, 'shipped');
+  EXEC tSQLt.ExpectException @ExpectedMessagePattern = '%cannot cancel%';
+  EXEC dbo.usp_CancelOrder @order_id = 1;
+END
+GO
+
+-- pgTAP (PostgreSQL) — TAP-producing assertions, so it plugs into any CI runner.
+SELECT plan(3);
+SELECT has_table('orders');
+SELECT col_not_null('orders', 'customer_id');
+SELECT throws_ok(
+  $$ INSERT INTO order_lines (order_id, line_no, product_id, quantity, unit_price_cents)
+     VALUES (1, 99, 1, -5, 100) $$,
+  '23514', NULL, 'negative quantity is rejected');
+SELECT finish();</code></pre>
+
+<div class="box note">
+  <div class="box-title">Or just test from the application's test framework</div>
+  <p style="margin-bottom:0">
+    A perfectly good option, and often the right one: the tests live with the rest of the suite,
+    run in the same CI job, and use tooling the team already knows. What you lose is the ability to
+    test objects the application never calls directly. What you gain is that they actually get run.
+  </p>
+</div>
+
+<h2 id="fixtures">Fixtures: deterministic, minimal, named</h2>
+
+<div class="box good">
+  <div class="box-title">✔ Three properties of a fixture that ages well</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Deterministic.</strong> No <code>random()</code>, no <code>now()</code> — pass the
+      clock in, or freeze it. A test that fails on the 31st of the month, or in a different time
+      zone, is worse than no test. (The reference database's seed is deliberately generated with
+      arithmetic rather than <code>random()</code> for exactly this reason.)</li>
+    <li><strong>Minimal.</strong> Insert the three rows this test needs, not the whole demo
+      dataset. A shared fixture means changing one test breaks four others.</li>
+    <li><strong>Named for the scenario</strong>, not the data:
+      <code>an_order_that_has_shipped</code>, not <code>order_7</code>. The name is what the failure
+      message will say.</li>
+  </ol>
+</div>
+
+<h2 id="ci">In CI</h2>
+
+<pre><code># One job, a real engine, migrations applied from scratch every time.
+services:
+  postgres:
+    image: postgres:17
+    env: { POSTGRES_PASSWORD: test }
+    options: &gt;-
+      --health-cmd pg_isready --health-interval 5s --health-retries 10
+
+steps:
+  - run: ./migrate up                 # migrations run against an EMPTY database…
+  - run: ./migrate up                 # …and again: they must be idempotent
+  - run: npm test</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 Two CI checks nobody thinks of and everybody needs</div>
+  <ul style="margin-bottom:0">
+    <li><strong>Run the migrations twice.</strong> If the second run fails, the migration is not
+      re-runnable — which matters enormously on MySQL and Oracle, where a failed migration cannot
+      be rolled back and will be re-run by hand at the worst possible moment.</li>
+    <li><strong>Assert schema invariants, not just behaviour.</strong> Every foreign key has an
+      index; no column is <code>FLOAT</code> in a monetary table; every table has a primary key.
+      These are three queries against the catalogue, they run in a second, and they catch the class
+      of mistake code review misses. The reference database ships exactly these as
+      <code>reference/labs/schema-invariants.sql</code>.</li>
+  </ul>
+</div>
+
+<pre><code>-- The invariant test, in one query. Every FK column without a leading index.
+SELECT c.conrelid::regclass AS tbl, a.attname AS col
+FROM pg_constraint c
+JOIN unnest(c.conkey) WITH ORDINALITY k(attnum, ord) ON TRUE
+JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+WHERE c.contype = 'f' AND k.ord = 1
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_index i
+    WHERE i.indrelid = c.conrelid AND i.indkey[0] = a.attnum);
+-- Zero rows, or the build fails. See chapter 04 for why this one matters so much.</code></pre>
+
+<div class="rules">
+  <ol>
+    <li>Test the decisions you made — constraints, reports, procedures, security — not the engine's arithmetic.</li>
+    <li>Transaction rollback per test is fast and perfect, except for anything about transactions.</li>
+    <li>An in-memory fake is not a database. Test against the engine and version you deploy.</li>
+    <li>Fixtures must be deterministic: no <code>random()</code>, no <code>now()</code>.</li>
+    <li>Fixtures must be minimal and named for the scenario, because the name is the failure message.</li>
+    <li>Do not assert on execution plans; assert on outcomes. Plans legitimately change with volume.</li>
+    <li>Run migrations twice in CI. If the second run fails, they are not re-runnable.</li>
+    <li>Assert schema invariants from the catalogue: every FK indexed, no float money, every table keyed.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">How do you test SQL?</p>
+  <p class="a">Against a real engine at the deployed version, usually in a container, with
+    migrations applied from scratch. Each test isolated by a rolled-back transaction, with minimal
+    deterministic fixtures named for the scenario. I test what I decided — constraints rejecting
+    bad data, reports returning known numbers, procedures including their error paths — not that
+    the engine can add up.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why not use an in-memory database for tests?</p>
+  <p class="a">Because it is a different implementation: different type coercion, different null
+    and collation behaviour, different transaction semantics, and it does not support most of the
+    SQL you actually wrote. It passes tests that fail against the thing you deploy, which is worse
+    than having no tests, because it produces confidence.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What would you check in CI besides the tests passing?</p>
+  <p class="a">That migrations apply to an empty database and then apply again without failing —
+    otherwise they are not re-runnable, which matters on engines where DDL is not transactional. And
+    a few schema invariants queried from the catalogue: every foreign key has a leading index, no
+    monetary column is a float, every table has a primary key.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

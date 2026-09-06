@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CV builder — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+<style>
+  .cv-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  @media (max-width: 1100px) { .cv-grid { grid-template-columns: 1fr; } }
+
+  .cv-doc {
+    background: #fff; color: #16181d; padding: 26px 30px; border-radius: 8px;
+    border: 1px solid var(--line); font: 12.5px/1.5 var(--sans);
+  }
+  .cv-doc h1.cv-name { font-size: 22px; margin: 0 0 3px; letter-spacing: -.01em; color: #16181d; }
+  .cv-doc .cv-contact { font-size: 11.5px; color: #4a5163; margin: 0 0 16px; }
+  .cv-doc h2 {
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #2f5bd7;
+    border: 0; border-bottom: 1px solid #dfe3ee; padding: 0 0 3px; margin: 16px 0 7px;
+  }
+  .cv-doc h3 { font-size: 12.5px; margin: 9px 0 3px; color: #16181d; }
+  .cv-doc .cv-url { font: 400 11px var(--mono); color: #757d92; }
+  .cv-doc p { margin: 0 0 8px; max-width: none; }
+  .cv-doc ul { margin: 0 0 8px; padding-left: 17px; }
+  .cv-doc li { margin: 2px 0; }
+  .cv-doc table.cv-skills { width: 100%; font-size: 12px; border: 0; }
+  .cv-doc table.cv-skills th {
+    text-align: left; width: 92px; font-weight: 600; padding: 2px 8px 2px 0;
+    background: none; border: 0; color: #4a5163; white-space: nowrap; font-size: 12px;
+  }
+  .cv-doc table.cv-skills td { padding: 2px 0; border: 0; }
+  .cv-doc .cv-consent { font-size: 9.5px; color: #757d92; margin-top: 18px; line-height: 1.4; }
+
+  .lint { display: grid; gap: 7px; }
+  .lint-item {
+    display: flex; gap: 9px; padding: 9px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--line); font-size: 13.5px; line-height: 1.45;
+  }
+  .lint-item.error { border-color: var(--bad); background: var(--bad-soft); }
+  .lint-item.warn  { border-color: var(--warn); background: var(--warn-soft); }
+  .lint-item.ok    { border-color: var(--ok); background: var(--ok-soft); }
+  .lint-item .ic { flex: 0 0 auto; }
+  .lint-item a { white-space: nowrap; }
+
+  .rep { display: grid; gap: 10px; }
+  .rep textarea { min-height: 62px; }
+  fieldset { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin: 0 0 14px; }
+  legend { font: 650 12px var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-faint); padding: 0 6px; }
+
+  @media print {
+    .topbar, .sidebar, .cv-editor, h1, .lede, .crumbs, .box, h2:not(.cv-doc h2), .row { display: none !important; }
+    .cv-grid { display: block; }
+    .cv-doc { border: 0; padding: 0; }
+  }
+</style>
+</head>
+<body data-page="cv">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main wide" id="main">
+
+<p class="crumbs">Tools</p>
+<h1>CV builder</h1>
+<p class="lede">
+  An Italian CV and cover letter, linted against the rules in
+  <a href="chapters/49-your-cv.html">chapter 49</a>.
+</p>
+
+<div class="box trap">
+  <div class="box-title">⚠ What this is, precisely</div>
+  <p style="margin-bottom:0">
+    <strong>It is not an AI that writes your CV.</strong> It can tell you when a bullet contains no
+    facts, when the GDPR consent line is missing, when a language level is not CEFR, and when the
+    result will not fit on one page. It cannot tell you whether what you wrote is
+    <em>interesting</em>. Every warning below cites the paragraph it comes from, and if it could
+    not cite one it would not be here.
+  </p>
+</div>
+
+<div class="row" style="margin:18px 0">
+  <button class="btn" id="tab-cv">CV</button>
+  <button class="btn quiet" id="tab-letter">Lettera di presentazione</button>
+  <span style="flex:1"></span>
+  <button class="btn quiet" id="print">Print / save as PDF</button>
+  <button class="btn quiet" id="export">Export .json</button>
+  <label class="btn quiet" style="cursor:pointer">Import <input type="file" id="import" accept="application/json" hidden></label>
+  <button class="btn quiet" id="clear">Clear</button>
+</div>
+
+<div class="cv-grid">
+  <div class="cv-editor" id="editor"></div>
+  <div>
+    <div id="preview"></div>
+    <h2 style="margin-top:22px">Linter</h2>
+    <div class="lint" id="lint"></div>
+  </div>
+</div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script src="assets/cv.js"></script>
+<script>
+(function () {
+  var CV = window.LFCv;
+  var doc = CV.load();
+  var tab = "cv";
+
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+  function field(label, value, oninput, hint, textarea) {
+    var l = el("label", "field");
+    l.appendChild(el("span", "", label));
+    var i = document.createElement(textarea ? "textarea" : "input");
+    i.value = value || "";
+    i.addEventListener("input", function () { oninput(i.value); update(); });
+    l.appendChild(i);
+    if (hint) l.appendChild(el("div", "hint", hint));
+    return l;
+  }
+
+  function editor() {
+    var host = document.getElementById("editor");
+    host.innerHTML = "";
+
+    if (tab === "letter") {
+      var fl = el("fieldset");
+      fl.appendChild(el("legend", "", "Lettera"));
+      fl.appendChild(field("Azienda", doc.letter.company, function (v) { doc.letter.company = v; },
+        "Name them. A letter that could go to anybody demonstrates the thing it claims to disprove."));
+      fl.appendChild(field("Perché loro", doc.letter.why, function (v) { doc.letter.why = v; },
+        "One specific, checkable sentence proving you read something about them.", true));
+      fl.appendChild(field("Perché lei", doc.letter.match, function (v) { doc.letter.match = v; },
+        "The one or two requirements you match best, with the evidence.", true));
+      fl.appendChild(field("Chiusura", doc.letter.close, function (v) { doc.letter.close = v; },
+        "Availability and a clear closing line.", true));
+      host.appendChild(fl);
+      return;
+    }
+
+    var f1 = el("fieldset");
+    f1.appendChild(el("legend", "", "Intestazione"));
+    f1.appendChild(field("Nome e cognome", doc.name, function (v) { doc.name = v; }));
+    f1.appendChild(field("Ruolo", doc.role, function (v) { doc.role = v; }, "The role you are applying for, not your current one."));
+    f1.appendChild(field("Città", doc.city, function (v) { doc.city = v; }, "Recruiters filter on this."));
+    f1.appendChild(field("Email", doc.email, function (v) { doc.email = v; }));
+    f1.appendChild(field("Telefono", doc.phone, function (v) { doc.phone = v; }));
+    f1.appendChild(field("GitHub", doc.github, function (v) { doc.github = v; }));
+    f1.appendChild(field("LinkedIn", doc.linkedin, function (v) { doc.linkedin = v; }));
+    host.appendChild(f1);
+
+    var f2 = el("fieldset");
+    f2.appendChild(el("legend", "", "Profilo"));
+    f2.appendChild(field("Tre righe", doc.profile, function (v) { doc.profile = v; },
+      "What you do, one concrete thing you built, what you are looking for. About 45 words.", true));
+    host.appendChild(f2);
+
+    var f3 = el("fieldset");
+    f3.appendChild(el("legend", "", "Competenze tecniche"));
+    doc.skills.forEach(function (s, i) {
+      f3.appendChild(field(s.group, s.items, function (v) { doc.skills[i].items = v; }));
+    });
+    f3.appendChild(el("p", "hint", "No star ratings and no percentages — they say nothing and invite disproof."));
+    host.appendChild(f3);
+
+    var f4 = el("fieldset");
+    f4.appendChild(el("legend", "", "Progetti — for a junior, these go FIRST"));
+    doc.projects.forEach(function (p, pi) {
+      f4.appendChild(field("Titolo", p.title, function (v) { doc.projects[pi].title = v; }));
+      f4.appendChild(field("Link", p.url, function (v) { doc.projects[pi].url = v; },
+        "Interviewers do look. Make it runnable in three minutes."));
+      p.bullets.forEach(function (b, bi) {
+        f4.appendChild(field("Punto " + (bi + 1), b, function (v) { doc.projects[pi].bullets[bi] = v; },
+          bi === 0 ? "Result, with a number and a method. Not “utilizzo di…”." : ""));
+      });
+      var add = el("button", "btn quiet", "+ another bullet");
+      add.onclick = function () { doc.projects[pi].bullets.push(""); update(); editor(); };
+      f4.appendChild(add);
+    });
+    var addP = el("button", "btn quiet", "+ another project");
+    addP.style.marginLeft = "6px";
+    addP.onclick = function () { doc.projects.push({ title: "", url: "", bullets: [""] }); update(); editor(); };
+    f4.appendChild(addP);
+    host.appendChild(f4);
+
+    var f5 = el("fieldset");
+    f5.appendChild(el("legend", "", "Esperienza"));
+    doc.experience.forEach(function (e, ei) {
+      f5.appendChild(field("Ruolo", e.title, function (v) { doc.experience[ei].title = v; }));
+      f5.appendChild(field("Azienda", e.org, function (v) { doc.experience[ei].org = v; }));
+      f5.appendChild(field("Periodo", e.period, function (v) { doc.experience[ei].period = v; }, "es. 03/2024 – oggi"));
+      e.bullets.forEach(function (b, bi) {
+        f5.appendChild(field("Punto " + (bi + 1), b, function (v) { doc.experience[ei].bullets[bi] = v; }));
+      });
+      var add = el("button", "btn quiet", "+ another bullet");
+      add.onclick = function () { doc.experience[ei].bullets.push(""); update(); editor(); };
+      f5.appendChild(add);
+    });
+    var addE = el("button", "btn quiet", "+ another role");
+    addE.style.marginLeft = "6px";
+    addE.onclick = function () { doc.experience.push({ title: "", org: "", period: "", bullets: [""] }); update(); editor(); };
+    f5.appendChild(addE);
+    host.appendChild(f5);
+
+    var f6 = el("fieldset");
+    f6.appendChild(el("legend", "", "Formazione"));
+    doc.education.forEach(function (e, i) {
+      f6.appendChild(field("Titolo", e.title, function (v) { doc.education[i].title = v; }));
+      f6.appendChild(field("Istituto", e.org, function (v) { doc.education[i].org = v; }));
+      f6.appendChild(field("Periodo", e.period, function (v) { doc.education[i].period = v; }));
+    });
+    var addEd = el("button", "btn quiet", "+ another");
+    addEd.onclick = function () { doc.education.push({ title: "", org: "", period: "" }); update(); editor(); };
+    f6.appendChild(addEd);
+    host.appendChild(f6);
+
+    var f7 = el("fieldset");
+    f7.appendChild(el("legend", "", "Lingue e chiusura"));
+    doc.languages.forEach(function (l, i) {
+      f7.appendChild(field(l.lang, l.level, function (v) { doc.languages[i].level = v; },
+        i === 0 ? "CEFR: A1–C2, or “madrelingua”. Never “buono”." : ""));
+    });
+    var d = el("label", "field");
+    var dc = document.createElement("input");
+    dc.type = "checkbox";
+    dc.checked = doc.driving;
+    dc.onchange = function () { doc.driving = dc.checked; update(); };
+    d.appendChild(dc);
+    d.appendChild(document.createTextNode(" Patente B"));
+    f7.appendChild(d);
+
+    var c = el("label", "field");
+    var cc = document.createElement("input");
+    cc.type = "checkbox";
+    cc.checked = doc.consent;
+    cc.onchange = function () { doc.consent = cc.checked; update(); };
+    c.appendChild(cc);
+    c.appendChild(document.createTextNode(" Riga di consenso GDPR"));
+    c.appendChild(el("div", "hint", "Its absence is noticed. It costs one line."));
+    f7.appendChild(c);
+    host.appendChild(f7);
+  }
+
+  function update() {
+    CV.save(doc);
+    document.getElementById("preview").innerHTML =
+      tab === "cv" ? CV.renderCv(doc) : CV.renderLetter(doc);
+
+    var findings = tab === "cv" ? CV.lint(doc) : CV.lintLetter(doc);
+    var host = document.getElementById("lint");
+    host.innerHTML = "";
+    if (!findings.length) { host.appendChild(el("p", "muted", "Nothing to say yet — fill something in.")); return; }
+    findings.sort(function (a, b) {
+      var w = { error: 0, warn: 1, ok: 2 };
+      return w[a.level] - w[b.level];
+    });
+    findings.forEach(function (f) {
+      var d = el("div", "lint-item " + f.level);
+      d.appendChild(el("span", "ic", f.level === "error" ? "✗" : f.level === "warn" ? "!" : "✓"));
+      var body = el("div");
+      body.appendChild(document.createTextNode(f.msg));
+      if (f.ref) {
+        var parts = f.ref.split("#");
+        var ch = (window.CHAPTERS || []).filter(function (c) { return c.n === parts[0]; })[0];
+        if (ch) {
+          body.appendChild(document.createTextNode(" "));
+          var a = el("a", "", "→ ch. " + parts[0]);
+          a.href = "chapters/" + ch.id + ".html" + (parts[1] ? "#" + parts[1] : "");
+          body.appendChild(a);
+        }
+      }
+      d.appendChild(body);
+      host.appendChild(d);
+    });
+  }
+
+  document.getElementById("tab-cv").onclick = function () {
+    tab = "cv";
+    this.className = "btn";
+    document.getElementById("tab-letter").className = "btn quiet";
+    editor(); update();
+  };
+  document.getElementById("tab-letter").onclick = function () {
+    tab = "letter";
+    this.className = "btn";
+    document.getElementById("tab-cv").className = "btn quiet";
+    editor(); update();
+  };
+  document.getElementById("print").onclick = function () { window.print(); };
+  document.getElementById("export").onclick = function () {
+    var blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "cv-" + (doc.name || "queryforge").replace(/\s+/g, "-").toLowerCase() + ".json";
+    a.click();
+  };
+  document.getElementById("import").onchange = function (e) {
+    var f = e.target.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      try { doc = JSON.parse(r.result); CV.save(doc); editor(); update(); }
+      catch (err) { alert("Not a CV file: " + err.message); }
+    };
+    r.readAsText(f);
+  };
+  document.getElementById("clear").onclick = function () {
+    if (!confirm("Clear the whole CV? Export first if you want a copy.")) return;
+    doc = CV.blank(); CV.save(doc); editor(); update();
+  };
+
+  editor();
+  update();
+})();
+</script>
+</body>
+</html>

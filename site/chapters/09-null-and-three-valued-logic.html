@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>09 &middot; NULL and three-valued logic &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="09-null-and-three-valued-logic">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 09</p>
+<h1>NULL and three-valued logic</h1>
+<p class="lede">NULL is not a value, = NULL is never true, and NOT IN with a NULL returns nothing. All three bite in production.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; the fastest way to prove you
+  have written SQL in production rather than only in tutorials is to be fluent about <code>NULL</code>.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="unknown">NULL is not a value. It is the absence of one.</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Two envelopes, both sealed. Are the numbers inside them the same? You cannot say yes and you
+    cannot say no — you can only say <em>I don't know</em>. That third answer is what breaks
+    everything, because computers usually only have two.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    SQL uses <strong>three-valued logic</strong>: <code>TRUE</code>, <code>FALSE</code>,
+    <code>UNKNOWN</code>. Any comparison involving <code>NULL</code> yields <code>UNKNOWN</code>,
+    including <code>NULL = NULL</code> and, notoriously, <code>NULL &lt;&gt; NULL</code>.
+    <code>WHERE</code>, <code>ON</code> and <code>HAVING</code> keep rows only where the predicate
+    is <code>TRUE</code>, so <code>UNKNOWN</code> behaves like <code>FALSE</code> there — but
+    <code>CHECK</code> constraints accept <code>UNKNOWN</code>, which is the opposite and is the
+    source of a whole class of surprises.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th><code>AND</code></th><th>TRUE</th><th>FALSE</th><th>UNKNOWN</th></tr></thead>
+<tbody>
+<tr><td><strong>TRUE</strong></td><td>TRUE</td><td>FALSE</td><td>UNKNOWN</td></tr>
+<tr><td><strong>FALSE</strong></td><td>FALSE</td><td>FALSE</td><td><strong>FALSE</strong></td></tr>
+<tr><td><strong>UNKNOWN</strong></td><td>UNKNOWN</td><td><strong>FALSE</strong></td><td>UNKNOWN</td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="small muted">
+  Note the two bold cells: <code>FALSE AND UNKNOWN</code> is <code>FALSE</code>, because whatever
+  the unknown turns out to be, the conjunction is false. Similarly
+  <code>TRUE OR UNKNOWN</code> is <code>TRUE</code>. Three-valued logic is not arbitrary; it is
+  what you get by asking “is this true for <em>every</em> possible value of the unknown?”
+</p>
+
+<h2 id="six">Six places NULL changes the answer</h2>
+
+<h3>1 · <code>= NULL</code> never matches</h3>
+<pre><code>WHERE shipped_at = NULL      -- always empty, even for unshipped orders
+WHERE shipped_at IS NULL     -- correct</code></pre>
+
+<h3>2 · <code>NOT IN</code> collapses</h3>
+<pre><code>-- If ANY row of the subquery is NULL, this returns zero rows.
+WHERE id NOT IN (SELECT customer_id FROM orders)   -- customer_id nullable? empty result.
+WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)   -- correct</code></pre>
+
+<h3>3 · Aggregates ignore NULL — except <code>COUNT(*)</code></h3>
+<pre><code>-- 4 rows: 10, 20, NULL, 30
+COUNT(*)        -- 4   counts ROWS
+COUNT(amount)   -- 3   counts NON-NULL VALUES
+SUM(amount)     -- 60  ignores the null
+AVG(amount)     -- 20  = 60/3, NOT 60/4  ← the one that produces wrong reports</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    <code>AVG</code> divides by the count of <em>non-null</em> values. If a missing rating means
+    “no rating” that is right; if it means “zero” it is wrong and your average is inflated. Decide
+    which, and if it is the latter write <code>AVG(COALESCE(rating, 0))</code> — explicitly, where
+    the reviewer can see the decision.
+  </p>
+</div>
+
+<h3>4 · <code>UNIQUE</code> does not constrain NULLs (mostly)</h3>
+<p>
+  Two nulls are not equal, so they do not collide. PostgreSQL, Oracle and MySQL allow many null
+  rows in a unique index; <strong>SQL Server allows only one</strong>, which is a genuine
+  portability trap. PostgreSQL 15+ offers <code>UNIQUE NULLS NOT DISTINCT</code> to opt in to the
+  SQL Server behaviour. If you need "at most one active row per customer", use a
+  <strong>filtered/partial unique index</strong> instead of relying on null semantics:
+</p>
+<pre><code>CREATE UNIQUE INDEX uq_one_active_cart
+  ON carts (customer_id) WHERE status = 'active';   -- PostgreSQL, SQL Server</code></pre>
+
+<h3>5 · <code>ORDER BY</code> disagrees across engines</h3>
+<p>
+  PostgreSQL and Oracle sort nulls <em>last</em> ascending; SQL Server, MySQL and SQLite sort them
+  <em>first</em>. If the position matters, say so: <code>ORDER BY x NULLS LAST</code> where
+  supported, otherwise <code>ORDER BY CASE WHEN x IS NULL THEN 1 ELSE 0 END, x</code>.
+</p>
+
+<h3>6 · Concatenation and arithmetic propagate</h3>
+<pre><code>'Rossi' || NULL      -- NULL in PostgreSQL, SQL Server, SQLite
+                     -- (Oracle treats '' as NULL and concatenation ignores it)
+100 + NULL           -- NULL, everywhere
+CONCAT('Rossi', NULL) -- 'Rossi' — CONCAT() deliberately ignores nulls</code></pre>
+
+<h2 id="tools">The tools for handling it</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Function</th><th>Does</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td><code>COALESCE(a, b, c)</code></td><td>First non-null argument</td><td>Standard, any number of arguments. The default choice</td></tr>
+<tr><td><code>ISNULL(a, b)</code> / <code>IFNULL</code> / <code>NVL</code></td><td>Two-argument version</td><td>Dialect-specific. <code>ISNULL</code> in T-SQL also truncates to the first argument's type</td></tr>
+<tr><td><code>NULLIF(a, b)</code></td><td><code>NULL</code> if a = b, else a</td><td>The idiom for “treat empty string as missing”, and for guarding division by zero</td></tr>
+<tr><td><code>IS [NOT] DISTINCT FROM</code></td><td>Null-safe comparison</td><td>PostgreSQL, SQLite. MySQL spells it <code>&lt;=&gt;</code>. SQL Server has no equivalent</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="tryit">
+  <pre><code>-- NULLIF as a division guard: no CASE, no error.
+SELECT delivered_count * 1.0 / NULLIF(total_count, 0) AS delivery_rate
+FROM daily_stats;
+-- total_count = 0 gives NULL ("undefined"), which is honest, rather than an error.</code></pre>
+</div>
+
+<h2 id="design">Designing so it comes up less</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Ask what the null means</div>
+  <p>
+    <code>NULL</code> is overloaded in practice, and different meanings want different designs:
+  </p>
+  <ul style="margin-bottom:0">
+    <li><strong>Not yet known</strong> — <code>shipped_at</code> on an unshipped order. Legitimate.
+      Keep the null; it is exactly what the model means.</li>
+    <li><strong>Not applicable</strong> — <code>vat_number</code> on a private customer. Often a
+      sign the table is really two kinds of thing and would be better as a subtype table.</li>
+    <li><strong>Nobody filled it in</strong> — a nullable <code>country</code> that everybody
+      leaves blank. This is a missing <code>NOT NULL</code> and a missing default.</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Say this in an interview</div>
+  <p style="margin-bottom:0">
+    “I try to make columns <code>NOT NULL</code> unless the null carries meaning, and when it does
+    I make sure I know which meaning — unknown, inapplicable, or not yet. Most of the
+    <code>NULL</code> bugs I have seen came from a column where nobody had decided.”
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li><code>NULL</code> is unknown, not empty and not zero. Every comparison with it is <code>UNKNOWN</code>.</li>
+    <li><code>WHERE</code> keeps only <code>TRUE</code>, so <code>UNKNOWN</code> filters the row out. <code>CHECK</code> accepts <code>UNKNOWN</code>, which is the reverse.</li>
+    <li>Use <code>IS NULL</code>, never <code>= NULL</code>.</li>
+    <li>One null in a <code>NOT IN</code> subquery returns the empty set. Use <code>NOT EXISTS</code>.</li>
+    <li><code>COUNT(*)</code> counts rows; <code>COUNT(col)</code> counts non-null values; <code>AVG</code> divides by the non-null count.</li>
+    <li><code>UNIQUE</code> permits multiple nulls in most engines but only one in SQL Server. For “at most one active”, use a filtered unique index.</li>
+    <li>Null ordering differs by engine. State it with <code>NULLS FIRST/LAST</code> if it matters.</li>
+    <li><code>NULLIF(x, 0)</code> is the idiomatic division guard.</li>
+    <li>Decide what a null <em>means</em> in each column: unknown, inapplicable, or not yet. Undecided is where the bugs live.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">What is the result of <code>NULL = NULL</code>?</p>
+  <p class="a"><code>UNKNOWN</code>, not <code>TRUE</code> and not <code>FALSE</code>. In a
+    <code>WHERE</code> clause that means the row is dropped. To compare null-safely use
+    <code>IS NULL</code>, or <code>IS NOT DISTINCT FROM</code> where the dialect supports it.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Difference between <code>COUNT(*)</code> and <code>COUNT(column)</code>?</p>
+  <p class="a"><code>COUNT(*)</code> counts rows regardless of content. <code>COUNT(column)</code>
+    counts rows where that column is not null. In a <code>LEFT JOIN</code> that difference is the
+    whole point: <code>COUNT(*)</code> reports 1 for a customer with no orders,
+    <code>COUNT(o.id)</code> reports 0.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why did this <code>NOT IN</code> query suddenly return nothing?</p>
+  <p class="a">A null appeared in the subquery result. <code>x NOT IN (…, NULL)</code> expands to a
+    conjunction containing <code>x &lt;&gt; NULL</code>, which is <code>UNKNOWN</code>, so the
+    predicate can never be true for any row. Rewrite as <code>NOT EXISTS</code>, which is
+    null-safe and usually plans the same or better.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

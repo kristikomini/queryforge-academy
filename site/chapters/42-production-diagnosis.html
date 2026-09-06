@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>42 &middot; Diagnosing a slow database in production &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="42-production-diagnosis">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 6 — Data at work <span>&rsaquo;</span> Chapter 42</p>
+<h1>Diagnosing a slow database in production</h1>
+<p class="lede">A method, not a guess: wait statistics, the top-ten list, blocking chains, and what to look at first.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Esperienza su ambienti di produzione&rdquo;</em> &mdash; this chapter is what
+  “production experience” actually consists of: a method for the twenty minutes after somebody
+  says “the system is slow”.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="method">Ask three questions before touching anything</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Somebody says “the car is making a noise”. Before you open the bonnet: is it always, or only
+    when turning? Did it start today? Does it do it when the radio is off? Three questions, and you
+    have halved the search.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 The three questions</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Everything, or one thing?</strong> Everything slow points at a resource — CPU,
+      memory, disk, network — or at blocking. One thing slow points at that query, its plan or its
+      indexes.</li>
+    <li><strong>Since when, and what changed?</strong> A deploy, a data load, a growth threshold
+      crossed, a statistics update, an index rebuild. Almost everything has a “since”.</li>
+    <li><strong>Slow, or waiting?</strong> A query burning CPU and a query blocked on a lock look
+      identical from the application and have nothing in common. Wait statistics answer this in one
+      query, and it is the highest-value question of the three.</li>
+  </ol>
+</div>
+
+<h2 id="waits">Wait statistics: what is the server waiting for?</h2>
+
+<pre><code>-- SQL Server: the top waits since the last restart or clear.
+SELECT TOP 12 wait_type,
+       wait_time_ms / 1000 AS wait_s,
+       signal_wait_time_ms / 1000 AS cpu_queue_s,
+       waiting_tasks_count
+FROM sys.dm_os_wait_stats
+WHERE wait_type NOT IN ('CLR_SEMAPHORE','SLEEP_TASK','BROKER_TASK_STOP','XE_TIMER_EVENT',
+                        'LAZYWRITER_SLEEP','SQLTRACE_BUFFER_FLUSH','WAITFOR','HADR_FILESTREAM_IOMGR_IOCOMPLETION')
+ORDER BY wait_time_ms DESC;
+
+-- PostgreSQL: what is happening right now.
+SELECT wait_event_type, wait_event, state, count(*)
+FROM pg_stat_activity WHERE state &lt;&gt; 'idle'
+GROUP BY 1,2,3 ORDER BY count DESC;</code></pre>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Wait</th><th>Means</th><th>Look at</th></tr></thead>
+<tbody>
+<tr><td><code>PAGEIOLATCH_*</code> / <code>DataFileRead</code></td><td>Waiting for a data page from disk</td><td>Missing index, too little memory, slow storage</td></tr>
+<tr><td><code>LCK_M_*</code> / <code>Lock</code></td><td>Blocked by another session</td><td>The blocking chain. Chapter 23</td></tr>
+<tr><td><code>CXPACKET</code> / <code>CXCONSUMER</code></td><td>Parallelism coordination</td><td>Usually a <em>symptom</em> of a big scan, not the cause</td></tr>
+<tr><td><code>WRITELOG</code> / <code>WALWrite</code></td><td>Waiting for the log to flush</td><td>Log disk latency; too many tiny transactions</td></tr>
+<tr><td><code>RESOURCE_SEMAPHORE</code></td><td>Waiting for a memory grant</td><td>Bad estimates causing huge grants. Chapter 28</td></tr>
+<tr><td><code>ASYNC_NETWORK_IO</code></td><td><strong>The client is not reading fast enough</strong></td><td>The application, not the database</td></tr>
+<tr><td><code>SOS_SCHEDULER_YIELD</code></td><td>CPU pressure</td><td>Genuinely expensive queries, or too few cores</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ <code>ASYNC_NETWORK_IO</code> is the one worth memorising</div>
+  <p style="margin-bottom:0">
+    It almost never means the network is slow. It means the database produced rows faster than the
+    application consumed them — usually because the client is fetching a million rows and
+    processing them one at a time in a loop, or paging through a grid it never finishes. The
+    database is being blamed for the application's behaviour, and being able to demonstrate that
+    calmly, with a number, is a genuinely valuable thing to be able to do.
+  </p>
+</div>
+
+<h2 id="topn">The top-ten list</h2>
+
+<pre><code>-- Sort by TOTAL, never by average. See chapter 28 for why.
+-- PostgreSQL
+SELECT calls, round(total_exec_time::numeric) AS total_ms,
+       round(mean_exec_time::numeric, 2) AS mean_ms, rows,
+       left(query, 120) AS q
+FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10;
+
+-- SQL Server
+SELECT TOP 10 qs.execution_count,
+       qs.total_worker_time/1000  AS cpu_ms,
+       qs.total_elapsed_time/1000 AS elapsed_ms,
+       qs.total_logical_reads,
+       SUBSTRING(t.text, 1, 120)  AS q
+FROM sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t
+ORDER BY qs.total_elapsed_time DESC;
+
+-- MySQL: the slow log with long_query_time = 0 for a sampling window,
+-- then pt-query-digest.</code></pre>
+
+<div class="box note">
+  <div class="box-title">Run it twice, a few minutes apart</div>
+  <p style="margin-bottom:0">
+    These counters are cumulative since the server started, so the top of the list may be a batch
+    job that ran at 03:00 and is irrelevant now. Snapshot, wait five minutes, snapshot again and
+    <em>diff</em>. What grew is what is happening now, and that is a different list.
+  </p>
+</div>
+
+<h2 id="blocking">The blocking chain</h2>
+
+<pre><code>-- SQL Server: who is blocked, and by whom
+SELECT r.session_id, r.blocking_session_id, r.wait_type, r.wait_time,
+       r.status, SUBSTRING(t.text, 1, 120) AS running
+FROM sys.dm_exec_requests r
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.blocking_session_id &lt;&gt; 0;
+
+-- Then find the HEAD of the chain — the session blocking others and blocked by
+-- nobody. That is the one to look at; everyone else is a queue behind it.
+
+-- PostgreSQL
+SELECT pid, state, now() - xact_start AS xact_age,
+       pg_blocking_pids(pid) AS blocked_by, left(query, 100)
+FROM pg_stat_activity
+WHERE state &lt;&gt; 'idle' ORDER BY xact_age DESC NULLS LAST;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ The head of the chain is often <code>idle in transaction</code></div>
+  <p style="margin-bottom:0">
+    A session that ran one <code>UPDATE</code>, never committed, and is now sitting idle — because
+    the application opened a transaction, called an external service, and is waiting for a timeout.
+    It is using no CPU and running no query, which is why it does not appear in any
+    "expensive queries" list, and it is holding the lock everyone else is queued behind. Look for
+    long-running transactions, not just long-running queries.
+  </p>
+</div>
+
+<h2 id="checklist">The twenty-minute checklist</h2>
+
+<div class="box good">
+  <div class="box-title">✔ In this order</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Is it the database at all?</strong> Application logs, the network, the disk. Do not
+      assume it is yours because somebody said "the database is slow".</li>
+    <li><strong>Blocking chain.</strong> One query, thirty seconds. Rules out or confirms the most
+      common cause of a sudden total freeze.</li>
+    <li><strong>Wait statistics.</strong> Slow or waiting, and waiting for what.</li>
+    <li><strong>Top queries by total time, diffed over five minutes.</strong> What is actually
+      running now.</li>
+    <li><strong>Server resources.</strong> CPU, memory, disk latency, and how much free space the
+      log volume has.</li>
+    <li><strong>What changed.</strong> Deploys, loads, index or statistics jobs, data growth.</li>
+    <li><strong>Only now</strong>, look at an individual query's plan
+      (<a href="27-execution-plans.html">chapter 27</a>).</li>
+  </ol>
+</div>
+
+<h2 id="baseline">The thing to do before the incident</h2>
+
+<p>
+  “Is 400 ms bad?” has no answer without a baseline. Record, weekly: the top ten queries by total
+  duration, wait statistics, index usage, table sizes, and the slowest report's runtime. Ten
+  minutes a week, and the day something goes wrong you are comparing against last Tuesday instead
+  of guessing. Proposing this in an interview says you have been on the wrong side of not having it.
+</p>
+
+<div class="rules">
+  <ol>
+    <li>Everything slow means a resource or blocking; one thing slow means that query.</li>
+    <li>“Slow or waiting?” is the highest-value question, and wait statistics answer it in one query.</li>
+    <li><code>ASYNC_NETWORK_IO</code> means the client is not consuming rows fast enough — it is the application's problem.</li>
+    <li><code>CXPACKET</code> is usually the symptom of a big scan, not a cause to tune away.</li>
+    <li>Sort the top-query list by total time and diff two snapshots. Cumulative counters describe the whole uptime.</li>
+    <li>Find the head of the blocking chain: blocked by nobody, blocking everyone.</li>
+    <li>The head is often idle-in-transaction, so it appears in no expensive-query list.</li>
+    <li>Look at the individual plan last, not first.</li>
+    <li>Without a baseline, every number is unfalsifiable. Record one weekly.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">The application is slow. Walk me through what you do.</p>
+  <p class="a">First establish whether it is everything or one thing, and what changed and when.
+    Then a blocking-chain query, which takes thirty seconds and catches the most common cause of a
+    sudden freeze. Then wait statistics to find out whether we are slow or waiting, and for what.
+    Then the top queries by total duration, diffed over a few minutes so I see what is happening
+    now. Server resources. And only then an individual execution plan.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What are wait statistics and why start there?</p>
+  <p class="a">They record what the engine spent time waiting for, aggregated by cause. They
+    separate "we are doing too much work" from "we are queued behind something" — which are
+    indistinguishable from the application and have entirely different fixes. It is one query and
+    it usually points straight at the category of problem.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Everything is blocked and the head of the chain is running nothing. What is going on?</p>
+  <p class="a">A session that is idle inside an open transaction — it made a change, never
+    committed, and is probably waiting on an external call or a user. It holds its locks and uses no
+    resources, so it appears in no expensive-query list. I would look for the oldest open
+    transaction, not the longest-running query, and then fix the application pattern that leaves one
+    open.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

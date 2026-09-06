@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>45 &middot; Procedural SQL: T-SQL and PL/SQL &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="45-procedural-sql">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 7 — What the market actually runs <span>&rsaquo;</span> Chapter 45</p>
+<h1>Procedural SQL: T-SQL and PL/SQL</h1>
+<p class="lede">Variables, control flow, cursors, error handling and packages — the two procedural dialects adverts name.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Esperienza in sviluppo PL/SQL a livello junior&rdquo;</em> &mdash; “a livello junior” means they
+  expect you to read and modify packages, not architect them. That is a much smaller ask than it
+  sounds.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="why">Why procedural SQL exists</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    SQL is very good at saying <em>what</em> you want. It has no way of saying “try this, and if it
+    goes wrong do that instead, and keep a note of how many times you tried”. The procedural
+    dialects add that — and the first rule of using them is to use as little of them as possible.
+  </p>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The rule that keeps procedural code fast</div>
+  <p style="margin-bottom:0">
+    <strong>Write set-based SQL, and use procedural code only for control flow around it.</strong>
+    A loop that processes one row per iteration is the commonest reason a stored procedure is slow
+    (<a href="29-slow-query-patterns.html">chapter 29</a>). Variables, <code>IF</code>, error
+    handling and transactions are the legitimate uses; iteration almost never is.
+  </p>
+</div>
+
+<h2 id="tsql">T-SQL, the shape you will meet</h2>
+
+<pre><code>CREATE OR ALTER PROCEDURE dbo.usp_ShipOrder
+  @order_id INT,
+  @version  INT,
+  @actor    SYSNAME = NULL
+AS
+BEGIN
+  SET NOCOUNT ON;              -- stop "n rows affected" messages confusing the caller
+  SET XACT_ABORT ON;           -- ON ERROR, ROLL BACK THE WHOLE TRANSACTION.
+  --  ^ Without this, some errors abort only the STATEMENT and leave the transaction
+  --    open and half-applied. It is the single most important line in the file.
+
+  DECLARE @now DATETIME2(3) = SYSUTCDATETIME();
+  SET @actor = COALESCE(@actor, SUSER_SNAME());
+
+  BEGIN TRY
+    BEGIN TRANSACTION;
+
+      UPDATE dbo.orders
+      SET status = 'shipped', shipped_at = @now, version = version + 1
+      WHERE id = @order_id
+        AND version = @version              -- optimistic concurrency, chapter 24
+        AND status  = 'confirmed';          -- and the state machine, chapter 04
+
+      IF @@ROWCOUNT = 0
+      BEGIN
+        -- Distinguish "gone", "changed under us" and "wrong state" — the caller
+        -- needs different behaviour for each, so do not return one vague error.
+        IF NOT EXISTS (SELECT 1 FROM dbo.orders WHERE id = @order_id)
+          THROW 50404, 'Order not found.', 1;
+        THROW 50409, 'Order was modified or is not in a shippable state.', 1;
+      END
+
+      INSERT INTO dbo.order_events (order_id, from_status, to_status, at, actor)
+      VALUES (@order_id, 'confirmed', 'shipped', @now, @actor);
+
+      INSERT INTO dbo.outbox (topic, payload, created_at)
+      VALUES ('order.shipped',
+              (SELECT @order_id AS orderId FOR JSON PATH, WITHOUT_ARRAY_WRAPPER), @now);
+      --      ^ the outbox write is in the SAME transaction. Chapter 24.
+
+    COMMIT TRANSACTION;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT &gt; 0 ROLLBACK TRANSACTION;   -- check the count; see chapter 21
+    THROW;                                     -- rethrow PRESERVING the original error
+  END CATCH
+END</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Three T-SQL traps in that one procedure</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Without <code>SET XACT_ABORT ON</code></strong>, several classes of error abort only
+      the current statement. The <code>CATCH</code> block runs with a transaction still open and
+      partially applied — which is how "it half-worked" incidents happen.</li>
+    <li><strong><code>THROW</code>, not <code>RAISERROR</code>.</strong> Bare <code>THROW</code>
+      inside a <code>CATCH</code> rethrows the original error with its number, message and line.
+      <code>RAISERROR</code> cannot do that: it substitutes its own, and the real cause is lost.</li>
+    <li><strong><code>@@ROWCOUNT</code> must be read immediately.</strong> Any statement in between
+      — including an <code>IF</code> — resets it. Capture it into a variable on the very next line
+      if you need it twice.</li>
+  </ol>
+</div>
+
+<h2 id="plsql">PL/SQL, the same thing in Oracle</h2>
+
+<pre><code>CREATE OR REPLACE PACKAGE orders_pkg AS
+  -- The SPEC is the public interface. Anything not declared here is private to
+  -- the body — which is real encapsulation, and the thing PL/SQL genuinely has
+  -- that T-SQL does not.
+  PROCEDURE ship_order(p_order_id IN NUMBER, p_version IN NUMBER);
+  e_conflict EXCEPTION;
+  PRAGMA EXCEPTION_INIT(e_conflict, -20409);
+END orders_pkg;
+/
+
+CREATE OR REPLACE PACKAGE BODY orders_pkg AS
+  PROCEDURE ship_order(p_order_id IN NUMBER, p_version IN NUMBER) IS
+  BEGIN
+    UPDATE orders
+       SET status = 'shipped', shipped_at = SYSTIMESTAMP, version = version + 1
+     WHERE id = p_order_id AND version = p_version AND status = 'confirmed';
+
+    IF SQL%ROWCOUNT = 0 THEN                 -- the PL/SQL @@ROWCOUNT
+      RAISE_APPLICATION_ERROR(-20409, 'Order modified or not shippable');
+    END IF;
+
+    INSERT INTO order_events (order_id, from_status, to_status)
+    VALUES (p_order_id, 'confirmed', 'shipped');
+    COMMIT;
+  EXCEPTION
+    WHEN OTHERS THEN
+      ROLLBACK;
+      RAISE;                                 -- rethrow, preserving the stack
+  END ship_order;
+END orders_pkg;
+/</code></pre>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Concept</th><th>T-SQL</th><th>PL/SQL</th></tr></thead>
+<tbody>
+<tr><td>Declare</td><td><code>DECLARE @x INT</code></td><td><code>x NUMBER;</code> in the DECLARE section</td></tr>
+<tr><td>Assign</td><td><code>SET @x = 1</code></td><td><code>x := 1;</code></td></tr>
+<tr><td>Rows affected</td><td><code>@@ROWCOUNT</code></td><td><code>SQL%ROWCOUNT</code></td></tr>
+<tr><td>Error handling</td><td><code>BEGIN TRY … BEGIN CATCH</code></td><td><code>EXCEPTION WHEN … THEN</code></td></tr>
+<tr><td>Raise</td><td><code>THROW</code></td><td><code>RAISE_APPLICATION_ERROR</code> (-20000 to -20999)</td></tr>
+<tr><td>Row type</td><td>Table variable</td><td><code>%ROWTYPE</code> and <code>%TYPE</code> — genuinely nice</td></tr>
+<tr><td>Grouping</td><td>Schemas only</td><td><strong>Packages</strong>, with a public spec and a private body</td></tr>
+<tr><td>Set-based iteration</td><td>Just write the SQL</td><td><code>FORALL</code> and <code>BULK COLLECT</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 The two PL/SQL features worth knowing by name</div>
+  <ul style="margin-bottom:0">
+    <li><strong><code>BULK COLLECT</code> / <code>FORALL</code></strong> — the fix when a cursor
+      loop is genuinely unavoidable. It moves rows between SQL and PL/SQL in batches instead of one
+      at a time, eliminating the per-row context switch. Order-of-magnitude improvements are
+      routine, and it is the first thing to reach for in slow legacy PL/SQL.</li>
+    <li><strong><code>%TYPE</code> and <code>%ROWTYPE</code></strong> — declare a variable as
+      "whatever type that column is". The declaration follows the schema automatically, so widening
+      a column does not silently truncate in a procedure nobody remembered.</li>
+  </ul>
+</div>
+
+<h2 id="cursors">Cursors, and the honest use for them</h2>
+
+<pre><code>-- If you must, at least tell the engine what you are doing:
+DECLARE c CURSOR LOCAL FAST_FORWARD READ_ONLY FOR SELECT ...;
+--            ^ local scope  ^ forward-only, read-only: far cheaper than the default
+
+-- But first ask: could this be one statement? It usually could.
+-- The legitimate cases:
+--   * each row requires a separate external action
+--   * you are deliberately batching a huge update to avoid lock escalation
+-- And in both cases, write the reason in a comment — because the default
+-- assumption on reading a cursor is that the author did not know better.</code></pre>
+
+<h2 id="reading">Reading somebody else's procedure</h2>
+
+<div class="box good">
+  <div class="box-title">✔ A five-minute order of attack</div>
+  <ol style="margin-bottom:0">
+    <li><strong>The signature.</strong> Parameters in, parameters out, return value. That is the
+      contract.</li>
+    <li><strong>Transaction boundaries.</strong> Where does it begin and commit, and is there a
+      path that leaves one open?</li>
+    <li><strong>The error paths.</strong> What happens on failure, and is the original error
+      preserved or swallowed?</li>
+    <li><strong>Loops and cursors.</strong> Anything row-at-a-time is where the time goes.</li>
+    <li><strong>Only then, the business logic.</strong> Which is usually the part that is actually
+      fine.</li>
+  </ol>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Set-based SQL for the work, procedural code only for control flow around it.</li>
+    <li><code>SET XACT_ABORT ON</code> in every T-SQL procedure with a transaction.</li>
+    <li><code>THROW</code> rethrows the original error; <code>RAISERROR</code> replaces it.</li>
+    <li><code>@@ROWCOUNT</code> is reset by the next statement. Capture it immediately.</li>
+    <li>Check <code>@@TRANCOUNT</code> before rolling back in a <code>CATCH</code>.</li>
+    <li>Distinguish “not found” from “changed under us” from “wrong state” — the caller needs to.</li>
+    <li>Packages give PL/SQL real encapsulation: a public spec and a private body.</li>
+    <li><code>BULK COLLECT</code> and <code>FORALL</code> are the fix for an unavoidable PL/SQL loop.</li>
+    <li><code>%TYPE</code> keeps a variable in step with its column.</li>
+    <li>A cursor needs <code>LOCAL FAST_FORWARD READ_ONLY</code> and a comment explaining itself.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">How do you handle errors in a stored procedure?</p>
+  <p class="a">In T-SQL: <code>SET XACT_ABORT ON</code>, a <code>TRY</code> block containing the
+    transaction, and a <code>CATCH</code> that rolls back if <code>@@TRANCOUNT</code> is non-zero
+    and then bare-<code>THROW</code>s to rethrow the original error with its number and line. In
+    PL/SQL it is an <code>EXCEPTION</code> block with <code>RAISE</code> to rethrow. The two things
+    I care about are not leaving a transaction open and not losing the original error.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What is a package in PL/SQL?</p>
+  <p class="a">A named container with a public specification and a private body. Anything not
+    declared in the spec is invisible outside, so it gives real encapsulation and a versionable
+    interface — which is the main structural thing PL/SQL has that T-SQL does not.</p>
+</div>
+
+<div class="qa">
+  <p class="q">You inherit a procedure that takes eight minutes. Where do you look first?</p>
+  <p class="a">For a cursor or a <code>WHILE</code> loop doing row-at-a-time work, because that is
+    usually the whole answer. Then for scalar functions inside a predicate, and for a table
+    variable being joined to — both of which give the optimiser no useful estimate. The business
+    logic is normally fine; the shape around it is not.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

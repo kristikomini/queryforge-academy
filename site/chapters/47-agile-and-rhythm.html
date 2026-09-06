@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>47 &middot; Agile, tickets and the daily rhythm &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="47-agile-and-rhythm">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 8 — The human requirements <span>&rsaquo;</span> Chapter 47</p>
+<h1>Agile, tickets and the daily rhythm</h1>
+<p class="lede">Stand-up, sprint, backlog, estimate — what actually happens, and what to say when you are behind.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Metodologia Agile/Scrum&rdquo;</em> &mdash; which in most Italian
+  software houses means: there is a stand-up, there are tickets, and there is a sprint that
+  sometimes slips. That is the whole of it.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="reality">What actually happens</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Every morning everyone stands up for ten minutes and says what they did, what they are doing,
+    and what is in the way. Every two weeks the team picks a batch of jobs and tries to finish
+    them. That is it. The books are long; the practice is short.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Ritual</th><th>Nominally</th><th>In practice</th></tr></thead>
+<tbody>
+<tr><td><strong>Daily stand-up</strong></td><td>15 min: yesterday, today, blockers</td><td>Often 25. Keep <em>your</em> part to two sentences and it will be noticed</td></tr>
+<tr><td><strong>Sprint planning</strong></td><td>Choose and size the work</td><td>Where you find out what you have committed to</td></tr>
+<tr><td><strong>Refinement / grooming</strong></td><td>Clarify upcoming tickets</td><td><strong>The most valuable meeting for you.</strong> Ask the data questions here</td></tr>
+<tr><td><strong>Review / demo</strong></td><td>Show the increment</td><td>Show the report, not the query</td></tr>
+<tr><td><strong>Retrospective</strong></td><td>Improve the process</td><td>Bring one concrete thing, not a complaint</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Refinement is where a database person earns their reputation</div>
+  <p style="margin-bottom:0">
+    Everyone else is discussing the screen. You are the one who asks <em>“what happens to the
+    existing rows?”</em>, <em>“is that unique per customer or globally?”</em>, <em>“does this need
+    to be true historically, or only from now on?”</em>. Those three questions, asked before the
+    work starts, prevent more rework than anything you can do afterwards — and asking them is how a
+    junior becomes the person whose opinion is sought.
+  </p>
+</div>
+
+<h2 id="standup">The stand-up, in two sentences</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ The two failure modes</div>
+  <p style="margin-bottom:0">
+    <strong>Too much detail:</strong> three minutes on the join you fixed. Nobody can use that
+    information. <strong>Too little:</strong> “still on the same ticket”, three days running, with
+    no signal. The second is worse, because it looks like either hiding or drifting.
+  </p>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The shape that works</div>
+  <p style="margin-bottom:0">
+    <em>“Yesterday I finished the reconciliation query for ticket 412 — the difference was
+    cancelled orders being counted in one report and not the other. Today I am on 415, the slow
+    warehouse screen. No blockers.”</em> — Outcome, cause, next, blocker. Twelve seconds.
+  </p>
+</div>
+
+<h2 id="behind">When you are behind</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The single most useful professional habit</div>
+  <p style="margin-bottom:0">
+    <strong>Say it early, say it specifically, and bring an option.</strong> A slip announced on
+    day two is a planning adjustment. The same slip announced on the last day is a broken promise —
+    identical work, completely different consequence. Nobody is angry that estimating is hard;
+    people are angry about being told late.
+  </p>
+</div>
+
+<pre><code>Not:  "It's taking longer than expected."
+Not:  "Almost done."          ← the most expensive two words in software
+
+But:  "415 will not be ready by Thursday. The report is slow because
+       the underlying view joins two child tables and fans out, so the
+       fix is restructuring it rather than adding an index.
+       I need about two more days.
+       If Thursday is fixed, I can ship a version limited to one region
+       and finish the rest next sprint. Which would you prefer?"</code></pre>
+
+<p class="small muted">
+  Note the structure: <em>what will not happen</em>, <em>why, technically and briefly</em>,
+  <em>the new estimate</em>, <em>an option they can choose</em>. It converts your problem into
+  their decision, which is exactly what a manager wants.
+</p>
+
+<h2 id="estimating">Estimating, when you cannot know</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Two things about database work that make it hard to estimate</div>
+  <ol style="margin-bottom:0">
+    <li><strong>The data is unknown until you look.</strong> "Add a unique constraint on email" is
+      ten minutes — unless there are 4 000 duplicates, and then it is a week of deciding which row
+      wins and who to tell.</li>
+    <li><strong>Production behaviour differs from test.</strong> A migration that takes 40 ms on
+      200 rows may take eleven minutes on 200 million, and you will not find out on your laptop.</li>
+  </ol>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Two techniques that work</div>
+  <ul style="margin-bottom:0">
+    <li><strong>Estimate the investigation separately.</strong> “Half a day to find out how many
+      duplicates there are, then I can estimate the fix.” That is a real, deliverable, honest unit
+      of work — a <em>spike</em> — and asking for one is normal, not an admission.</li>
+    <li><strong>Give a range with the reason.</strong> “Two days if the data is clean, a week if it
+      is not, and I will know which by tomorrow afternoon.” Ranges are more useful than a single
+      number everybody knows is fiction.</li>
+  </ul>
+</div>
+
+<h2 id="tickets">Tickets, and leaving a trail</h2>
+
+<div class="box note">
+  <div class="box-title">Write the finding in the ticket, not in a chat message</div>
+  <p style="margin-bottom:0">
+    When you discover <em>why</em> the report was wrong, put it in the ticket: the query that
+    proves it, the number before and after, and the cause in one sentence. Six months later
+    somebody — quite possibly you — will search for that. A chat message is gone; a ticket comment
+    is institutional memory, and being the person who leaves one is disproportionately valued.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Italian</th><th>Means</th></tr></thead>
+<tbody>
+<tr><td><em>presa in carico</em></td><td>Taken on / assigned to me. What you say when you start a ticket</td></tr>
+<tr><td><em>in lavorazione</em></td><td>In progress</td></tr>
+<tr><td><em>collaudo</em></td><td>Acceptance testing — usually by the client or an analyst</td></tr>
+<tr><td><em>avvio in produzione</em> / <em>messa in produzione</em></td><td>Go-live</td></tr>
+<tr><td><em>rilascio</em></td><td>Release / deploy</td></tr>
+<tr><td><em>segnalazione</em></td><td>A reported issue, from a client</td></tr>
+<tr><td><em>capitolato</em></td><td>The specification document, usually contractual</td></tr>
+<tr><td><em>fermo</em> / <em>bloccante</em></td><td>Blocked / blocking</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="ownership">The rhythm that actually matters</h2>
+
+<div class="box good">
+  <div class="box-title">✔ Four habits, worth more than any framework</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Finish things.</strong> Three tickets done beats six at 80%. Work in progress helps
+      nobody and hides risk.</li>
+    <li><strong>Ask early, not at hour six.</strong> Twenty minutes stuck is thinking; three hours
+      stuck is a decision to waste an afternoon. See
+      <a href="48-analysis-and-teamwork.html">chapter 48</a> for how to ask well.</li>
+    <li><strong>Leave the campsite tidier.</strong> Name the constraint you added, comment the
+      non-obvious query, write the finding in the ticket.</li>
+    <li><strong>Do not be surprising.</strong> Predictable is a compliment. Being the person whose
+      estimates can be planned around is worth more than being the fastest.</li>
+  </ol>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Agile in practice is a stand-up, tickets and a sprint. Do not over-prepare for the theory.</li>
+    <li>Refinement is where a database person earns their reputation: ask the data questions before the work starts.</li>
+    <li>Stand-up is two sentences: outcome, cause, next, blocker.</li>
+    <li>“Almost done” is the most expensive phrase in software.</li>
+    <li>Announce a slip early, with a reason and an option. It converts your problem into their decision.</li>
+    <li>Estimate the investigation separately when the data is unknown. A spike is a legitimate unit of work.</li>
+    <li>Give a range with a reason rather than a number everyone knows is fiction.</li>
+    <li>Write findings in the ticket, not in chat. It is institutional memory.</li>
+    <li>Finish things. Three done beats six at eighty per cent.</li>
+    <li>Predictable is a compliment.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Have you worked in an Agile team?</p>
+  <p class="a">Describe the rhythm rather than the vocabulary: a daily stand-up, two-week sprints,
+    refinement before the work starts, a demo at the end. Then say what you personally did in it —
+    “in refinement I would ask what happens to existing rows and whether a value is unique per
+    customer or globally, because those are the questions that cause rework if nobody asks them.”</p>
+</div>
+
+<div class="qa">
+  <p class="q">What do you do when you realise you will miss a deadline?</p>
+  <p class="a">Say so as soon as I know, with the specific reason, a revised estimate, and an
+    option — usually a reduced scope that still ships on the original date. The cost of a slip is
+    mostly in how late it is communicated; the same delay announced on day two is a planning
+    adjustment.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you estimate work when you do not know the data?</p>
+  <p class="a">I separate the investigation from the fix and estimate them separately — half a day
+    to find out how bad the duplicates are, then a real estimate. If pressed for a single number I
+    give a range with the reason for the spread and say when I will be able to narrow it.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

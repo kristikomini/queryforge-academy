@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>39 &middot; OLTP vs OLAP and dimensional modelling &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="39-oltp-vs-olap">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 6 — Data at work <span>&rsaquo;</span> Chapter 39</p>
+<h1>OLTP vs OLAP and dimensional modelling</h1>
+<p class="lede">Star schemas, fact and dimension tables, grain, and slowly changing dimensions type 1 and type 2.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Reporting con SSRS e Power BI&rdquo;</em> &mdash; the query behind a report is
+  usually the easy part. Designing the model the reports sit on is the job.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="two">Two workloads, two designs</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A shop till and a shop's annual accounts want opposite things. The till needs to add one sale,
+    right now, without disturbing anybody. The accounts need to add up two million sales, and do
+    not mind waiting a minute. Designing one thing to do both means it does neither well.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th></th><th>OLTP</th><th>OLAP</th></tr></thead>
+<tbody>
+<tr><td>Unit of work</td><td>One order</td><td>Two years of orders</td></tr>
+<tr><td>Reads</td><td>A few rows by key</td><td>Millions, aggregated</td></tr>
+<tr><td>Writes</td><td>Constant, small, concurrent</td><td>Bulk, scheduled, single-writer</td></tr>
+<tr><td>Design</td><td>Normalised — 3NF</td><td>Denormalised — star schema</td></tr>
+<tr><td>Indexes</td><td>Narrow, selective, many</td><td>Few; columnstore, or none at all</td></tr>
+<tr><td>Optimised for</td><td>Latency and concurrency</td><td>Throughput per scan</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Why analytical queries want a different shape</div>
+  <p style="margin-bottom:0">
+    Normalisation exists to prevent update anomalies from concurrent piecemeal writes. A warehouse
+    is loaded in bulk by one controlled process, so those anomalies largely cannot arise — and the
+    cost of normalisation, an eleven-table join on every question, is paid on every query instead.
+    A star schema trades storage and update flexibility for <strong>fewer joins and sequential
+    scans</strong>, which is the right trade for that workload and the wrong one for a till.
+  </p>
+</div>
+
+<h2 id="star">The star schema</h2>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 280" role="img" aria-labelledby="d39t d39d">
+    <title id="d39t">A star schema: one fact table surrounded by dimension tables</title>
+    <desc id="d39d">A central fact_sales table holds foreign keys to dim_date, dim_customer, dim_product and dim_region, plus the numeric measures.</desc>
+
+    <rect class="d-box-a" x="320" y="100" width="200" height="86" rx="10"/>
+    <text class="d-t-b" x="420" y="124" text-anchor="middle">fact_sales</text>
+    <text class="d-t-m" x="420" y="144" text-anchor="middle">date_key, customer_key,</text>
+    <text class="d-t-m" x="420" y="160" text-anchor="middle">product_key, region_key</text>
+    <text class="d-t-m" x="420" y="178" text-anchor="middle">quantity, revenue_cents</text>
+
+    <rect class="d-box" x="60" y="20" width="170" height="50" rx="9"/>
+    <text class="d-t-b" x="145" y="42" text-anchor="middle">dim_date</text>
+    <text class="d-t-s" x="145" y="60" text-anchor="middle">year, month, is_holiday</text>
+
+    <rect class="d-box" x="610" y="20" width="170" height="50" rx="9"/>
+    <text class="d-t-b" x="695" y="42" text-anchor="middle">dim_customer</text>
+    <text class="d-t-s" x="695" y="60" text-anchor="middle">name, segment, city</text>
+
+    <rect class="d-box" x="60" y="215" width="170" height="50" rx="9"/>
+    <text class="d-t-b" x="145" y="237" text-anchor="middle">dim_product</text>
+    <text class="d-t-s" x="145" y="255" text-anchor="middle">sku, category, brand</text>
+
+    <rect class="d-box" x="610" y="215" width="170" height="50" rx="9"/>
+    <text class="d-t-b" x="695" y="237" text-anchor="middle">dim_region</text>
+    <text class="d-t-s" x="695" y="255" text-anchor="middle">region, area, country</text>
+
+    <path class="d-line-a" d="M230 52 L320 118"/>
+    <path class="d-line-a" d="M610 52 L520 118"/>
+    <path class="d-line-a" d="M230 232 L320 172"/>
+    <path class="d-line-a" d="M610 232 L520 172"/>
+  </svg>
+  <figcaption>Every question is one join per dimension. Never more.</figcaption>
+</figure>
+
+<div class="box pro">
+  <div class="box-title">🎓 Grain is the first decision and the one that matters</div>
+  <p style="margin-bottom:0">
+    <strong>What does one row of the fact table represent?</strong> One order line? One order? One
+    day per product? Everything else follows: which dimensions apply, which measures are additive,
+    what the row count will be. Getting it wrong is not a tuning problem, it is a rebuild — and
+    "what is the grain?" is the question a data-warehouse interviewer is waiting to hear you ask.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Term</th><th>Means</th></tr></thead>
+<tbody>
+<tr><td><strong>Fact</strong></td><td>A measurement: quantity, revenue, duration. Numeric and usually additive</td></tr>
+<tr><td><strong>Dimension</strong></td><td>The context you slice by: who, what, when, where</td></tr>
+<tr><td><strong>Grain</strong></td><td>What one fact row means. Decide it first, write it down</td></tr>
+<tr><td><strong>Additive</strong></td><td>Summable across every dimension — revenue</td></tr>
+<tr><td><strong>Semi-additive</strong></td><td>Summable across some — a stock level sums over products but <em>not</em> over time</td></tr>
+<tr><td><strong>Non-additive</strong></td><td>A ratio or percentage. Store the numerator and denominator; compute the ratio on read</td></tr>
+<tr><td><strong>Snowflake</strong></td><td>Normalised dimensions. More joins, less redundancy, usually not worth it</td></tr>
+<tr><td><strong>Conformed dimension</strong></td><td>One <code>dim_customer</code> shared by several fact tables, so figures reconcile across reports</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — averaging a semi-additive measure</div>
+  <p style="margin-bottom:0">
+    Summing a daily stock level over a month gives a number with no meaning. Summing a percentage
+    across regions gives a wrong one. Non-additive measures must be stored as their components:
+    keep <code>delivered_count</code> and <code>total_count</code>, and compute the rate in the
+    report. Storing the percentage is the commonest fatal mistake in a warehouse design, because
+    every subsequent aggregation of it is silently wrong.
+  </p>
+</div>
+
+<h2 id="scd">Slowly changing dimensions</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A customer moves from Modena to Milano. Do last year's sales now count as Milano sales, or do
+    they stay Modena sales because that is where they happened? Both answers are defensible; the
+    disaster is not deciding, because then different reports give different totals.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Type</th><th>Behaviour</th><th>Use when</th></tr></thead>
+<tbody>
+<tr><td><strong>Type 1</strong></td><td>Overwrite. History is lost</td><td>Correcting a mistake — a misspelled name</td></tr>
+<tr><td><strong>Type 2</strong></td><td>New row, with <code>valid_from</code>/<code>valid_to</code> and an <code>is_current</code> flag</td><td>The change is real and history matters. <strong>The default</strong></td></tr>
+<tr><td><strong>Type 3</strong></td><td>A <code>previous_city</code> column beside the current one</td><td>You need exactly one prior value. Rare</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>-- Type 2 in practice. The SURROGATE key is what makes it work:
+dim_customer
+ customer_key  customer_id  name        city     valid_from   valid_to     is_current
+ ------------  -----------  ----------  -------  -----------  -----------  ----------
+ 501           42           Rossi SpA   Modena   2024-01-01   2026-06-30   0
+ 902           42           Rossi SpA   Milano   2026-07-01   9999-12-31   1
+
+-- A fact row records customer_key 501, so it is permanently attached to the
+-- version of the customer that existed when the sale happened. This is the whole
+-- reason a warehouse uses surrogate keys instead of the source system's ids —
+-- a natural key cannot express "this row, as it was then".</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ Say this in an interview</div>
+  <p style="margin-bottom:0">
+    “Dimension surrogate keys are not just for narrowness — they are what lets a fact reference a
+    <em>version</em> of a dimension row, which is how type 2 history works at all.” That one
+    sentence covers surrogate keys, SCDs and grain in a way that is hard to fake.
+  </p>
+</div>
+
+<h2 id="italy">Where this lands in the Italian market</h2>
+
+<p>
+  Most jobs advertising “Power BI” or “SSRS” are asking you to be the layer underneath: the views,
+  the summary tables, the nightly load and the <code>dim_date</code>. A useful, concrete thing to
+  know is that Power BI's own model is a star schema — its engine (VertiPaq) is columnar and
+  optimised for exactly this shape, and a report built on one wide flat table or on a normalised
+  OLTP schema will be slow in ways no amount of DAX fixes. “I would give Power BI a star schema,
+  not a view over the OLTP tables” is a strong, specific answer.
+</p>
+
+<div class="tryit">
+  <pre><code>-- The reference database already has a dim_date. Build the smallest possible
+-- fact table from it and see the shape:
+SELECT d.year, d.month, r.name AS region, COUNT(*) AS orders,
+       SUM(o.total_cents)/100.0 AS revenue_eur
+FROM orders o
+JOIN dim_date d ON d.d = date(o.placed_at)
+JOIN customers c ON c.id = o.customer_id
+JOIN cities   ci ON ci.id = c.city_id
+JOIN regions   r ON r.id = ci.region_id
+WHERE o.status &lt;&gt; 'cancelled'
+GROUP BY d.year, d.month, r.name
+ORDER BY d.year, d.month, revenue_eur DESC;</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>OLTP optimises latency and concurrency; OLAP optimises throughput per scan. One design cannot do both.</li>
+    <li>A warehouse is denormalised because it is bulk-loaded by one process, so update anomalies largely cannot arise.</li>
+    <li>Decide the grain first and write it down. Everything else follows from it.</li>
+    <li>Facts are measurements; dimensions are the context you slice by.</li>
+    <li>Never store a ratio as a measure. Store the numerator and denominator.</li>
+    <li>Semi-additive measures — stock levels, balances — cannot be summed over time.</li>
+    <li>Type 1 overwrites, type 2 adds a versioned row. Type 2 is the default when history matters.</li>
+    <li>Surrogate dimension keys are what let a fact point at a <em>version</em> of a dimension row.</li>
+    <li>A conformed dimension is what makes two reports agree.</li>
+    <li>Power BI's engine wants a star schema. A view over the OLTP schema will be slow whatever the DAX.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">What is a star schema and why is it denormalised?</p>
+  <p class="a">A central fact table of measurements surrounded by dimension tables you slice by, so
+    every query is one join per dimension. It is denormalised because the workload is bulk-loaded
+    and read with wide aggregate scans — the anomalies normalisation prevents cannot really arise,
+    and the joins it would cost are paid on every query.</p>
+</div>
+
+<div class="qa">
+  <p class="q">A customer changes city. How do you handle it in the warehouse?</p>
+  <p class="a">First ask whether historical sales should follow them. If not — usually the case —
+    it is a type 2 slowly changing dimension: close the current row with a <code>valid_to</code>,
+    insert a new one with a new surrogate key, and leave existing facts pointing at the old key. If
+    it is a correction rather than a change, type 1 and overwrite.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why not store a conversion rate in the fact table?</p>
+  <p class="a">Because it is non-additive: summing rates is meaningless and averaging averages is
+    wrong. I store the numerator and denominator as separate additive measures and compute the rate
+    at report time, so it is correct at every level of aggregation.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

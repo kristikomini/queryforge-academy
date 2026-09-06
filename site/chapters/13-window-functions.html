@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>13 &middot; Window functions &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="13-window-functions">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 13</p>
+<h1>Window functions</h1>
+<p class="lede">ROW_NUMBER, RANK, DENSE_RANK and OVER(PARTITION BY …). The highest-leverage thing in modern SQL.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; if you learn one thing from
+  this course that changes what you can do at work, it is this chapter.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="idea">Aggregate without collapsing</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    <code>GROUP BY</code> puts your receipts into envelopes and you lose the receipts. A window
+    function leaves every receipt on the table and writes a note in the corner of each one:
+    “this is the third biggest in its shop”, “the shop's total is 412”. Nothing is thrown away.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    A window function computes a value over a set of rows <em>related to the current row</em>
+    without collapsing the result. <code>OVER (PARTITION BY … ORDER BY …)</code> defines that set.
+    Crucially, window functions are evaluated <strong>after</strong> <code>WHERE</code>,
+    <code>GROUP BY</code> and <code>HAVING</code>, and <strong>before</strong>
+    <code>ORDER BY</code> — which is exactly why you cannot filter on one in <code>WHERE</code> and
+    always need a wrapping query or CTE to do it.
+  </p>
+</div>
+
+<pre><code>SELECT
+  customer_id,
+  placed_at,
+  total_cents,
+  SUM(total_cents)   OVER (PARTITION BY customer_id)                       AS customer_total,
+  ROW_NUMBER()       OVER (PARTITION BY customer_id ORDER BY placed_at)    AS nth_order,
+  total_cents * 100.0
+    / SUM(total_cents) OVER (PARTITION BY customer_id)                     AS pct_of_customer
+FROM orders;
+-- Same number of rows as `orders`. Every row now knows about its neighbours.</code></pre>
+
+<h2 id="ranking">The three ranking functions, and the difference that is always asked</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Function</th><th>Ties get</th><th>Next value after a tie</th><th>Use for</th></tr></thead>
+<tbody>
+<tr><td><code>ROW_NUMBER()</code></td><td>Different numbers (arbitrary)</td><td>n + 1</td><td>De-duplication, exactly-one-per-group</td></tr>
+<tr><td><code>RANK()</code></td><td>The same number</td><td>Skips (1, 1, 3)</td><td>Competition ranking</td></tr>
+<tr><td><code>DENSE_RANK()</code></td><td>The same number</td><td>No gap (1, 1, 2)</td><td>“The 3rd distinct salary”</td></tr>
+<tr><td><code>NTILE(n)</code></td><td>—</td><td>—</td><td>Quartiles, deciles, bucketing</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>-- salary:  5000  5000  4000  3000
+ROW_NUMBER()  ->    1     2     3     4
+RANK()        ->    1     1     3     4
+DENSE_RANK()  ->    1     1     2     3</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    <code>ROW_NUMBER()</code> breaks ties <strong>arbitrarily</strong>, and the arbitrary choice
+    can change between runs when the plan changes. If you use it to pick “the one row to keep”,
+    add a deterministic tie-breaker — <code>ORDER BY updated_at DESC, id DESC</code>. Without it,
+    a de-duplication job can delete a different row each time it runs, which is a genuinely
+    horrible bug to diagnose.
+  </p>
+</div>
+
+<h2 id="topn">Top-N per group: the canonical use</h2>
+
+<pre><code>-- The most recent order per customer.
+WITH ranked AS (
+  SELECT o.*,
+         ROW_NUMBER() OVER (PARTITION BY customer_id
+                            ORDER BY placed_at DESC, id DESC) AS rn
+  FROM orders o
+)
+SELECT * FROM ranked WHERE rn = 1;</code></pre>
+
+<div class="box note">
+  <div class="box-title">Why the CTE is not optional</div>
+  <p style="margin-bottom:0">
+    <code>WHERE rn = 1</code> cannot go in the same <code>SELECT</code>, because
+    <code>WHERE</code> is evaluated before window functions exist
+    (<a href="06-how-select-is-evaluated.html">chapter 06</a>). Every top-N-per-group query
+    therefore has two levels. If you find yourself writing
+    <code>WHERE ROW_NUMBER() OVER (…) = 1</code> and getting a syntax error, this is why —
+    and the error message will not tell you.
+  </p>
+</div>
+
+<h2 id="dedupe">De-duplication, done properly</h2>
+
+<pre><code>-- Keep the newest row per (email); delete the rest. One statement, no temp table.
+WITH dupes AS (
+  SELECT id,
+         ROW_NUMBER() OVER (PARTITION BY LOWER(email)
+                            ORDER BY updated_at DESC, id DESC) AS rn
+  FROM customers
+)
+DELETE FROM customers
+WHERE id IN (SELECT id FROM dupes WHERE rn &gt; 1);</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ Before you run this on production</div>
+  <p style="margin-bottom:0">
+    Run the <code>SELECT</code> half first and read the count. Then wrap the delete in an explicit
+    transaction and check the affected row count against that number before committing. “I would
+    run the select first and compare the counts inside a transaction” is a sentence that makes
+    interviewers relax.
+  </p>
+</div>
+
+<h2 id="reuse">Naming a window</h2>
+
+<p>
+  Repeating <code>OVER (PARTITION BY customer_id ORDER BY placed_at)</code> five times is how a
+  typo gets into one of them. Standard SQL lets you name it once:
+</p>
+
+<pre><code>SELECT customer_id, placed_at,
+       ROW_NUMBER() OVER w  AS nth,
+       LAG(total_cents) OVER w AS prev_total,
+       SUM(total_cents) OVER w AS running_total
+FROM orders
+WINDOW w AS (PARTITION BY customer_id ORDER BY placed_at)
+ORDER BY customer_id, placed_at;
+-- PostgreSQL, MySQL 8, SQLite, Oracle. SQL Server does not support WINDOW.</code></pre>
+
+<h2 id="performance">What they cost</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The index that makes them fast</div>
+  <p style="margin-bottom:0">
+    A window function needs its input sorted by <code>PARTITION BY</code> then
+    <code>ORDER BY</code>. An index on exactly <code>(customer_id, placed_at)</code> supplies that
+    order for free and the plan shows no sort operator. Without it, the engine sorts — and if the
+    estimate is wrong, that sort spills to disk, which is the single most common reason a window
+    query is slow. Look for a <code>Sort</code> with a spill warning before you blame the function.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- Every customer's orders, numbered, with their share of the customer's spend
+-- and the gap in days since their previous order. One pass.
+SELECT customer_id, id, placed_at,
+       ROW_NUMBER() OVER w                              AS nth_order,
+       ROUND(100.0 * total_cents
+             / SUM(total_cents) OVER (PARTITION BY customer_id), 1) AS pct,
+       julianday(placed_at) - julianday(LAG(placed_at) OVER w)      AS days_since_prev
+FROM orders
+WINDOW w AS (PARTITION BY customer_id ORDER BY placed_at)
+ORDER BY customer_id, placed_at;</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>A window function adds a column about neighbouring rows without collapsing the result.</li>
+    <li>Window functions run after <code>WHERE</code>/<code>GROUP BY</code>/<code>HAVING</code> and before <code>ORDER BY</code>. Filtering one always needs a CTE or derived table.</li>
+    <li><code>ROW_NUMBER</code> gives distinct numbers, <code>RANK</code> skips after ties, <code>DENSE_RANK</code> does not.</li>
+    <li><code>ROW_NUMBER</code> breaks ties arbitrarily and non-deterministically. Add a tie-breaker whenever the result decides something.</li>
+    <li>Top-N per group is <code>ROW_NUMBER() OVER (PARTITION BY … ORDER BY …)</code> filtered in an outer query.</li>
+    <li>De-duplicate by ranking within the duplicate key and deleting <code>rn &gt; 1</code> — after checking the count.</li>
+    <li>Name a repeated window with <code>WINDOW w AS (…)</code> — everywhere except SQL Server.</li>
+    <li>An index on <code>(partition cols, order cols)</code> removes the sort. A spilling sort is the usual cause of a slow window query.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Difference between <code>ROW_NUMBER</code>, <code>RANK</code> and <code>DENSE_RANK</code>?</p>
+  <p class="a">On ties: <code>ROW_NUMBER</code> gives each row a distinct number arbitrarily;
+    <code>RANK</code> gives ties the same number and then skips (1,1,3);
+    <code>DENSE_RANK</code> gives ties the same number without skipping (1,1,2). Use
+    <code>ROW_NUMBER</code> when you need exactly one row per group, <code>DENSE_RANK</code> for
+    “the nth distinct value”.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Find the second-highest salary.</p>
+  <p class="a"><code>DENSE_RANK() OVER (ORDER BY salary DESC)</code> filtered to 2, because the
+    question means the second distinct salary — <code>ROW_NUMBER</code> would return the second
+    <em>row</em>, which is the same salary again if the top two are tied. Mentioning that
+    distinction unprompted is the point of the question.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why can't I write <code>WHERE ROW_NUMBER() OVER (…) = 1</code>?</p>
+  <p class="a">Because <code>WHERE</code> is evaluated before window functions are computed, so the
+    value does not exist yet. Wrap the query in a CTE or derived table and filter in the outer
+    level. Same reason you cannot use a <code>SELECT</code> alias in <code>WHERE</code>.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

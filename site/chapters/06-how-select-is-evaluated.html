@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>06 &middot; How a SELECT is really evaluated &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="06-how-select-is-evaluated">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 1 — The relational foundation <span>&rsaquo;</span> Chapter 06</p>
+<h1>How a SELECT is really evaluated</h1>
+<p class="lede">FROM before WHERE before GROUP BY before SELECT. Nearly every beginner error is this one order.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; “ottima” starts with knowing
+  that the clauses do not run in the order they are written. Almost every beginner error is this
+  one fact.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="order">Written order is not evaluation order</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    You write a shopping list starting with “I want apples”, but you do it in a different order:
+    first you go to the shop, then you walk to the fruit aisle, then you look at what is there,
+    then you pick apples, then you queue. SQL is the same. You <em>say</em> <code>SELECT</code>
+    first, but the database does it almost last — it has to know which rows it is looking at
+    before it can decide what to show you about them.
+  </p>
+</div>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 250" role="img" aria-labelledby="d6t d6d">
+    <title id="d6t">Written order versus logical evaluation order of a SELECT</title>
+    <desc id="d6d">A SELECT statement is written SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, but is evaluated FROM and JOIN first, then WHERE, GROUP BY, HAVING, SELECT, DISTINCT, ORDER BY and finally LIMIT.</desc>
+
+    <text class="d-t-c" x="120" y="26" text-anchor="middle">AS WRITTEN</text>
+    <text class="d-t-c" x="560" y="26" text-anchor="middle">AS EVALUATED</text>
+
+    <g class="d-t-m">
+      <text x="60" y="56">SELECT</text>
+      <text x="60" y="82">FROM / JOIN</text>
+      <text x="60" y="108">WHERE</text>
+      <text x="60" y="134">GROUP BY</text>
+      <text x="60" y="160">HAVING</text>
+      <text x="60" y="186">ORDER BY</text>
+      <text x="60" y="212">LIMIT</text>
+    </g>
+
+    <g>
+      <rect class="d-box-a" x="400" y="40" width="330" height="24" rx="6"/>
+      <text class="d-t-m" x="412" y="57">1  FROM / JOIN     which rows exist at all</text>
+      <rect class="d-box-a" x="400" y="70" width="330" height="24" rx="6"/>
+      <text class="d-t-m" x="412" y="87">2  WHERE          filter ROWS</text>
+      <rect class="d-box-k" x="400" y="100" width="330" height="24" rx="6"/>
+      <text class="d-t-m" x="412" y="117">3  GROUP BY       collapse into groups</text>
+      <rect class="d-box-k" x="400" y="130" width="330" height="24" rx="6"/>
+      <text class="d-t-m" x="412" y="147">4  HAVING         filter GROUPS</text>
+      <rect class="d-box-p" x="400" y="160" width="330" height="24" rx="6"/>
+      <text class="d-t-m" x="412" y="177">5  SELECT         aliases are born HERE</text>
+      <rect class="d-box" x="400" y="190" width="330" height="24" rx="6"/>
+      <text class="d-t-m" x="412" y="207">6  ORDER BY  →  7  LIMIT / OFFSET</text>
+    </g>
+
+    <path class="d-line-b" d="M170 56 C 300 56, 280 172, 400 172" marker-end="url(#a6)"/>
+    <path class="d-line-b" d="M170 82 C 260 82, 300 52, 400 52" marker-end="url(#a6)"/>
+    <defs>
+      <marker id="a6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" class="d-fill"/>
+      </marker>
+    </defs>
+  </svg>
+  <figcaption>The two clauses you write first are evaluated fifth and first.</figcaption>
+</figure>
+
+<h2 id="consequences">Four things this explains</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 1 · You cannot use a SELECT alias in WHERE</div>
+  <p style="margin-bottom:0">
+    <code>WHERE</code> runs at step 2; the alias is created at step 5. It does not exist yet, and
+    the error message — “invalid column name” — sounds like a typo rather than an ordering
+    problem. Repeat the expression, or wrap the query in a derived table or CTE.
+  </p>
+</div>
+
+<pre><code>-- Fails: `spend` does not exist yet when WHERE runs.
+SELECT customer_id, SUM(total_cents) AS spend
+FROM orders GROUP BY customer_id
+WHERE spend &gt; 100000;
+
+-- Works: HAVING runs AFTER grouping, so the aggregate is available.
+SELECT customer_id, SUM(total_cents) AS spend
+FROM orders GROUP BY customer_id
+HAVING SUM(total_cents) &gt; 100000;
+
+-- Also works, and reads better when there are three of these:
+SELECT * FROM (
+  SELECT customer_id, SUM(total_cents) AS spend
+  FROM orders GROUP BY customer_id
+) t WHERE t.spend &gt; 100000;</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 2 · ORDER BY <em>can</em> use an alias</div>
+  <p style="margin-bottom:0">
+    Because it runs at step 6, after <code>SELECT</code>. So <code>ORDER BY spend DESC</code> is
+    legal in exactly the query where <code>WHERE spend &gt; …</code> is not. That asymmetry looks
+    arbitrary until you know the order, and then it is obvious — which is precisely why
+    interviewers like the question.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 3 · WHERE and HAVING are not interchangeable</div>
+  <p style="margin-bottom:0">
+    <code>WHERE</code> filters rows before grouping; <code>HAVING</code> filters groups after.
+    Where a condition could go in either, <strong>put it in <code>WHERE</code></strong>: it can use
+    an index, and it removes rows the aggregate would otherwise have had to read. Filtering in
+    <code>HAVING</code> what you could have filtered in <code>WHERE</code> is correct and slower —
+    and saying <em>why</em> it is slower is the answer that lands.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 4 · A LEFT JOIN condition in WHERE is an INNER JOIN</div>
+  <p style="margin-bottom:0">
+    The join happens at step 1, producing <code>NULL</code>s for unmatched rows.
+    <code>WHERE</code> then runs at step 2 — and a predicate on the right-hand table is
+    <code>UNKNOWN</code> for those <code>NULL</code>s, so they are dropped. The outer join has been
+    silently undone. If the condition is part of the <em>matching</em> rule it belongs in
+    <code>ON</code>; if it is a filter on the result it belongs in <code>WHERE</code>. See
+    <a href="08-joins.html">chapter 08</a>.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- Every customer, with their 2026 orders. Zero-order customers included.
+SELECT c.name, COUNT(o.id) AS orders_2026
+FROM customers c
+LEFT JOIN orders o
+       ON o.customer_id = c.id
+      AND o.placed_at &gt;= DATE '2026-01-01'   -- part of the MATCH: stays in ON
+GROUP BY c.name;
+
+-- Move that line to WHERE and the customers with no 2026 orders vanish.
+-- Same intent, different question, no error message.</code></pre>
+</div>
+
+<h2 id="logical">"Logical" order, not physical order</h2>
+
+<div class="box note">
+  <div class="box-title">The clarification that separates good candidates from great ones</div>
+  <p style="margin-bottom:0">
+    This ordering is a <strong>semantic definition</strong>, not a description of what the engine
+    does. The optimiser will happily push a <code>WHERE</code> predicate down inside a join, use an
+    index to satisfy <code>ORDER BY</code> without sorting, or stop early because of a
+    <code>LIMIT</code>. It may do anything at all <em>provided the answer is the same as if it had
+    followed this order</em>. So the order tells you what your query <em>means</em>; the
+    <a href="27-execution-plans.html">execution plan</a> tells you what actually happened. Say both
+    halves of that and you have answered the follow-up before it was asked.
+  </p>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    <code>SELECT DISTINCT</code> is evaluated after <code>SELECT</code>, so it deduplicates the
+    <em>projected</em> rows — including columns you added only to make the output readable. Adding
+    <code>o.id</code> to a <code>SELECT DISTINCT</code> makes every row unique and silently
+    disables the deduplication. When <code>DISTINCT</code> appears as a fix for duplicates, the
+    real bug is almost always a fanning join; see <a href="08-joins.html">chapter 08</a>.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Evaluation order is <code>FROM</code> → <code>WHERE</code> → <code>GROUP BY</code> → <code>HAVING</code> → <code>SELECT</code> → <code>DISTINCT</code> → <code>ORDER BY</code> → <code>LIMIT</code>.</li>
+    <li>Aliases are born in <code>SELECT</code>, so <code>ORDER BY</code> can use them and <code>WHERE</code> cannot.</li>
+    <li><code>WHERE</code> filters rows, <code>HAVING</code> filters groups. If it can go in <code>WHERE</code>, put it there.</li>
+    <li>A predicate on the outer table of a <code>LEFT JOIN</code> placed in <code>WHERE</code> turns it into an inner join, with no error.</li>
+    <li>This order is what the query <em>means</em>. The optimiser may do anything that produces the same answer.</li>
+    <li><code>DISTINCT</code> applies to the projected row. Adding a unique column to the select list disables it.</li>
+    <li>Reaching for <code>DISTINCT</code> to remove duplicates usually means the join is wrong.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Why can't I use a column alias in the <code>WHERE</code> clause?</p>
+  <p class="a">Because <code>WHERE</code> is evaluated before <code>SELECT</code>, and the alias is
+    created by <code>SELECT</code>. <code>ORDER BY</code> runs after, which is why the alias works
+    there. Repeat the expression, or wrap the query in a derived table or CTE.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What is the difference between <code>WHERE</code> and <code>HAVING</code>?</p>
+  <p class="a"><code>WHERE</code> filters rows before grouping, <code>HAVING</code> filters groups
+    after. Beyond correctness there is a performance consequence: a <code>WHERE</code> predicate can
+    use an index and reduces the rows the aggregate has to process, so a condition that could live
+    in either should live in <code>WHERE</code>.</p>
+</div>
+
+<div class="qa">
+  <p class="q">My <code>LEFT JOIN</code> is returning fewer rows than the left table. Why?</p>
+  <p class="a">There is a condition on the right-hand table in <code>WHERE</code> rather than
+    <code>ON</code>. Unmatched rows have nulls there, the predicate evaluates to
+    <code>UNKNOWN</code>, and they are filtered out — so the join behaves as an inner join. Move
+    the matching condition into <code>ON</code>.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

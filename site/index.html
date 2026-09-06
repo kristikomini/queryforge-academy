@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>QueryForge Academy — SQL, for the job you want</title>
+<meta name="description" content="A free, offline-capable SQL course built from real Italian job adverts: 52 chapters, a spaced-repetition engine, a viva drill and a timed mock interview.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="index">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+  <div class="hero">
+    <h1>SQL, for the job you want</h1>
+    <p class="lede">
+      Fifty-two chapters built backwards from real Italian <em>SQL / Database Developer</em>
+      adverts, with a learning engine that measures whether you can <strong>recall</strong> this
+      material — not whether you scrolled past it.
+    </p>
+    <div class="row">
+      <a class="btn" href="chapters/00-the-job-posting.html">Start at chapter 00 →</a>
+      <a class="btn ghost" href="dashboard.html">Your progress</a>
+      <a class="btn quiet" href="review.html">Today's review</a>
+      <a class="btn quiet" href="playground.html">SQL playground</a>
+    </div>
+    <p class="small muted" style="margin-top:14px;margin-bottom:0">
+      No account needed. No network needed. Every page is a real file — save the folder to a USB
+      stick and it still works.
+    </p>
+  </div>
+
+  <div class="grid-3" id="home-stats"></div>
+
+  <h2 id="how">How this works</h2>
+
+  <div class="grid-2">
+    <div class="panel">
+      <h3 style="margin-top:0">Every idea is explained twice</h3>
+      <p class="small">
+        A <strong>🧒 Simple</strong> box — the version you would give a child — and a
+        <strong>🎓 Professional</strong> box — the version you would give an interviewer. The
+        switch in the top bar hides one of them, which turns any chapter into a self-test: read
+        the simple one, then produce the professional one from memory.
+      </p>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0">Progress means retrieval</h3>
+      <p class="small">
+        A chapter is worth <strong>25% for reading</strong> and <strong>75% for the test score</strong>.
+        Read all fifty-two and answer nothing and you are capped at 25%. That is deliberate: the
+        number on the top bar should mean something.
+      </p>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0">Recognition and recall are different skills</h3>
+      <p class="small">
+        Multiple choice measures recognition. An interview measures recall. So there is a
+        <a href="viva.html">viva</a> that hides the answer until you have committed to one, and a
+        <a href="simulate.html">simulator</a> that adds a clock and takes the options away.
+      </p>
+    </div>
+    <div class="panel">
+      <h3 style="margin-top:0">Nothing is behind a login</h3>
+      <p class="small">
+        An <a href="account.html">account</a> exists only to carry your progress between a laptop
+        and a phone. Everything works signed out, offline, and from <code>file://</code>.
+      </p>
+    </div>
+  </div>
+
+  <h2 id="chapters">The chapters</h2>
+  <div id="home-parts"></div>
+
+  <h2 id="coverage">Coverage: what the adverts asked for</h2>
+  <p>
+    This course was built from five real Italian SQL / Database Developer postings, not from a
+    syllabus. Every chapter therefore declares one of two things: the line of an advert it
+    answers, or the reason it exists although no advert mentioned it. Both lists are generated
+    from the same manifest that builds the sidebar, so the claim below is checkable rather than
+    asserted.
+  </p>
+
+  <h3>Answered directly from an advert</h3>
+  <div class="table-wrap"><table id="cov-req">
+    <thead><tr><th style="width:52px">Ch.</th><th>Chapter</th><th>The line it answers</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <h3>Here anyway, and why</h3>
+  <p class="small muted">
+    Ten chapters no advert asked for. Each one is here because it comes up in the interview, in
+    the take-home, or on the second Tuesday of the job.
+  </p>
+  <div class="table-wrap"><table id="cov-extra">
+    <thead><tr><th style="width:52px">Ch.</th><th>Chapter</th><th>Why it is here</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <h2 id="honest">What this is not</h2>
+  <div class="box trap">
+    <div class="box-title">⚠ Read this before you trust the numbers</div>
+    <ul style="margin-bottom:0">
+      <li>The <a href="dashboard.html">mastery percentage</a> is a fact about your test scores on
+        <em>these</em> questions. It is not a fact about your ability, and it is certainly not a
+        fact about whether anyone will hire you.</li>
+      <li>The <a href="viva.html">viva</a> and the <a href="simulate.html">simulator</a> are
+        <strong>self-marked</strong>. That is the weakest link in this whole site and it is
+        mitigated, not solved: your own words stay on screen next to the model answer, and the
+        rule's code terms are matched literally so "you never mentioned <code>SKIP LOCKED</code>"
+        is at least a fact. It still cannot tell whether you were right.</li>
+      <li>The <a href="leaderboard.html">leaderboard</a> is a nudge, not an audit. Your progress
+        document lives in your browser and you can edit it. The server re-derives the four numbers
+        it shows rather than trusting what the browser claims, which raises the effort a little
+        and proves nothing.</li>
+      <li>A lost <a href="account.html">recovery code</a> is a lost account. There is no email
+        address on file, so there is no way round it. That is a real cost of the
+        no-personal-data decision and it is not worth pretending otherwise.</li>
+    </ul>
+  </div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+/* Home page rendering. Everything comes from the manifest, so adding a chapter
+   updates the cards, both coverage tables and the counts with no edit here. */
+(function () {
+  var CH = window.CHAPTERS || [], PARTS = window.PARTS || [];
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+  /* --- headline counts, read from the data rather than typed into prose --- */
+  var stats = document.getElementById("home-stats");
+  var qn = window.LFQuiz ? window.LFQuiz.count() : 0;
+  [["Chapters", CH.length, "across eight parts"],
+   ["Questions", qn, "every one a flashcard too"],
+   ["From an advert", CH.filter(function (c) { return c.req; }).length + " of " + CH.length, "the rest say why they are here"]]
+   .forEach(function (s) {
+     var d = el("div", "stat");
+     d.appendChild(el("div", "k", s[0]));
+     d.appendChild(el("div", "v", String(s[1])));
+     d.appendChild(el("div", "s", s[2]));
+     stats.appendChild(d);
+   });
+
+  /* --- chapter cards, grouped by part --- */
+  var host = document.getElementById("home-parts");
+  PARTS.forEach(function (part) {
+    var list = CH.filter(function (c) { return c.part === part; });
+    if (!list.length) return;
+    var h = el("h3", "", part);
+    if (window.LF) {
+      var pct = window.LF.partMastery(part);
+      var pill = el("span", "pill" + (pct >= 80 ? " ok" : ""), pct + "%");
+      pill.style.marginLeft = "10px";
+      h.appendChild(pill);
+    }
+    host.appendChild(h);
+
+    var grid = el("div", "cards");
+    list.forEach(function (c) {
+      var a = el("a", "card");
+      a.href = "chapters/" + c.id + ".html";
+      a.appendChild(el("div", "n", c.n));
+      a.appendChild(el("h3", "", c.title));
+      a.appendChild(el("p", "", c.blurb));
+      var foot = el("div", "foot");
+      foot.appendChild(el("span", "pill " + (c.req ? "req" : "extra"), c.req ? "from the advert" : "extra"));
+      if (window.LF) {
+        var st = window.LF.profile.chapters[c.id];
+        if (st && st.best >= 0.8) foot.appendChild(el("span", "pill ok", Math.round(st.best * 100) + "%"));
+        else if (st && st.read) foot.appendChild(el("span", "pill", "read"));
+      }
+      a.appendChild(foot);
+      grid.appendChild(a);
+    });
+    host.appendChild(grid);
+  });
+
+  /* --- the two coverage tables --- */
+  function fill(id, key) {
+    var tb = document.querySelector("#" + id + " tbody");
+    CH.filter(function (c) { return c[key]; }).forEach(function (c) {
+      var tr = document.createElement("tr");
+      var td1 = el("td", "mono", c.n);
+      var td2 = document.createElement("td");
+      var a = el("a", "", c.title);
+      a.href = "chapters/" + c.id + ".html";
+      td2.appendChild(a);
+      var td3 = el("td", "small", c[key]);
+      if (key === "req") { td3.innerHTML = ""; var em = el("em", "", c[key]); td3.appendChild(em); }
+      tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+      tb.appendChild(tr);
+    });
+  }
+  fill("cov-req", "req");
+  fill("cov-extra", "extra");
+})();
+</script>
+</body>
+</html>

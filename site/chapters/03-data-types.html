@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>03 &middot; Data types and what they cost &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="03-data-types">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 1 — The relational foundation <span>&rsaquo;</span> Chapter 03</p>
+<h1>Data types and what they cost</h1>
+<p class="lede">Money is never a float. Also varchar vs nvarchar, dates, UUIDs as keys, and storage that becomes speed.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; the fluency being asked for
+  starts here. Type choice is the first place a schema is either right or quietly wrong for years.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="money">Money is never a float</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A computer stores <code>0.1</code> the way you would store one third as <code>0.3333</code> —
+    close, but not exact. Add enough of those tiny errors together and an invoice for
+    &euro;10.00 becomes &euro;9.999999998. Nobody notices until the accountant does, and then
+    everybody notices.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p>
+    <code>FLOAT</code> and <code>REAL</code> are binary floating point (IEEE 754). Decimal
+    fractions like 0.1 have no exact binary representation, so arithmetic accumulates error and
+    equality comparisons are unreliable. Two safe choices:
+  </p>
+  <ul style="margin-bottom:0">
+    <li><strong><code>DECIMAL(p, s)</code> / <code>NUMERIC(p, s)</code></strong> — exact decimal
+      arithmetic. <code>DECIMAL(12, 2)</code> is the default answer for currency in a European
+      business system.</li>
+    <li><strong>Integer minor units</strong> — store cents in a <code>BIGINT</code>
+      (<code>total_cents</code>). Fast, exactly comparable, impossible to accidentally average into
+      a fraction of a cent, and it makes the unit explicit in the column name. This is what the
+      reference database does — run <a href="../playground.html">the playground</a> and look at
+      <code>products.list_price_cents</code>.</li>
+  </ul>
+</div>
+
+<div class="tryit">
+  <pre><code>-- Run this in the playground. It is not a trick; it is how binary floats work.
+SELECT 0.1 + 0.2 = 0.3        AS float_says;     -- often 0 / false
+SELECT CAST(0.1 AS DECIMAL(4,2)) + CAST(0.2 AS DECIMAL(4,2))
+     = CAST(0.3 AS DECIMAL(4,2)) AS decimal_says; -- 1 / true</code></pre>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    <code>MONEY</code> in SQL Server looks like the right answer and is not. It is a scaled
+    integer with four decimal places and it <strong>truncates intermediate results</strong>:
+    dividing then multiplying loses precision in a way <code>DECIMAL</code> does not. Microsoft's
+    own guidance is to use <code>DECIMAL</code>. Knowing this is a genuine differentiator in a
+    SQL Server interview.
+  </p>
+</div>
+
+<h2 id="strings">Strings: length, unicode and collation</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Type</th><th>Use it when</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td><code>CHAR(n)</code></td><td>Every value is genuinely n characters</td><td>Blank-padded to n. Country codes, currency codes. Almost nothing else.</td></tr>
+<tr><td><code>VARCHAR(n)</code></td><td>The default for text with a sane upper bound</td><td>The limit is a constraint, not an optimisation — storage is by actual length.</td></tr>
+<tr><td><code>NVARCHAR(n)</code></td><td>SQL Server, any non-ASCII text</td><td>UTF-16, so two bytes per character. In PostgreSQL/MySQL just use <code>VARCHAR</code> with a UTF-8 database.</td></tr>
+<tr><td><code>TEXT</code> / <code>VARCHAR(MAX)</code></td><td>Genuinely unbounded prose</td><td>Stored off-page. Cannot be a full index key in most engines.</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Collation is a correctness setting, not a formatting one</div>
+  <p style="margin-bottom:0">
+    Collation decides both <strong>sort order</strong> and <strong>equality</strong>. Under a
+    case-insensitive collation <code>'Rossi' = 'rossi'</code> is true, and a
+    <code>UNIQUE</code> constraint will reject the second one. Under an accent-insensitive
+    collation <code>'Perù' = 'Peru'</code>. So a collation change is a behaviour change to every
+    query in the database — and mixing collations across joined columns causes an implicit
+    conversion that <a href="07-predicates-and-sargability.html">kills index usage</a>. Choose one
+    at creation and mean it; <code>Latin1_General_CI_AI</code> or an ICU locale is the usual
+    Italian answer.
+  </p>
+</div>
+
+<h2 id="dates">Dates, times, and the one that has a time zone</h2>
+
+<p>
+  There are three genuinely different things, and engines name them badly:
+</p>
+
+<ul>
+  <li><strong>A date</strong> — a birthday, an invoice date. No time, no zone.
+    <code>DATE</code>.</li>
+  <li><strong>A wall-clock time with no zone</strong> — “the shop opens at 09:00”, which stays
+    09:00 when the clocks change. <code>TIMESTAMP WITHOUT TIME ZONE</code>,
+    <code>DATETIME2</code>.</li>
+  <li><strong>An instant</strong> — when something actually happened. This is the one that needs a
+    zone. <code>TIMESTAMP WITH TIME ZONE</code> (PostgreSQL <code>timestamptz</code>, SQL Server
+    <code>DATETIMEOFFSET</code>).</li>
+</ul>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    Storing local time for an event is a bug with a delay fuse. On the last Sunday of October,
+    02:30 <em>happens twice</em> in Italy, and rows recorded in that hour cannot be ordered or
+    subtracted correctly ever again. <strong>Store instants in UTC</strong> (or in a
+    zone-aware type) and convert at the edge, when you display. Chapter
+    <a href="17-strings-dates-timezones.html">17</a> is the arithmetic.
+  </p>
+</div>
+
+<h2 id="ids">Integers, identities and UUIDs as keys</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The UUID question, answered properly</div>
+  <p>
+    “Should I use a UUID as a primary key?” is asked constantly and answered badly. The real
+    trade-off is <strong>insertion locality</strong>, and it depends on whether the key decides
+    physical order.
+  </p>
+  <ul style="margin-bottom:0">
+    <li>A random UUID (v4) as a <em>clustered</em> key means every insert lands on a random page.
+      That page must be read, modified, split when full — so the write working set becomes the
+      whole table instead of the last page. On a large table this is a genuine, measurable
+      collapse.</li>
+    <li><strong>UUID v7</strong> fixes it: the first 48 bits are a millisecond timestamp, so
+      values are time-ordered and inserts stay at the end of the index. SQL Server's
+      <code>NEWSEQUENTIALID()</code> solves the same problem the same way.</li>
+    <li>A <code>BIGINT</code> identity is narrower (8 bytes vs 16) and every non-clustered index
+      carries a copy of the clustering key — so a wide key makes <em>every</em> index bigger.</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Say this in an interview</div>
+  <p style="margin-bottom:0">
+    “UUIDs are useful when IDs must be generated outside the database — offline clients, or
+    merging data from several systems. If I use one as a clustered key I want v7 or a sequential
+    variant, because random keys scatter inserts across the whole index and cause page splits.”
+  </p>
+</div>
+
+<h2 id="enums">Booleans, enums and “status” columns</h2>
+
+<p>
+  A status is a small closed set of values, and there are three ways to represent it. Ranked:
+</p>
+
+<ol>
+  <li><strong>A lookup table with a foreign key.</strong> Portable, self-documenting, joinable,
+    and you can add a status without a migration to a constraint. This is the default.</li>
+  <li><strong>A <code>CHECK</code> constraint on a short <code>VARCHAR</code>.</strong> Readable
+    in raw query output, which matters more than people expect at 2am. Adding a value is an
+    <code>ALTER</code>.</li>
+  <li><strong>A native <code>ENUM</code></strong> (PostgreSQL, MySQL). Compact, but reordering or
+    removing a value is awkward and it is not portable.</li>
+</ol>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    Storing a status as a bare integer with the meaning living only in application code is the
+    worst of all worlds: <code>WHERE status = 3</code> is unreadable in a report, unverifiable in
+    a bug ticket, and there is nothing stopping somebody writing <code>7</code>. If you inherit
+    this, add the lookup table and a foreign key — you can do it without changing the column.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Never <code>FLOAT</code> for money. <code>DECIMAL(p, s)</code> or integer minor units, and put the unit in the column name.</li>
+    <li><code>MONEY</code> in SQL Server truncates intermediate results. Use <code>DECIMAL</code>.</li>
+    <li>A <code>VARCHAR</code> length is a business constraint, not a performance tuning knob.</li>
+    <li>Collation decides equality as well as sort order, so it is a correctness setting. Mixing collations across a join costs you the index.</li>
+    <li>Store instants in UTC or a zone-aware type; store wall-clock times and dates as themselves. Convert at the edge.</li>
+    <li>Random UUIDs as clustered keys scatter inserts and split pages. Use v7 or a sequential variant, or keep a narrow integer key.</li>
+    <li>Every non-clustered index carries the clustering key, so a wide primary key makes every index wider.</li>
+    <li>A status belongs in a lookup table or a <code>CHECK</code> constraint — not in an untyped integer whose meaning lives in application code.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Which type would you use for a price, and why?</p>
+  <p class="a"><code>DECIMAL(12,2)</code>, or an integer number of cents. Both are exact; floats
+    are not, and currency arithmetic that is 0.0000001 out will eventually be compared for equality
+    by a reconciliation job. If the system does high-volume arithmetic I lean to integer cents
+    because it is also faster and impossible to misread.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What is the difference between <code>CHAR</code> and <code>VARCHAR</code>?</p>
+  <p class="a"><code>CHAR(n)</code> is fixed length and blank-padded to n; <code>VARCHAR(n)</code>
+    stores only what you put in, plus a small length prefix. <code>CHAR</code> is right for values
+    that genuinely are always the same length — a two-letter country code — and wrong for
+    everything else, where it wastes space and produces surprising trailing-space comparisons.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How would you store a timestamp for an audit record?</p>
+  <p class="a">As an instant, in UTC or a zone-aware type — <code>timestamptz</code> or
+    <code>DATETIMEOFFSET</code>. Local time is ambiguous for one hour every autumn, which makes
+    audit rows in that hour impossible to order correctly. Display conversion happens in the
+    presentation layer.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

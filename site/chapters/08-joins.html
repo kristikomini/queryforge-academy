@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>08 &middot; JOINs, semi-joins and anti-joins &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="08-joins">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 08</p>
+<h1>JOINs, semi-joins and anti-joins</h1>
+<p class="lede">INNER, LEFT, FULL, CROSS, self — plus the two joins that have no keyword and are asked about constantly.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; if there is one thing every
+  SQL interview tests, it is whether you understand joins beyond “INNER keeps matches”.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="what">A join is a filtered cross product</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Put every customer card next to every order card — every possible pairing, which is a huge
+    pile. Now throw away every pair where the names do not match. What is left is the join. The
+    database does not literally do it that way, but if you think of it that way you will never be
+    surprised by the number of rows you get back.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    Logically, <code>A JOIN B ON p</code> is the Cartesian product of A and B restricted to rows
+    satisfying <code>p</code>. Outer joins then <em>add back</em> the rows from the preserved side
+    that found no partner, padded with <code>NULL</code>. That is the whole definition, and it
+    explains both the row counts and why <code>NULL</code> behaves the way it does in the result.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Join</th><th>Keeps</th><th>Typical use</th></tr></thead>
+<tbody>
+<tr><td><code>INNER JOIN</code></td><td>Only matching pairs</td><td>The default. Orders with their customer</td></tr>
+<tr><td><code>LEFT JOIN</code></td><td>All left rows; nulls where no match</td><td>“…and their orders, if any”</td></tr>
+<tr><td><code>RIGHT JOIN</code></td><td>All right rows</td><td>Rare. Rewrite as a <code>LEFT</code> and swap the tables — it reads better</td></tr>
+<tr><td><code>FULL OUTER JOIN</code></td><td>All rows from both sides</td><td>Reconciliation: what is in one system and not the other</td></tr>
+<tr><td><code>CROSS JOIN</code></td><td>Every pairing</td><td>Deliberate: a calendar table × every product, to make gaps visible</td></tr>
+<tr><td><em>self join</em></td><td>A table joined to itself</td><td>Employee → manager, hierarchies, comparing a row to its neighbour</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="anti">The two joins with no keyword</h2>
+
+<p>
+  These are asked about constantly and have no dedicated syntax, which is exactly why they
+  separate candidates.
+</p>
+
+<div class="box pro">
+  <div class="box-title">🎓 Semi-join — “does a match exist?”</div>
+  <p style="margin-bottom:0">
+    Returns rows from the left table that have <em>at least one</em> match, <strong>without
+    duplicating them</strong> and without returning any right-hand columns. Written as
+    <code>EXISTS</code>. A plain <code>INNER JOIN</code> is not the same thing: a customer with
+    three orders comes back three times.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Anti-join — “where is there no match?”</div>
+  <p style="margin-bottom:0">
+    Rows from the left table with <em>no</em> match. Written as <code>NOT EXISTS</code>, or as a
+    <code>LEFT JOIN … WHERE right.key IS NULL</code>. Do <strong>not</strong> write it as
+    <code>NOT IN</code> over a nullable column — see the trap below.
+  </p>
+</div>
+
+<pre><code>-- Customers who have ordered (semi-join). One row each, however many orders.
+SELECT c.* FROM customers c
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+
+-- Customers who have never ordered (anti-join).
+SELECT c.* FROM customers c
+WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+
+-- The same anti-join, the older way. Identical plan in most engines.
+SELECT c.* FROM customers c
+LEFT JOIN orders o ON o.customer_id = c.id
+WHERE o.id IS NULL;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — <code>NOT IN</code> and a single NULL</div>
+  <p>
+    If the subquery returns even one <code>NULL</code>, <code>NOT IN</code> returns
+    <strong>no rows at all</strong>. Not an error — an empty result. The reason is three-valued
+    logic: <code>x NOT IN (1, 2, NULL)</code> expands to
+    <code>x &lt;&gt; 1 AND x &lt;&gt; 2 AND x &lt;&gt; NULL</code>, and the last term is
+    <code>UNKNOWN</code>, so the whole conjunction can never be <code>TRUE</code>.
+  </p>
+  <p style="margin-bottom:0">
+    <code>NOT EXISTS</code> does not have this behaviour, handles the null case correctly, and
+    usually produces the same or a better plan. <strong>Use <code>NOT EXISTS</code>.</strong> This
+    is one of the highest-value facts in the whole course: it is asked often, and it has caused
+    silent data loss in a report that "worked yesterday".
+  </p>
+</div>
+
+<h2 id="fan">Fan-out: the duplicate-row bug</h2>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 230" role="img" aria-labelledby="d8t d8d">
+    <title id="d8t">How joining two child tables multiplies rows</title>
+    <desc id="d8d">One order joined to two order lines and three payments produces six rows, so summing the order total counts it three times and summing payments counts them twice.</desc>
+
+    <rect class="d-box-a" x="30" y="90" width="120" height="50" rx="9"/>
+    <text class="d-t-b" x="90" y="112" text-anchor="middle">orders</text>
+    <text class="d-t-s" x="90" y="130" text-anchor="middle">1 row</text>
+
+    <rect class="d-box-k" x="230" y="30" width="140" height="50" rx="9"/>
+    <text class="d-t-b" x="300" y="52" text-anchor="middle">order_lines</text>
+    <text class="d-t-s" x="300" y="70" text-anchor="middle">2 rows</text>
+
+    <rect class="d-box-p" x="230" y="150" width="140" height="50" rx="9"/>
+    <text class="d-t-b" x="300" y="172" text-anchor="middle">payments</text>
+    <text class="d-t-s" x="300" y="190" text-anchor="middle">3 rows</text>
+
+    <path class="d-line" d="M150 108 C 190 108, 195 55, 230 55" marker-end="url(#a8)"/>
+    <path class="d-line" d="M150 122 C 190 122, 195 175, 230 175" marker-end="url(#a8)"/>
+
+    <rect class="d-box-b" x="470" y="80" width="200" height="70" rx="10"/>
+    <text class="d-t-b" x="570" y="106" text-anchor="middle">result: 2 × 3 = 6 rows</text>
+    <text class="d-t-s" x="570" y="126" text-anchor="middle">SUM(total) is now 3× too big</text>
+    <text class="d-t-s" x="570" y="142" text-anchor="middle">SUM(paid) is now 2× too big</text>
+
+    <path class="d-line-b" d="M370 55 C 420 55, 430 100, 470 100" marker-end="url(#a8)"/>
+    <path class="d-line-b" d="M370 175 C 420 175, 430 132, 470 132" marker-end="url(#a8)"/>
+
+    <defs>
+      <marker id="a8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" class="d-fill"/>
+      </marker>
+    </defs>
+  </svg>
+  <figcaption>Two one-to-many joins from the same parent multiply, they do not add.</figcaption>
+</figure>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the report that is exactly 3× wrong</div>
+  <p style="margin-bottom:0">
+    This is the classic "the totals on the invoice report are wrong" ticket. The instinct is to
+    add <code>DISTINCT</code>, which removes the duplicate <em>rows</em> but does nothing for a
+    <code>SUM</code>, and hides the real bug. The fix is to <strong>aggregate each branch before
+    joining</strong>, so each side contributes exactly one row per order.
+  </p>
+</div>
+
+<pre><code>-- Correct: pre-aggregate, then join one-to-one.
+SELECT o.id,
+       l.line_total_cents,
+       COALESCE(p.paid_cents, 0) AS paid_cents
+FROM orders o
+LEFT JOIN (SELECT order_id, SUM(quantity * unit_price_cents) AS line_total_cents
+           FROM order_lines GROUP BY order_id) l ON l.order_id = o.id
+LEFT JOIN (SELECT order_id, SUM(amount_cents) AS paid_cents
+           FROM payments GROUP BY order_id)    p ON p.order_id = o.id;</code></pre>
+
+<h2 id="algorithms">The three join algorithms</h2>
+
+<p>
+  You do not choose these — the optimiser does — but recognising them in a plan is most of what
+  <a href="27-execution-plans.html">plan reading</a> is.
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Algorithm</th><th>How it works</th><th>Good when</th><th>Bad when</th></tr></thead>
+<tbody>
+<tr><td><strong>Nested loops</strong></td><td>For each outer row, seek the inner</td><td>Outer input is small and the inner side is indexed</td><td>Outer is large — you get millions of seeks</td></tr>
+<tr><td><strong>Hash join</strong></td><td>Build a hash table on the smaller input, probe with the larger</td><td>Big unsorted inputs, equality joins</td><td>Needs memory; spills to disk if the estimate was wrong</td></tr>
+<tr><td><strong>Merge join</strong></td><td>Walk both inputs in sorted order</td><td>Both already sorted on the join key</td><td>Requires a sort if they are not</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The diagnosis this gives you</div>
+  <p style="margin-bottom:0">
+    A nested loops join whose outer input was <em>estimated</em> at 10 rows and <em>actually</em>
+    produced 400 000 is the single most common shape of “this query used to be fast”. The engine
+    chose loops because it expected a small input; the estimate was wrong, so it is now doing
+    400 000 index seeks. The fix is upstream — statistics, or a predicate the optimiser cannot
+    estimate — not the join itself. See <a href="28-statistics-and-sniffing.html">chapter 28</a>.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- Every customer and their order count, INCLUDING those with none.
+-- COUNT(o.id) not COUNT(*): COUNT(*) counts the null-padded row as 1.
+SELECT c.name, COUNT(o.id) AS n
+FROM customers c
+LEFT JOIN orders o ON o.customer_id = c.id
+GROUP BY c.name
+ORDER BY n DESC;</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>A join is a cross product filtered by <code>ON</code>; an outer join adds back the unmatched rows, null-padded.</li>
+    <li><code>ON</code> defines the match; <code>WHERE</code> filters the result. A right-table predicate in <code>WHERE</code> turns a <code>LEFT JOIN</code> into an inner join.</li>
+    <li>Use <code>NOT EXISTS</code> for anti-joins. <code>NOT IN</code> returns nothing at all if the subquery yields a single <code>NULL</code>.</li>
+    <li><code>EXISTS</code> is a semi-join: it does not duplicate the left row and does not need <code>DISTINCT</code>.</li>
+    <li>Joining two one-to-many children of the same parent multiplies rows. Pre-aggregate each branch instead.</li>
+    <li><code>DISTINCT</code> as a fix for duplicates hides a fan-out and does not fix the aggregates.</li>
+    <li>In a <code>LEFT JOIN</code>, <code>COUNT(*)</code> counts unmatched rows as one. <code>COUNT(right.col)</code> counts zero.</li>
+    <li>Nested loops for small outer inputs, hash for large unsorted ones, merge for pre-sorted. A loops join over a badly estimated outer input is the classic regression.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Difference between <code>WHERE</code> and <code>ON</code> in an outer join?</p>
+  <p class="a"><code>ON</code> decides which rows pair up; unmatched rows are still preserved and
+    null-padded. <code>WHERE</code> runs after the join and filters the result, so a predicate on
+    the non-preserved table eliminates the null-padded rows and silently converts the outer join to
+    an inner one.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Find customers with no orders.</p>
+  <p class="a"><code>SELECT c.* FROM customers c WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE
+    o.customer_id = c.id)</code>. Then add why not <code>NOT IN</code>: a single null in the
+    subquery makes the whole predicate <code>UNKNOWN</code> and returns an empty set.</p>
+</div>
+
+<div class="qa">
+  <p class="q">The totals in this report are three times too high. What happened?</p>
+  <p class="a">A fan-out: two one-to-many joins from the same parent, so the rows multiply and the
+    parent's value is summed once per combination. The fix is to aggregate each child branch in a
+    derived table or CTE first, then join those one-to-one. <code>DISTINCT</code> would remove the
+    duplicate rows but leave the sums wrong.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

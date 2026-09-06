@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>15 &middot; Set operations and de-duplication &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="15-set-operations">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 15</p>
+<h1>Set operations and de-duplication</h1>
+<p class="lede">UNION vs UNION ALL is a performance decision, not a style one. Plus four ways to delete duplicate rows.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; and one specific habit:
+  writing <code>UNION</code> when you meant <code>UNION ALL</code>, which is a hidden sort on every
+  row you return.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="ops">The four operators</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Operator</th><th>Returns</th><th>Duplicates</th><th>Cost</th></tr></thead>
+<tbody>
+<tr><td><code>UNION ALL</code></td><td>Everything from both</td><td>Kept</td><td>Concatenation. Nearly free</td></tr>
+<tr><td><code>UNION</code></td><td>Everything, deduplicated</td><td>Removed</td><td><strong>A sort or hash of the whole result</strong></td></tr>
+<tr><td><code>INTERSECT</code></td><td>Rows in both</td><td>Removed</td><td>Sort or hash</td></tr>
+<tr><td><code>EXCEPT</code> (Oracle: <code>MINUS</code>)</td><td>In the first, not the second</td><td>Removed</td><td>Sort or hash</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Two guest lists. <code>UNION ALL</code> staples them together, so anyone on both appears
+    twice. <code>UNION</code> staples them and then goes through crossing out repeats — which
+    means reading the whole thing. If you already know there are no repeats, making somebody check
+    anyway is just wasted work.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    <code>UNION ALL</code> is a <strong>concatenation</strong>: the engine streams one branch then
+    the other, and can start returning rows immediately. <code>UNION</code> additionally requires
+    <strong>duplicate elimination across the whole combined result</strong>, which means a sort or a
+    hash — so it is blocking (nothing is returned until everything has been read), it needs memory,
+    and it can spill to disk if the estimate was low. That is a difference in <em>algorithm</em>,
+    not a flag, which is why the cost is so much larger than the syntax suggests.
+  </p>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    <code>UNION</code> is the default habit and it is the wrong one. It forces a full
+    deduplication of the combined result — a sort or hash over every row, which can spill to disk —
+    and it does it even when the two branches cannot possibly overlap. <strong>Default to
+    <code>UNION ALL</code></strong> and use <code>UNION</code> only when you actually need
+    duplicates removed. On a large result this is not a micro-optimisation; it is often the
+    difference between two seconds and forty.
+  </p>
+</div>
+
+<h2 id="rules-of-use">The rules</h2>
+
+<ul>
+  <li>Both branches need the <strong>same number of columns</strong>, in the same order, with
+    compatible types. Names come from the <em>first</em> branch.</li>
+  <li><code>ORDER BY</code> applies to the whole result and goes <strong>once, at the end</strong>.
+    To order inside a branch you need a derived table.</li>
+  <li>For these operators, and only these, <strong>two nulls are considered equal</strong>. That is
+    the opposite of <code>=</code>, and it is why <code>EXCEPT</code> is such a good table-diff
+    tool.</li>
+</ul>
+
+<pre><code>-- Reconciliation: exactly what differs between two tables, nulls included.
+SELECT * FROM staging_customers
+EXCEPT
+SELECT * FROM customers;          -- rows arriving or changed
+
+SELECT * FROM customers
+EXCEPT
+SELECT * FROM staging_customers;  -- rows that vanished
+
+-- One query, labelled, and it is the fastest schema-diff you will ever write:
+SELECT 'only in staging' AS side, * FROM (SELECT * FROM staging_customers EXCEPT SELECT * FROM customers) a
+UNION ALL
+SELECT 'only in live',      * FROM (SELECT * FROM customers EXCEPT SELECT * FROM staging_customers) b;</code></pre>
+
+<h2 id="dedupe">Four ways to delete duplicate rows</h2>
+
+<p>A staple of screening tests. Know at least two, and know which is portable.</p>
+
+<h3>1 · <code>ROW_NUMBER</code> — portable, and the one to give first</h3>
+<pre><code>WITH d AS (
+  SELECT id, ROW_NUMBER() OVER (PARTITION BY email ORDER BY updated_at DESC, id DESC) AS rn
+  FROM customers
+)
+DELETE FROM customers WHERE id IN (SELECT id FROM d WHERE rn &gt; 1);</code></pre>
+
+<h3>2 · <code>MIN(id)</code> per group — works on any engine, including ancient ones</h3>
+<pre><code>DELETE FROM customers
+WHERE id NOT IN (SELECT MIN(id) FROM customers GROUP BY email);
+-- MySQL needs the subquery wrapped in another derived table: it will not read
+-- from the table it is deleting from. Wrap it: (SELECT * FROM (…) x)</code></pre>
+
+<h3>3 · A physical row identifier — when there is no key at all</h3>
+<pre><code>-- PostgreSQL. The rows are IDENTICAL, so nothing distinguishes them but their location.
+DELETE FROM t a USING t b WHERE a.ctid &gt; b.ctid AND a.email = b.email;
+-- Oracle: ROWID. SQL Server: no equivalent, so use ROW_NUMBER.</code></pre>
+
+<h3>4 · Rebuild the table — for very large clean-ups</h3>
+<pre><code>CREATE TABLE customers_new AS SELECT DISTINCT * FROM customers;
+-- then swap names in a transaction. Faster than deleting 40M rows one by one,
+-- and it leaves no bloat behind. It also drops your indexes and constraints —
+-- script them first, or you will find out in production.</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ Say this before you run any of them</div>
+  <p style="margin-bottom:0">
+    “First I would run the <code>SELECT</code> to count what will go, then check whether a
+    <code>UNIQUE</code> constraint should have prevented this in the first place — because
+    otherwise I will be doing it again next month.” The second clause is the one that separates
+    fixing a symptom from fixing a bug.
+  </p>
+</div>
+
+<h2 id="distinct">DISTINCT, and when it is a lie</h2>
+
+<p>
+  <code>SELECT DISTINCT</code> deduplicates the projected row, so adding any unique column
+  disables it entirely. More importantly, <strong><code>DISTINCT</code> appearing in a query with
+  joins is usually a symptom</strong>: the join is fanning out
+  (<a href="08-joins.html">chapter 08</a>), and <code>DISTINCT</code> hides the duplicate rows
+  while leaving every <code>SUM</code> and <code>COUNT</code> wrong.
+</p>
+
+<pre><code>-- Symptom:
+SELECT DISTINCT c.id, c.name FROM customers c JOIN orders o ON o.customer_id = c.id;
+
+-- Cause named, and cheaper: this is a semi-join.
+SELECT c.id, c.name FROM customers c
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);</code></pre>
+
+<div class="rules">
+  <ol>
+    <li><code>UNION</code> deduplicates and therefore sorts or hashes the whole result. <code>UNION ALL</code> concatenates.</li>
+    <li>Default to <code>UNION ALL</code>; reach for <code>UNION</code> only when duplicates must actually go.</li>
+    <li>Branches must match in column count and order; names come from the first branch.</li>
+    <li>One <code>ORDER BY</code>, at the end, applying to the whole result.</li>
+    <li>Set operators treat two nulls as equal — the opposite of <code>=</code> — which makes <code>EXCEPT</code> an excellent table-diff.</li>
+    <li>De-duplicate with <code>ROW_NUMBER</code> and an explicit tie-breaker; check the count first.</li>
+    <li>After removing duplicates, add the <code>UNIQUE</code> constraint that should have stopped them.</li>
+    <li><code>DISTINCT</code> in a joined query usually means the join fans out. Fix the join.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q"><code>UNION</code> vs <code>UNION ALL</code>?</p>
+  <p class="a"><code>UNION</code> removes duplicates and so has to sort or hash the entire combined
+    result; <code>UNION ALL</code> just concatenates. It is a performance decision, not a style
+    one, and <code>ALL</code> should be the default because most branches cannot overlap anyway.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Delete duplicate rows keeping the newest.</p>
+  <p class="a"><code>ROW_NUMBER() OVER (PARTITION BY &lt;dup key&gt; ORDER BY updated_at DESC, id
+    DESC)</code> in a CTE, then delete where <code>rn &gt; 1</code>. The tie-breaker on
+    <code>id</code> makes it deterministic. Then add the unique constraint that should have
+    prevented it.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How would you find what differs between two tables?</p>
+  <p class="a"><code>EXCEPT</code> in both directions. It compares whole rows, treats nulls as
+    equal — so a null-to-null match does not show as a difference — and needs no join keys.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

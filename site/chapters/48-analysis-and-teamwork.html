@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>48 &middot; Analysis, autonomy and teamwork &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="48-analysis-and-teamwork">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 8 — The human requirements <span>&rsaquo;</span> Chapter 48</p>
+<h1>Analysis, autonomy and teamwork</h1>
+<p class="lede">How to turn “the report is wrong” into a specification, and how to ask for help without looking lost.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Eccellenti capacita di problem solving, proattivita e buon approccio al lavoro in team&rdquo;</em> &mdash; every one of those words is
+  about what you do when nobody has told you what to do. Which is most of the job.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="wrong">“The report is wrong”</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Somebody says the number is wrong. They do not know why, and they are not going to find out —
+    that is your part. But they <em>do</em> know what the right number is, and that is the most
+    valuable thing anyone will give you all week. Ask for it first.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 The five questions that turn a complaint into a specification</div>
+  <ol style="margin-bottom:0">
+    <li><strong>“What number did you expect, and where did you get it from?”</strong> Now you have
+      two figures and a source to reconcile against, instead of a feeling.</li>
+    <li><strong>“Show me one row that is wrong.”</strong> One concrete example collapses the search
+      space faster than any amount of reasoning about the query.</li>
+    <li><strong>“When was it last right?”</strong> Turns an open problem into a change to find.</li>
+    <li><strong>“Is it wrong for everyone, or just this filter?”</strong> Separates a data problem
+      from a query problem.</li>
+    <li><strong>“What decision does this number drive?”</strong> Tells you the tolerance. A figure
+      steering a €400k purchase deserves a different answer from a curiosity.</li>
+  </ol>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ And then reconcile, do not stare</div>
+  <p style="margin-bottom:0">
+    The technique is always the same: get both numbers in one query and find where they diverge.
+    Not by reading the SQL and hoping — by <strong>bisecting</strong>. Total by month; the month
+    that differs; total by customer within it; the customer that differs; then the rows. Five
+    queries, and you land on the exact row rather than a theory about it. That is the method, and
+    it works when the query is somebody else's and 300 lines long.
+  </p>
+</div>
+
+<pre><code>-- Bisection in practice: where exactly do the two sources disagree?
+SELECT month, a.total AS report_says, b.total AS source_says,
+       a.total - b.total AS diff
+FROM report_monthly a
+FULL OUTER JOIN source_monthly b USING (month)
+WHERE a.total IS DISTINCT FROM b.total          -- null-safe; see chapter 09
+ORDER BY ABS(a.total - b.total) DESC;
+-- Then repeat one level down inside the worst month. Five queries, not five hours.</code></pre>
+
+<h2 id="asking">Asking for help without looking lost</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ The two failure modes, and both are real</div>
+  <p style="margin-bottom:0">
+    <strong>Too early:</strong> asking before trying looks like you have not engaged, and it trains
+    people to expect it. <strong>Too late:</strong> three days silently stuck is far worse — it
+    costs the team the time <em>and</em> the trust, because the manager now discovers both the
+    problem and the delay at once. The window is roughly <strong>twenty to forty minutes of
+    genuinely no progress</strong>.
+  </p>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The four-line ask</div>
+  <pre style="margin-bottom:0"><code>1. What I am trying to do:  make the stock reconciliation match the ledger.
+2. What I have tried:       compared by month (matches) and by warehouse
+                            (WH-03 is out by 412 units, consistently, since March).
+3. Where I am stuck:        I cannot find a movement type that would explain a
+                            one-directional difference.
+4. What I am asking:        is there a transfer type that bypasses the movements
+                            table? Ten minutes of your time, or a pointer.</code></pre>
+</div>
+
+<p class="small muted">
+  This is worth more than the answer. It shows you engaged, it lets them help in one minute instead
+  of twenty, and it makes you the person people are willing to be interrupted by — which is a real
+  professional asset.
+</p>
+
+<h2 id="autonomy">What “proattività” actually means here</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Not “do more work”. Notice and report.</div>
+  <p>
+    Italian adverts ask for <em>proattività</em> constantly and nobody defines it. In practice it
+    means three specific behaviours:
+  </p>
+  <ol style="margin-bottom:0">
+    <li><strong>Say when something is wrong before you are asked.</strong> “While fixing 412 I
+      noticed the same fan-out in the invoice report — it is probably also over-counting. Shall I
+      raise a ticket?” Noticing and <em>reporting</em>, not silently fixing.</li>
+    <li><strong>Bring the option, not just the problem.</strong> “This will be slow at ten million
+      rows. We could index it now, or accept it and revisit in six months — I would do the index,
+      it is twenty minutes.”</li>
+    <li><strong>Close the loop.</strong> Tell the person who reported it that it is fixed, and what
+      it was. Almost nobody does this, and everybody notices.</li>
+  </ol>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Autonomy is not going quiet for a week</div>
+  <p style="margin-bottom:0">
+    A junior who disappears for five days and returns with a large refactor nobody asked for has
+    not demonstrated autonomy — they have demonstrated risk. Autonomy is
+    <em>making the small decisions yourself and surfacing the ones that are not yours</em>. Adding
+    an index: yours. Changing a column type: not yours. Deciding which of two duplicate customers
+    survives: definitely not yours.
+  </p>
+</div>
+
+<h2 id="disagreeing">Disagreeing, and being right, without cost</h2>
+
+<div class="box good">
+  <div class="box-title">✔ The structure</div>
+  <p style="margin-bottom:0">
+    <strong>Agree with the goal. Name the specific risk. Offer the alternative. Accept the
+    decision.</strong> — <em>“I agree we need this out on Thursday. My worry is that the migration
+    locks the orders table, and on the largest customer that could be several minutes at 09:00. We
+    could run it at 21:00, or do it in batches so it never holds a long lock. If Thursday morning
+    is fixed, I will do the batched version — it takes a day longer to write.”</em>
+  </p>
+</div>
+
+<div class="box note">
+  <div class="box-title">And when you are overruled</div>
+  <p style="margin-bottom:0">
+    Say it once, clearly, put it in writing in the ticket, and then execute properly. Continuing to
+    argue after a decision is what gets people labelled difficult — and the written note means that
+    if it goes wrong you are the person who flagged it, without ever having to say “I told you so”
+    out loud.
+  </p>
+</div>
+
+<h2 id="talking">Talking to people who do not write SQL</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Do not say</th><th>Say</th></tr></thead>
+<tbody>
+<tr><td>“The query does a table scan”</td><td>“It reads every order to answer, instead of jumping to the ones you asked for”</td></tr>
+<tr><td>“There's a fan-out in the join”</td><td>“Orders with several payments are being counted once per payment”</td></tr>
+<tr><td>“It's a cardinality estimate problem”</td><td>“The database expected a few hundred rows and got half a million, so it chose a slow strategy”</td></tr>
+<tr><td>“We need to denormalise”</td><td>“We can calculate this overnight instead of each time — the report opens instantly and is up to this morning”</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Lead with the consequence</div>
+  <p style="margin-bottom:0">
+    A non-technical stakeholder needs three things and in this order: <strong>what it means for
+    them</strong>, <strong>what you are going to do</strong>, <strong>when</strong>. The mechanism
+    is optional and goes last. Getting that order right is most of what people mean by “good
+    communication skills”, and it is entirely learnable.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>“What number did you expect, and where from?” is the first question, always.</li>
+    <li>One concrete wrong row collapses the search faster than any reasoning about the query.</li>
+    <li>“When was it last right?” turns an open problem into a change to find.</li>
+    <li>Reconcile by bisection — month, then customer, then row. Five queries, not five hours.</li>
+    <li>Ask for help after twenty to forty minutes of no progress, not three days.</li>
+    <li>Ask in four lines: goal, tried, stuck, request.</li>
+    <li>Proattività means noticing and reporting, bringing an option, and closing the loop.</li>
+    <li>Autonomy is making small decisions and surfacing the ones that are not yours.</li>
+    <li>Disagree once, in writing, then execute the decision properly.</li>
+    <li>To a stakeholder: consequence, action, timing. Mechanism last, if at all.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">A user says a report is wrong. What do you do?</p>
+  <p class="a">Ask what number they expected and where they got it, and ask for one specific row
+    that is wrong — those two answers turn a complaint into something testable. Then find when it
+    was last right, and reconcile by bisection: totals by month, then within the worst month by
+    customer, then the rows. That lands on the cause in five queries even when the report is
+    somebody else's and three hundred lines long.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Tell me about a time you disagreed with a decision.</p>
+  <p class="a">Structure it: what the goal was, what specific risk you saw, what alternative you
+    offered, what was decided, and what you did next. The last part is the one being assessed — the
+    good answer ends with executing the decision properly and noting the concern in writing, not
+    with being proved right.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How long do you spend stuck before asking for help?</p>
+  <p class="a">Twenty to forty minutes of genuinely no progress. And I ask in a structured way —
+    what I am trying to do, what I have already tried and ruled out, where exactly I am stuck, and
+    what I am asking for — so it costs the other person a minute rather than twenty.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

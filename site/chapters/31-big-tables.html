@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>31 &middot; Big tables: partitioning, archiving, sharding &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="31-big-tables">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 4 — Fast at scale <span>&rsaquo;</span> Chapter 31</p>
+<h1>Big tables: partitioning, archiving, sharding</h1>
+<p class="lede">Partition elimination, the sliding window, and the honest answer about when you need any of it.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">Adverts say “grandi moli di dati” without saying what to do about it. This is what to do about it.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="first">Start by not needing any of this</h2>
+
+<div class="box good">
+  <div class="box-title">✔ The answer that shows judgement</div>
+  <p style="margin-bottom:0">
+    Before partitioning: <strong>is the working set the problem, or the table?</strong> A billion-row
+    table where every query filters to last month is not a big-table problem — it is an indexing
+    problem, and the right index makes the other 999 million rows irrelevant. Partitioning is for
+    when you need to <em>manage</em> the data in chunks: load it, archive it, drop it, or compress
+    it by age. Reaching for it as a performance fix is the classic mistake, and saying so is worth
+    more than reciting the syntax.
+  </p>
+</div>
+
+<h2 id="partitioning">Partitioning</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    One enormous filing cabinet becomes twelve smaller ones, one per month. It is still one filing
+    system and you look things up the same way — but when somebody asks for March you open one
+    drawer, and when the year ends you throw away a whole drawer instead of picking out sheets one
+    at a time.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Scheme</th><th>Splits by</th><th>Good for</th></tr></thead>
+<tbody>
+<tr><td><strong>Range</strong></td><td>A continuous key, usually a date</td><td>Time-series data. The default choice by a wide margin</td></tr>
+<tr><td><strong>List</strong></td><td>An explicit set of values</td><td>Region, tenant, country</td></tr>
+<tr><td><strong>Hash</strong></td><td>A hash of the key</td><td>Spreading write load evenly with no natural range</td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>-- PostgreSQL 10+ declarative partitioning
+CREATE TABLE orders (
+  id BIGINT, placed_at TIMESTAMPTZ NOT NULL, customer_id INT, total_cents BIGINT
+) PARTITION BY RANGE (placed_at);
+
+CREATE TABLE orders_2026_01 PARTITION OF orders
+  FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+
+-- The partition key MUST be part of the primary key. That is not a quirk: the
+-- engine cannot enforce global uniqueness across partitions without checking all
+-- of them, which would defeat the point.
+</code></pre>
+
+<h3>Partition elimination is the payoff — and it is conditional</h3>
+
+<pre><code>-- Reads ONE partition:
+SELECT * FROM orders WHERE placed_at &gt;= '2026-03-01' AND placed_at &lt; '2026-04-01';
+
+-- Reads ALL of them: the key is wrapped, so the planner cannot prove which
+-- partitions can be skipped. Exactly the sargability rule, one level up.
+SELECT * FROM orders WHERE YEAR(placed_at) = 2026;
+
+-- Also reads all of them: no predicate on the partition key at all.
+SELECT * FROM orders WHERE customer_id = 42;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — partitioning can make queries slower</div>
+  <p style="margin-bottom:0">
+    A query that does not filter on the partition key now touches <em>n</em> indexes instead of
+    one, and merges <em>n</em> sorted streams instead of reading one. So partitioning by month and
+    then querying by <code>customer_id</code> is worse than not partitioning at all. Choose the
+    partition key from how the data is <strong>queried and managed</strong>, and accept that one
+    key cannot serve every access pattern.
+  </p>
+</div>
+
+<h2 id="sliding">The sliding window</h2>
+
+<p>
+  The real reason range partitioning earns its complexity: retention becomes metadata, not work.
+</p>
+
+<pre><code>-- Retire January 2025 without a DELETE. This is a catalogue operation:
+-- no rows are read, no log is generated, it completes in milliseconds.
+ALTER TABLE orders DETACH PARTITION orders_2025_01;      -- PostgreSQL
+DROP TABLE orders_2025_01;        -- or keep it, compressed, on cheaper storage
+
+-- SQL Server: SWITCH the partition into a staging table, then truncate that.
+ALTER TABLE orders SWITCH PARTITION 13 TO orders_archive;</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 Compare that with the alternative</div>
+  <p style="margin-bottom:0">
+    <code>DELETE FROM orders WHERE placed_at &lt; '2025-02-01'</code> on 40 million rows: hours of
+    work, a transaction log the size of the data, lock escalation, index fragmentation, and bloat
+    to vacuum afterwards. The partition switch is a metadata update. <strong>That</strong> is the
+    argument for partitioning, and it is an argument about operations, not about SELECT speed.
+  </p>
+</div>
+
+<h2 id="archiving">Archiving without partitioning</h2>
+
+<p>Most systems that think they need partitioning need this instead:</p>
+
+<pre><code>-- Batched, resumable, and it never holds a long transaction or escalates locks.
+-- Run it in a loop until it affects zero rows.
+WITH doomed AS (
+  SELECT id FROM orders
+  WHERE placed_at &lt; '2025-01-01' AND status IN ('delivered','cancelled')
+  ORDER BY id
+  LIMIT 5000
+)
+DELETE FROM orders WHERE id IN (SELECT id FROM doomed);</code></pre>
+
+<div class="box note">
+  <div class="box-title">Three details that make it safe</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Bounded batch size</strong>, so each transaction stays under the lock escalation
+      threshold and the log can truncate between batches.</li>
+    <li><strong>Ordered by the key</strong>, so each batch is a contiguous index range rather than
+      a scan of the whole table looking for survivors.</li>
+    <li><strong>A pause between batches</strong> in a busy system, so other work gets through.
+      Ten minutes of polite deletion beats one minute of blocking everything.</li>
+  </ol>
+</div>
+
+<h2 id="sharding">Sharding, and what it really costs</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Partitioning splits a table. Sharding splits a database.</div>
+  <p>
+    Sharding puts different rows on different <em>servers</em>, which is the only way past one
+    machine's write capacity. What you give up is significant and permanent:
+  </p>
+  <ul style="margin-bottom:0">
+    <li><strong>No cross-shard transactions.</strong> ACID stops at the shard boundary.</li>
+    <li><strong>No cross-shard joins or foreign keys.</strong> Both move into application code.</li>
+    <li><strong>Rebalancing is a project</strong>, not a maintenance task — which is why consistent
+      hashing and "many more logical shards than physical servers" exist.</li>
+    <li><strong>Every query needs the shard key</strong>, or it fans out to all of them.</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The honest ladder, in order</div>
+  <ol style="margin-bottom:0">
+    <li>Index properly. Most "too big" tables are an indexing problem.</li>
+    <li>Archive what nobody queries.</li>
+    <li>Read replicas, if the load is reads.</li>
+    <li>Partition, for manageability and retention.</li>
+    <li>A bigger machine — genuinely, this buys years and costs less than the alternatives.</li>
+    <li>Shard, when writes exceed one machine and you have exhausted the rest.</li>
+  </ol>
+  <p style="margin-bottom:0">
+    Being able to give that ladder — and say “most systems never get past step 4” — is a much
+    better answer than describing a sharding scheme.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Most big-table problems are indexing problems. Check that first.</li>
+    <li>Partitioning is for manageability — loading, archiving, dropping by age — more than for speed.</li>
+    <li>Partition elimination only happens when the predicate is on the raw partition key.</li>
+    <li>A query that does not filter on the partition key is <em>slower</em> when partitioned.</li>
+    <li>The partition key must be in the primary key, because uniqueness cannot be enforced across partitions cheaply.</li>
+    <li>Detaching a partition is a metadata operation; deleting the same rows is hours of logged work.</li>
+    <li>Batched, ordered, bounded deletes are the archiving strategy for everyone who is not partitioned.</li>
+    <li>Sharding costs cross-shard transactions, joins and foreign keys, permanently.</li>
+    <li>Index, archive, replicate, partition, bigger machine, and only then shard.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">When would you partition a table?</p>
+  <p class="a">When I need to manage the data in chunks — a retention policy where dropping a
+    month should be a metadata operation, or a load that replaces one slice at a time. Not as a
+    first response to slowness: if queries filter to a small subset, an index does that better, and
+    partitioning actively hurts queries that do not filter on the partition key.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How would you delete 40 million old rows from a live table?</p>
+  <p class="a">In batches of a few thousand, ordered by the primary key, each in its own
+    transaction, looping until nothing is affected — so locks never escalate and the log can
+    truncate between batches. If the table were range-partitioned by date I would detach and drop
+    the partition instead, which is a metadata operation.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Partitioning or sharding?</p>
+  <p class="a">Partitioning splits a table within one database and keeps transactions, joins and
+    constraints. Sharding splits across servers and gives all three up, so it is the last step, not
+    an early one. I would index, archive, add read replicas, partition and buy a bigger machine
+    first — most systems never need to go further.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

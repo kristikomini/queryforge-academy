@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>22 &middot; Isolation levels and the anomalies they allow &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="22-isolation-levels">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 3 — Changing data <span>&rsaquo;</span> Chapter 22</p>
+<h1>Isolation levels and the anomalies they allow</h1>
+<p class="lede">Dirty read, non-repeatable read, phantom, lost update — each mapped to the level that still permits it.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Esperienza su ambienti di produzione&rdquo;</em> &mdash; and this is the chapter that
+  explains the bugs that only ever happen under load.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="anomalies">The four anomalies</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Two people writing in the same notebook at the same time. How much are they allowed to see of
+    each other's half-finished sentences? Letting them see everything is fast and produces
+    nonsense. Letting them see nothing until the other has finished is safe and slow. The isolation
+    level is where you set that dial.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Anomaly</th><th>What happens</th><th>Concrete example</th></tr></thead>
+<tbody>
+<tr><td><strong>Dirty read</strong></td><td>You read data another transaction has not committed</td><td>You see a €5 000 transfer that is then rolled back</td></tr>
+<tr><td><strong>Non-repeatable read</strong></td><td>You read the same row twice and it changed</td><td>A stock check says 5, then 3, inside one transaction</td></tr>
+<tr><td><strong>Phantom read</strong></td><td>You run the same query twice and new <em>rows</em> appear</td><td>“Orders today” returns 40, then 41</td></tr>
+<tr><td><strong>Lost update</strong></td><td>Two read-modify-writes; one overwrites the other</td><td>Two agents both set the discount, one silently wins</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="levels">The levels, and what each still permits</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Level</th><th>Dirty</th><th>Non-repeatable</th><th>Phantom</th><th>Cost</th></tr></thead>
+<tbody>
+<tr><td><code>READ UNCOMMITTED</code></td><td>✅ allowed</td><td>✅</td><td>✅</td><td>Lowest</td></tr>
+<tr><td><code>READ COMMITTED</code></td><td>❌ prevented</td><td>✅</td><td>✅</td><td>Low — <strong>the default nearly everywhere</strong></td></tr>
+<tr><td><code>REPEATABLE READ</code></td><td>❌</td><td>❌</td><td>✅ (in theory)</td><td>Medium</td></tr>
+<tr><td><code>SERIALIZABLE</code></td><td>❌</td><td>❌</td><td>❌</td><td>Highest</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 The standard describes anomalies, not implementations</div>
+  <p style="margin-bottom:0">
+    Each engine implements these differently and some of them exceed the requirement.
+    <strong>PostgreSQL's <code>REPEATABLE READ</code> is a genuine snapshot and prevents
+    phantoms</strong> too, even though the standard allows them. <strong>InnoDB's
+    <code>REPEATABLE READ</code></strong> — its default — also prevents phantoms for plain reads,
+    using next-key locks, but not for locking reads without care. <strong>Oracle</strong> offers
+    only <code>READ COMMITTED</code> and <code>SERIALIZABLE</code>; asking for the other two gets
+    you one of those. Naming <em>one</em> such divergence is what marks the answer as experience
+    rather than a memorised table.
+  </p>
+</div>
+
+<h2 id="snapshot">SQL Server is the interesting case</h2>
+
+<p>
+  SQL Server historically used <strong>pessimistic locking</strong>: at <code>READ COMMITTED</code>
+  a reader takes shared locks and therefore <em>blocks on writers</em>. That is why so much legacy
+  T-SQL is peppered with <code>WITH (NOLOCK)</code> — it is people working round reader/writer
+  blocking. Two settings change the model entirely:
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Setting</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>READ_COMMITTED_SNAPSHOT ON</code></td><td>Database-level. <code>READ COMMITTED</code> now uses row versions, so <strong>readers never block writers</strong> — PostgreSQL-like behaviour, and usually the right change</td></tr>
+<tr><td><code>ALLOW_SNAPSHOT_ISOLATION ON</code></td><td>Enables the explicit <code>SNAPSHOT</code> level: a consistent view for the whole transaction</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — <code>WITH (NOLOCK)</code> is not “a bit faster”</div>
+  <p>
+    <code>NOLOCK</code> is <code>READ UNCOMMITTED</code> under another name, and it does not merely
+    risk reading uncommitted rows. It can also:
+  </p>
+  <ul style="margin-bottom:0">
+    <li><strong>Miss committed rows entirely</strong>, or <strong>return the same row twice</strong>,
+      if a page split moves rows while your scan is passing.</li>
+    <li>Fail with error 601 (“could not continue scan with NOLOCK due to data movement”).</li>
+  </ul>
+  <p style="margin-bottom:0">
+    So a financial report with <code>NOLOCK</code> can produce a number that was never true at any
+    instant. The correct fix for reader/writer blocking is
+    <code>READ_COMMITTED_SNAPSHOT</code>, not a hint on nine hundred queries. Being able to say
+    this precisely is one of the strongest single answers available in a SQL Server interview.
+  </p>
+</div>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 260" role="img" aria-labelledby="d22t d22d">
+    <title id="d22t">Lost update: two read-modify-write cycles interleaving</title>
+    <desc id="d22d">Session A reads a value of 10, session B reads the same 10, A writes 15, B writes 12 — and A's change is silently gone.</desc>
+
+    <text class="d-t-c" x="150" y="26" text-anchor="middle">SESSION A</text>
+    <text class="d-t-c" x="560" y="26" text-anchor="middle">SESSION B</text>
+    <line class="d-line" x1="150" y1="36" x2="150" y2="240"/>
+    <line class="d-line" x1="560" y1="36" x2="560" y2="240"/>
+
+    <rect class="d-box-a" x="60" y="50" width="180" height="34" rx="7"/>
+    <text class="d-t-m" x="150" y="72" text-anchor="middle">SELECT qty → 10</text>
+
+    <rect class="d-box-a" x="470" y="92" width="180" height="34" rx="7"/>
+    <text class="d-t-m" x="560" y="114" text-anchor="middle">SELECT qty → 10</text>
+
+    <rect class="d-box-g" x="60" y="134" width="180" height="34" rx="7"/>
+    <text class="d-t-m" x="150" y="156" text-anchor="middle">UPDATE qty = 10+5</text>
+
+    <rect class="d-box-b" x="470" y="176" width="180" height="34" rx="7"/>
+    <text class="d-t-m" x="560" y="198" text-anchor="middle">UPDATE qty = 10+2</text>
+
+    <text class="d-t-b" x="330" y="232" text-anchor="middle">final value 12 — A's +5 is gone, with no error anywhere</text>
+    <path class="d-line-b" d="M240 151 H430 V193 H470" marker-end="url(#a22)"/>
+    <defs>
+      <marker id="a22" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" class="d-fill"/>
+      </marker>
+    </defs>
+  </svg>
+  <figcaption>Nothing here is a dirty read. Both sessions behaved correctly at <code>READ COMMITTED</code>.</figcaption>
+</figure>
+
+<div class="box pro">
+  <div class="box-title">🎓 Lost update is the one that actually bites</div>
+  <p style="margin-bottom:0">
+    It is not in the standard's table, it happens at the <em>default</em> isolation level in every
+    engine, and it produces no error. The three fixes, in order of preference:
+  </p>
+  <ol style="margin-bottom:0">
+    <li><strong>Make the update atomic:</strong> <code>SET qty = qty + 5</code> rather than reading
+      then writing. Free, and it eliminates the window entirely.</li>
+    <li><strong>Optimistic concurrency:</strong> a <code>version</code> column and
+      <code>WHERE version = ?</code>; zero rows affected means you lost, so retry.</li>
+    <li><strong>Pessimistic locking:</strong> <code>SELECT … FOR UPDATE</code>, holding a lock from
+      read to write. Correct, and it costs concurrency.</li>
+  </ol>
+</div>
+
+<h2 id="serializable">What SERIALIZABLE really costs</h2>
+
+<p>
+  PostgreSQL implements it as <strong>Serializable Snapshot Isolation</strong>: transactions run
+  optimistically, and the engine aborts one with a <code>serialization_failure</code> (SQLSTATE
+  40001) if the interleaving could not have happened serially. That means
+  <strong>your application must be prepared to retry</strong> — a serialisable transaction is not a
+  transaction that always succeeds, it is one that always succeeds <em>or tells you it did not</em>.
+  SQL Server implements it with range locks instead, so the cost appears as blocking and deadlocks
+  rather than as aborts.
+</p>
+
+<div class="tryit">
+  <pre><code>-- Two psql windows against the same PostgreSQL database:
+-- window 1
+BEGIN; SELECT on_hand FROM stock WHERE product_id = 1;    -- 19
+-- window 2
+BEGIN; UPDATE stock SET on_hand = 5 WHERE product_id = 1; COMMIT;
+-- window 1 again
+SELECT on_hand FROM stock WHERE product_id = 1;           -- 5 at READ COMMITTED
+COMMIT;
+-- Now repeat with BEGIN ISOLATION LEVEL REPEATABLE READ. It still says 19.</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Four anomalies: dirty read, non-repeatable read, phantom, lost update.</li>
+    <li><code>READ COMMITTED</code> is the default nearly everywhere and permits everything except dirty reads.</li>
+    <li>The standard names anomalies, not implementations. PostgreSQL's <code>REPEATABLE READ</code> also prevents phantoms; Oracle offers only two levels.</li>
+    <li>SQL Server readers block writers until <code>READ_COMMITTED_SNAPSHOT</code> is on. That setting, not <code>NOLOCK</code>, is the fix.</li>
+    <li><code>NOLOCK</code> can miss committed rows and return duplicates during page splits — not just read uncommitted data.</li>
+    <li>Lost update is not in the anomaly table, happens at the default level, and raises no error.</li>
+    <li>Prefer an atomic update (<code>SET x = x + n</code>) over read-modify-write; then optimistic concurrency; then locking.</li>
+    <li>PostgreSQL's <code>SERIALIZABLE</code> aborts transactions with SQLSTATE 40001. Using it means writing a retry loop.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">What isolation levels are there, and what does each prevent?</p>
+  <p class="a">Read uncommitted (prevents nothing), read committed (no dirty reads — the usual
+    default), repeatable read (no non-repeatable reads), serializable (no phantoms either). Then add
+    that engines differ: PostgreSQL's repeatable read is a full snapshot and prevents phantoms,
+    Oracle only implements two of the four.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Is <code>WITH (NOLOCK)</code> a good idea?</p>
+  <p class="a">Rarely. It is read uncommitted, so it can read rows that get rolled back — and worse,
+    during page splits it can skip committed rows or return the same row twice, producing a total
+    that was never true. If the problem is readers blocking writers, the fix is
+    <code>READ_COMMITTED_SNAPSHOT</code> at database level.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Two users edit the same record. How do you stop one overwriting the other?</p>
+  <p class="a">If it is a simple increment, make the write atomic: <code>SET qty = qty + n</code>.
+    Otherwise optimistic concurrency — a version column, <code>WHERE version = ?</code>, and treat
+    zero rows affected as a conflict to report or retry. Pessimistic locking works but holds a lock
+    across the user's thinking time, which is usually unacceptable.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

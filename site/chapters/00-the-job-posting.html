@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>00 · The job posting, decoded — QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00-the-job-posting">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Start here <span>›</span> Chapter 00</p>
+<h1>The job posting, decoded</h1>
+<p class="lede">
+  This course was not written from a syllabus. It was written backwards from five real Italian
+  <em>SQL / Database Developer</em> postings, so that every chapter can point at the line it
+  answers — and so that the chapters that answer no line have to justify themselves.
+</p>
+
+<div class="box note">
+  <div class="box-title">Where these came from</div>
+  <p style="margin-bottom:0">
+    Five postings collected in September 2026 from Indeed Italia, Glassdoor, Experis and Jooble,
+    for roles titled <em>SQL Developer</em>, <em>Database Developer</em>, <em>Programmatore SQL
+    Server</em> and <em>Sviluppatore PL/SQL junior</em>. The exact wording is quoted below. See
+    <code>docs/ADVERTS.md</code> in the repository for the full text of each.
+  </p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="the-lines">The lines, and what each one really means</h2>
+
+<p>
+  Job adverts are written by someone who is not the person you will work for, usually by pasting
+  three older adverts together. Read literally they are intimidating. Read properly they are a
+  short list of things a team is tired of not having.
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th style="width:34%">The line</th><th>What it actually means</th><th style="width:78px">Chapter</th></tr></thead>
+<tbody>
+<tr>
+  <td><em>Ottima conoscenza del linguaggio SQL</em></td>
+  <td>You can write a join, a group-by and a window function without looking them up, and you know
+      what <code>NULL</code> does to each of them. This is the whole of Part 2.</td>
+  <td><a href="08-joins.html">08</a>, <a href="13-window-functions.html">13</a></td>
+</tr>
+<tr>
+  <td><em>Solida conoscenza di MS SQL Server (versione ≥ 2008)</em></td>
+  <td>You have used one engine deeply enough to know it has a buffer pool, a transaction log and a
+      query optimiser, and you can name the T-SQL spellings.</td>
+  <td><a href="01-engines-and-storage.html">01</a>, <a href="44-dialects.html">44</a></td>
+</tr>
+<tr>
+  <td><em>Ottima conoscenza del linguaggio MS T-SQL</em></td>
+  <td>Procedural SQL: variables, <code>TRY…CATCH</code>, temp tables, and why a cursor is usually
+      the wrong answer.</td>
+  <td><a href="45-procedural-sql.html">45</a></td>
+</tr>
+<tr>
+  <td><em>Esperienza in sviluppo PL/SQL a livello junior</em></td>
+  <td>The same skills spelled the Oracle way. Worth an afternoon; the concepts transfer entirely.</td>
+  <td><a href="45-procedural-sql.html">45</a></td>
+</tr>
+<tr>
+  <td><em>Progettazione e modellazione di basi dati relazionali</em></td>
+  <td>You can take a paragraph of business description and produce tables, keys and constraints
+      that make the wrong state unrepresentable.</td>
+  <td><a href="02-relational-model.html">02</a>–<a href="05-normalisation.html">05</a></td>
+</tr>
+<tr>
+  <td><em>Ottimizzazione e tuning delle query</em></td>
+  <td>The single most common reason this role exists. Something is slow, and nobody on the team
+      can read a plan. This is the whole of Part 4.</td>
+  <td><a href="25-how-an-index-works.html">25</a>–<a href="29-slow-query-patterns.html">29</a></td>
+</tr>
+<tr>
+  <td><em>Sviluppo di stored procedure, viste, funzioni e trigger</em></td>
+  <td>The codebase has business logic inside the database. You will be maintaining it whether or
+      not you think that was a good idea.</td>
+  <td><a href="33-views-procs-functions-triggers.html">33</a></td>
+</tr>
+<tr>
+  <td><em>Esperienza nello sviluppo ETL con SSIS</em></td>
+  <td>Data arrives from somewhere else in a shape nobody controls, nightly, and must land without
+      duplicating itself when the job is re-run.</td>
+  <td><a href="20-upsert-and-idempotency.html">20</a>, <a href="40-etl-and-warehouses.html">40</a></td>
+</tr>
+<tr>
+  <td><em>Reporting con SSRS e Power BI</em></td>
+  <td>Somebody in finance needs a number. Your job is the view underneath the report, and making
+      it fast enough that the report opens.</td>
+  <td><a href="16-case-and-pivot.html">16</a>, <a href="39-oltp-vs-olap.html">39</a></td>
+</tr>
+<tr>
+  <td><em>Gestione di backup, restore e manutenzione</em></td>
+  <td>You are partly the DBA. Nobody will say so at the interview.</td>
+  <td><a href="41-backup-restore-ha.html">41</a></td>
+</tr>
+<tr>
+  <td><em>Almeno 3 anni su ambienti di produzione</em></td>
+  <td>You have been on the wrong end of a deadlock, a full disk, or a migration that locked a
+      table at 09:00. Most of this is learnable without the scar.</td>
+  <td><a href="21-transactions.html">21</a>–<a href="23-locks-and-deadlocks.html">23</a>, <a href="42-production-diagnosis.html">42</a></td>
+</tr>
+<tr>
+  <td><em>Conoscenza dei principi di sicurezza dei dati e GDPR</em></td>
+  <td>You will not write an injectable query, and you know why a table of Italian customers is a
+      legal object as well as a technical one.</td>
+  <td><a href="34-dynamic-sql-and-injection.html">34</a>, <a href="35-security-and-gdpr.html">35</a></td>
+</tr>
+<tr>
+  <td><em>Eccellenti capacità di problem solving, proattività</em></td>
+  <td>Nobody will hand you a specification. You will be handed “the report is wrong”.</td>
+  <td><a href="48-analysis-and-teamwork.html">48</a></td>
+</tr>
+<tr>
+  <td><em>Metodologia Agile/Scrum</em></td>
+  <td>There is a stand-up. You will be asked what you did yesterday. Say it in two sentences.</td>
+  <td><a href="47-agile-and-rhythm.html">47</a></td>
+</tr>
+<tr>
+  <td><em>Buona conoscenza dell'inglese tecnico</em></td>
+  <td>You can read documentation and a Stack Overflow answer. Almost nobody is tested on spoken
+      English for these roles in Italy.</td>
+  <td>—</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="what-they-mean">The three sentences that are really one sentence</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Imagine a shop with a very big cupboard. Everything the shop knows lives in that cupboard: who
+    ordered what, how much things cost, which parcel went out on Tuesday. The advert is the shop
+    saying three things. <em>Find things in the cupboard quickly.</em> <em>Put things in the
+    cupboard without breaking what is already there.</em> <em>Tell us when the cupboard is about
+    to fall over.</em> Everything else in this course is one of those three.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p>
+    Strip the buzzwords and every posting reduces to three responsibilities:
+  </p>
+  <ol style="margin-bottom:0">
+    <li><strong>Read paths.</strong> Retrieve correct data at acceptable latency — which is query
+      formulation (Part 2), physical design (Part 4) and knowing what the optimiser will do with
+      both.</li>
+    <li><strong>Write paths.</strong> Change data without violating an invariant and without two
+      concurrent sessions producing a state neither intended — constraints (Part 1), transactions
+      and isolation (Part 3).</li>
+    <li><strong>Operability.</strong> The system tells you when it is unhealthy, and can be
+      restored when it is not — backup, monitoring and safe schema change (Parts 5 and 6).</li>
+  </ol>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    The most common failure in a junior SQL interview is not a missing feature — it is
+    <strong>answering the syntax question and stopping there</strong>. Asked “what is the
+    difference between <code>WHERE</code> and <code>HAVING</code>?”, the weak answer is “HAVING
+    filters groups”. The strong answer adds <em>why</em>: <code>WHERE</code> runs before grouping
+    so it can use an index and reduces the rows the aggregate has to touch; <code>HAVING</code>
+    runs after, on rows that already cost you the work. Same fact, and one of them tells the
+    interviewer you understand the machine.
+  </p>
+</div>
+
+<h2 id="dialect">Which engine should you learn?</h2>
+
+<p>
+  The postings name four, and Italian shops in practice run three of them:
+  <strong>Microsoft SQL Server</strong> (dominant in gestionali and manufacturing ERP),
+  <strong>Oracle</strong> (banks, insurance, large public-sector), and
+  <strong>MySQL/MariaDB</strong> (everything with a web front end).
+  <strong>PostgreSQL</strong> is growing fast and is what new projects start on.
+</p>
+
+<div class="box note">
+  <div class="box-title">The pragmatic answer</div>
+  <p style="margin-bottom:0">
+    Learn the <strong>standard</strong> deeply and one <strong>dialect</strong> fluently. About
+    85% of what you write is portable; the differences are a lookup table you internalise in a
+    week (<a href="44-dialects.html">chapter 44</a> is that table). This course writes standard
+    SQL by default and flags dialect-specific spellings inline like this:
+  </p>
+</div>
+
+<pre><code>-- Portable: works everywhere
+SELECT customer_id, SUM(total_cents) AS spend
+FROM orders
+WHERE placed_at &gt;= DATE '2026-01-01'
+GROUP BY customer_id;
+
+-- Top-N, and the four spellings you will meet
+SELECT ... FETCH FIRST 10 ROWS ONLY;   -- standard, Oracle 12c+, PostgreSQL, DB2
+SELECT ... LIMIT 10;                   -- PostgreSQL, MySQL, MariaDB, SQLite
+SELECT TOP (10) ...;                   -- SQL Server
+WHERE ROWNUM &lt;= 10;                    -- Oracle, legacy, and NOT the same thing</code></pre>
+
+<div class="tryit">
+  <p>
+    Open the <a href="../playground.html">playground</a> — a real SQL engine, in your browser, with
+    the reference order-fulfilment database loaded. Run this and read the shape of the answer
+    before you read the rest of this course:
+  </p>
+  <pre><code>SELECT status, COUNT(*) AS n, SUM(total_cents) / 100.0 AS eur
+FROM orders
+GROUP BY status
+ORDER BY n DESC;</code></pre>
+</div>
+
+<h2 id="use">How to use this course</h2>
+
+<ol>
+  <li><strong>Read a chapter with the switch on “Both”.</strong> The 🧒 box builds the intuition;
+    the 🎓 box is the sentence you would say to an interviewer.</li>
+  <li><strong>Reread it with the switch on “🧒 Simple”</strong> and try to produce the professional
+    version out loud before you reveal it. That is the whole trick — the switch is not a display
+    preference, it is a retrieval exercise.</li>
+  <li><strong>Take the test at the bottom.</strong> Every question you answer enters a spaced
+    repetition schedule; <a href="../review.html">Review</a> brings them back on the day you are
+    about to forget them.</li>
+  <li><strong>Once a week, do the <a href="../viva.html">viva</a></strong> — no options, you say
+    the answer, then mark yourself against the model.</li>
+  <li><strong>Before a real interview, run the <a href="../simulate.html">simulator</a></strong>.
+    It has a clock, it does not let you go back, and it opens with <em>mi parli di lei</em>.</li>
+</ol>
+
+<div class="rules">
+  <ol>
+    <li>An advert is a list of things a team is tired of not having, not a specification of you.</li>
+    <li>Every posting reduces to three responsibilities: read paths, write paths, operability.</li>
+    <li>Answer the syntax question, then answer the <em>why</em>. The second half is the interview.</li>
+    <li>Learn the standard deeply and one dialect fluently; the differences are a week's lookup table.</li>
+    <li>“3 years in production” means “has been on the wrong end of a deadlock”. Most of that is learnable without the scar.</li>
+    <li>If a requirement is genuinely missing from your experience, say so in one sentence and say what you would do about it. Hedging is what loses the room, not the gap.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Which databases have you worked with?</p>
+  <p class="a">Name one you know deeply and be specific about what you did in it — “SQL Server:
+    I wrote the reporting views and tuned the two slowest ones from 40s to under a second”. Then
+    name the others honestly with the level attached: “I read PL/SQL comfortably, I have not
+    shipped a package.” A precise small answer beats a vague large one every time.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why do you want to work with databases rather than application code?</p>
+  <p class="a">Because the data outlives every application written on top of it, so the decisions
+    made here are the expensive ones. It is also the layer where correctness is checkable —
+    a constraint either holds or it does not.</p>
+</div>
+
+<div class="qa">
+  <p class="q">You have no commercial experience. Why should we take you?</p>
+  <p class="a">Point at something concrete you built and can be questioned on. This course ships a
+    reference database — a real order-fulfilment schema with a state machine, optimistic
+    concurrency and a transactional outbox — precisely so that you have an answer to this that is
+    not a sentence about being a fast learner.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

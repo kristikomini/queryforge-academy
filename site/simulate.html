@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mock interview — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="simulate">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Retrieval practice</p>
+<h1>Mock interview</h1>
+<p class="lede">
+  A clock, no going back, and the two questions asked in every interview and prepared for in almost
+  none: <em>mi parli di lei</em> and <em>ha domande per noi?</em>
+</p>
+
+<div id="setup">
+  <div class="panel">
+    <h3 style="margin-top:0">Pick a round</h3>
+    <div class="row" id="rounds"></div>
+    <p class="small muted" style="margin-top:14px;margin-bottom:0">
+      Questions come from the rules deck <em>and</em> from the question bank —
+      <strong>with the options stripped off</strong>. That turns a recognition item into a recall
+      item at no content cost, which is the entire trick of this page.
+    </p>
+  </div>
+
+  <div class="box note" style="margin-top:18px">
+    <div class="box-title">What this adds that the other pages do not</div>
+    <ul style="margin-bottom:0">
+      <li><strong>A clock</strong>, about ninety seconds a question. Interviews are timed and
+        thinking silently for four minutes is not an option you have.</li>
+      <li><strong>No going back.</strong> You cannot revise an answer once you have moved on,
+        because you cannot in the room either.</li>
+      <li><strong>The non-technical parts.</strong> Every round opens with <em>mi parli di
+        lei</em> and closes with <em>ha domande per noi?</em> — the two that decide more outcomes
+        than any query.</li>
+    </ul>
+  </div>
+
+  <div class="box trap" style="margin-top:0">
+    <div class="box-title">⚠ It produces a transcript, not a score</div>
+    <p style="margin-bottom:0">
+      Deliberately. A self-marked percentage is a number about your generosity. What you said, next
+      to what the course says, with the time you took, is not — and it is something you can reread
+      the evening before the real thing.
+    </p>
+  </div>
+</div>
+
+<div id="live" hidden>
+  <div class="row" style="align-items:center;margin-bottom:16px">
+    <span class="pill" id="progress">1 / 12</span>
+    <span class="q-clock" id="clock">1:30</span>
+    <span style="flex:1"></span>
+    <button class="btn quiet" id="stop">End the interview</button>
+  </div>
+  <div class="viva-card">
+    <div class="row" style="margin-bottom:8px"><span class="pill" id="kind">Technical</span></div>
+    <p class="viva-claim" id="question"></p>
+    <p class="small muted" id="hint"></p>
+    <textarea class="viva-ans" id="answer" placeholder="Say it out loud, then type what you said…"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="next">Next  ⌃⏎</button>
+      <button class="btn quiet" id="skip">Pass on this one</button>
+      <span style="flex:1"></span>
+      <span class="q-hint">You cannot come back to it.</span>
+    </div>
+  </div>
+</div>
+
+<div id="transcript" hidden></div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/rules.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+(function () {
+  if (!window.LF) return;
+  var LF = window.LF, RULES = window.RULES || [];
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function md(s) { return esc(s).replace(/`([^`]+)`/g, "<code>$1</code>"); }
+
+  var ROUNDS = [
+    { id: "screening", name: "Screening · 10 min", minutes: 10, technical: 6,
+      blurb: "A recruiter or a team lead, checking you are real." },
+    { id: "tecnico", name: "Primo colloquio tecnico · 20 min", minutes: 20, technical: 12,
+      blurb: "The person you would work for." },
+    { id: "giornata", name: "Giornata intera · 35 min", minutes: 35, technical: 20,
+      blurb: "Deeper, and it will find the edges of what you know." },
+  ];
+
+  /* The two that bracket every interview. They are not technical and they are
+     not optional — they decide more outcomes than any query does. */
+  var OPENER = {
+    kind: "Apertura",
+    q: "Mi parli di lei.",
+    hint: "Ninety seconds, three parts: where you are now, what you can do — with ONE concrete example rather than a list — and why this company specifically. It should hand them three follow-up questions you can answer.",
+    model: "Where you are now (one sentence) · what you can do, with a concrete artefact and a reason for a technical choice in it · why here, quoting something from their advert. See chapter 51.",
+  };
+  var CLOSER = {
+    kind: "Chiusura",
+    q: "Ha domande per noi?",
+    hint: "“No, I think you covered everything” is a bad answer. Name two real questions that are also signals.",
+    model: "How do schema changes reach production — are migrations versioned? · When was your last restore drill? · Who owns the database? · What does the first month look like? · What would make you say in six months that this hire went well? See chapter 51.",
+  };
+  var HR = [
+    { kind: "Non tecnica", q: "Mi racconti di una volta in cui non era d'accordo con una decisione tecnica.",
+      hint: "Goal, specific risk, alternative offered, what was decided, what you did next. The last part is what is being assessed.",
+      model: "Agree with the goal · name the specific risk · offer the alternative · accept the decision, note it in writing, execute properly. Chapter 48." },
+    { kind: "Non tecnica", q: "Come si comporta quando si accorge che non rispetterà una scadenza?",
+      hint: "Early, specific, with an option. The cost of a slip is mostly in how late it is communicated.",
+      model: "Say it as soon as you know: what will not happen, why (briefly and technically), the revised estimate, and an option they can choose — usually reduced scope on the original date. Chapter 47." },
+    { kind: "Non tecnica", q: "Quali sono le sue aspettative economiche?",
+      hint: "A range in RAL, a reason, a note that money is not the only variable, and the question handed back.",
+      model: "Give a range in RAL with a brief reason, mention training and growth, and ask their budgeted range. Refusing to answer reads as evasive in an Italian recruiter call. Chapter 51." },
+    { kind: "Non tecnica", q: "Non ha esperienza commerciale. Perché dovremmo sceglierla?",
+      hint: "Point at something concrete with defensible decisions in it, and be precise about what the gap actually is.",
+      model: "Name the artefact and go straight to a decision and its trade-off. Then bound the gap honestly — what you have not done, and how you would approach the first time. Chapter 49." },
+  ];
+
+  var round = null, queue = [], at = 0, answers = [], deadline = 0, tick = null, qStart = 0;
+
+  /* --------------------------------------------------------------- setup */
+  var rounds = document.getElementById("rounds");
+  ROUNDS.forEach(function (r, i) {
+    var b = el("button", i === 1 ? "btn" : "btn ghost", r.name);
+    b.title = r.blurb;
+    b.onclick = function () { start(r); };
+    rounds.appendChild(b);
+  });
+
+  function shuffle(a) {
+    a = a.slice();
+    for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; }
+    return a;
+  }
+
+  function build(r) {
+    var out = [OPENER];
+
+    /* Half from the rules deck, half from the question bank WITHOUT its options.
+       A recognition item becomes a recall item at no content cost. */
+    var fromRules = shuffle(RULES).slice(0, Math.ceil(r.technical / 2)).map(function (x) {
+      return { kind: "Tecnica", q: x.claim.split(".")[0] + " — perché?",
+               hint: "Explain the rule and why it is true, as you would to an interviewer.",
+               model: x.claim, ref: x.n + " · " + x.title, chapter: x.chapter };
+    });
+
+    var bank = window.LFQuiz ? window.LFQuiz.all() : [];
+    var fromBank = shuffle(bank).slice(0, Math.floor(r.technical / 2)).map(function (x) {
+      var ch = (window.CHAPTERS || []).filter(function (c) { return c.id === x.ch; })[0];
+      return { kind: "Tecnica", q: x.q.replace(/<[^>]+>/g, ""),
+               hint: "No options. Answer it out loud, in full sentences.",
+               model: (Array.isArray(x.c) ? x.c : [x.c]).map(function (i) { return x.a[i].replace(/<[^>]+>/g, ""); }).join("  ·  ")
+                      + "  —  " + x.why.replace(/<[^>]+>/g, ""),
+               ref: ch ? ch.n + " · " + ch.title : x.ch, chapter: x.ch };
+    });
+
+    out = out.concat(shuffle(fromRules.concat(fromBank)));
+    out.push(shuffle(HR)[0]);
+    out.push(CLOSER);
+    return out;
+  }
+
+  function start(r) {
+    round = r;
+    queue = build(r);
+    at = 0;
+    answers = [];
+    deadline = Date.now() + r.minutes * 60000;
+    document.getElementById("setup").hidden = true;
+    document.getElementById("transcript").hidden = true;
+    document.getElementById("live").hidden = false;
+    tick = setInterval(clock, 250);
+    show();
+  }
+
+  function clock() {
+    var left = Math.max(0, (deadline - Date.now()) / 1000);
+    var c = document.getElementById("clock");
+    c.textContent = Math.floor(left / 60) + ":" + (left % 60 < 10 ? "0" : "") + Math.floor(left % 60);
+    c.classList.toggle("low", left <= 90);
+    if (left <= 0) finish(true);
+  }
+
+  function show() {
+    var q = queue[at];
+    document.getElementById("progress").textContent = (at + 1) + " / " + queue.length;
+    document.getElementById("kind").textContent = q.kind;
+    document.getElementById("question").innerHTML = md(q.q);
+    document.getElementById("hint").textContent = q.hint || "";
+    var a = document.getElementById("answer");
+    a.value = "";
+    a.focus();
+    qStart = Date.now();
+  }
+
+  function advance(passed) {
+    var q = queue[at];
+    answers.push({
+      q: q, said: passed ? "" : document.getElementById("answer").value.trim(),
+      seconds: Math.round((Date.now() - qStart) / 1000), passed: !!passed,
+    });
+    at++;
+    if (at >= queue.length) finish(false);
+    else show();
+  }
+
+  document.getElementById("next").onclick = function () { advance(false); };
+  document.getElementById("skip").onclick = function () { advance(true); };
+  document.getElementById("stop").onclick = function () { finish(false); };
+  document.getElementById("answer").addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); advance(false); }
+  });
+
+  /* ---------------------------------------------------------- transcript */
+  function finish(timedOut) {
+    if (tick) { clearInterval(tick); tick = null; }
+    document.getElementById("live").hidden = true;
+    var host = document.getElementById("transcript");
+    host.hidden = false;
+    host.innerHTML = "";
+
+    var answered = answers.filter(function (a) { return a.said; }).length;
+    var passes = answers.filter(function (a) { return a.passed; }).length;
+    var total = answers.reduce(function (n, a) { return n + a.seconds; }, 0);
+
+    var head = el("div", "panel");
+    head.appendChild(el("h2", "", "Transcript"));
+    head.appendChild(el("p", "", round.name + " · " + answered + " answered · " + passes + " passed on · "
+      + Math.floor(total / 60) + "m " + (total % 60) + "s"
+      + (timedOut ? " · the clock ran out" : "")));
+    head.appendChild(el("p", "small muted",
+      "There is no score, on purpose. Read what you said next to what the course says. The gap is the study list — "
+      + "and the questions you passed on are the top of it."));
+    var row = el("div", "row");
+    var again = el("button", "btn ghost", "Run another round");
+    again.onclick = function () {
+      host.hidden = true;
+      document.getElementById("setup").hidden = false;
+    };
+    row.appendChild(again);
+    var copy = el("button", "btn quiet", "Copy transcript");
+    copy.onclick = function () {
+      var text = answers.map(function (a, i) {
+        return (i + 1) + ". " + a.q.q + "\n\nYou said:\n" + (a.said || "(passed)") +
+               "\n\nThe course says:\n" + a.q.model + "\n\n(" + a.seconds + "s)\n";
+      }).join("\n---\n\n");
+      var ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); copy.textContent = "Copied"; } catch (e) {}
+      ta.remove();
+    };
+    row.appendChild(copy);
+    head.appendChild(row);
+    host.appendChild(head);
+
+    answers.forEach(function (a, i) {
+      var wrap = el("div", "panel");
+      wrap.style.marginTop = "14px";
+
+      var line = el("div", "sim-line");
+      var who = el("div", "sim-who", "I");
+      line.appendChild(who);
+      var body = el("div", "sim-body");
+      body.appendChild(el("div", "nm", "Interviewer · " + a.q.kind));
+      var tx = el("div", "tx");
+      tx.innerHTML = md(a.q.q);
+      body.appendChild(tx);
+      line.appendChild(body);
+      wrap.appendChild(line);
+
+      var mine = el("div", "sim-line you");
+      mine.appendChild(el("div", "sim-who", "You"));
+      var mb = el("div", "sim-body");
+      mb.appendChild(el("div", "nm", "You"));
+      var mtx = el("div", "tx");
+      mtx.textContent = a.said || "— passed —";
+      if (!a.said) mtx.style.opacity = ".6";
+      mb.appendChild(mtx);
+      mb.appendChild(el("div", "tm", a.seconds + "s"));
+      mine.appendChild(mb);
+      wrap.appendChild(mine);
+
+      var model = el("div", "viva-model");
+      model.appendChild(el("b", "", "What the course says"));
+      var mp = el("p");
+      mp.style.margin = "0";
+      mp.innerHTML = md(a.q.model);
+      model.appendChild(mp);
+      wrap.appendChild(model);
+
+      if (a.q.chapter) {
+        var r = el("p", "small muted");
+        r.style.margin = "8px 0 0";
+        r.innerHTML = 'Read it again: <a href="chapters/' + a.q.chapter + '.html">' + esc(a.q.ref) + "</a>";
+        wrap.appendChild(r);
+      }
+      host.appendChild(wrap);
+    });
+
+    /* The simulator does not touch the spaced-repetition schedule: nothing here
+       was graded, and inventing a grade from a self-assessment would corrupt
+       intervals on cards the learner actually knows. It does award XP for
+       showing up, and it counts toward the streak. */
+    LF.touchStreak();
+    LF.addXp(Math.min(40, 4 * answered), "exam", "Mock interview");
+    host.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+})();
+</script>
+</body>
+</html>

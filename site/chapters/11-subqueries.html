@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>11 &middot; Subqueries: EXISTS, IN and the correlated one &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="11-subqueries">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 11</p>
+<h1>Subqueries: EXISTS, IN and the correlated one</h1>
+<p class="lede">Three ways to ask the same question, one of which is a trap the moment a NULL appears.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; knowing which of three
+  equivalent forms to reach for, and which one has a null bug in it.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="kinds">Four kinds of subquery</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Kind</th><th>Returns</th><th>Where it goes</th></tr></thead>
+<tbody>
+<tr><td><strong>Scalar</strong></td><td>Exactly one row, one column</td><td>Anywhere a value goes: <code>SELECT</code>, <code>WHERE</code></td></tr>
+<tr><td><strong>Row / column</strong></td><td>One column, many rows</td><td><code>IN</code>, <code>ANY</code>, <code>ALL</code></td></tr>
+<tr><td><strong>Derived table</strong></td><td>A whole table</td><td><code>FROM</code>. Must be aliased</td></tr>
+<tr><td><strong>Correlated</strong></td><td>Depends on the outer row</td><td><code>WHERE EXISTS</code>, <code>SELECT</code>, <code>LATERAL</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A normal subquery is a question you answer once and write on a sticky note. A
+    <em>correlated</em> subquery is a question you have to answer again for every single row —
+    “for <em>this</em> customer, is there an order?” — so it is like looking something up once per
+    line of a list rather than once for the whole list.
+  </p>
+</div>
+
+<h2 id="three">EXISTS, IN and JOIN: the same question, three ways</h2>
+
+<pre><code>-- 1. Semi-join with EXISTS — no duplicates, stops at the first match.
+SELECT c.* FROM customers c
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+
+-- 2. IN — equivalent HERE, and dangerous with NULLs in the negative form.
+SELECT c.* FROM customers c
+WHERE c.id IN (SELECT customer_id FROM orders);
+
+-- 3. JOIN — DIFFERENT: a customer with 3 orders appears 3 times.
+SELECT c.* FROM customers c
+JOIN orders o ON o.customer_id = c.id;              -- needs DISTINCT to match the others</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 Which one, and the honest answer about performance</div>
+  <ul style="margin-bottom:0">
+    <li><strong><code>EXISTS</code></strong> is the default for “does a match exist?”. It is
+      null-safe, cannot duplicate rows, and can short-circuit at the first match.</li>
+    <li><strong><code>IN</code></strong> reads better with a literal list. With a subquery it is
+      fine in the positive form and a landmine in the negative
+      (<a href="09-null-and-three-valued-logic.html">chapter 09</a>).</li>
+    <li><strong><code>JOIN</code></strong> when you actually need columns from the other table.</li>
+  </ul>
+</div>
+
+<div class="box note">
+  <div class="box-title">“EXISTS is faster than IN” is folklore</div>
+  <p style="margin-bottom:0">
+    Modern optimisers rewrite all three into the same internal semi-join and produce identical
+    plans in the common cases. Saying “<code>EXISTS</code> is faster” in an interview is a small
+    trap; saying “<strong>they usually plan identically, so I choose on semantics — and I avoid
+    <code>NOT IN</code> because of nulls</strong>” is the answer that shows you have checked rather
+    than repeated.
+  </p>
+</div>
+
+<h2 id="correlated">Correlated subqueries, and when they hurt</h2>
+
+<pre><code>-- The most recent order date per customer, as a correlated scalar subquery.
+SELECT c.name,
+       (SELECT MAX(o.placed_at) FROM orders o WHERE o.customer_id = c.id) AS last_order
+FROM customers c;</code></pre>
+
+<p>
+  Logically that runs once per customer. In practice a good optimiser will often decorrelate it
+  into a grouped join — but not always, and not when the subquery contains something it cannot
+  transform (a scalar UDF, a <code>TOP</code> with a tie-break, an <code>ORDER BY</code>). When it
+  cannot, you have written an N+1 inside the database.
+</p>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the same subquery three times</div>
+  <p>This shape is extremely common and is three correlated executions per row:</p>
+  <pre style="margin-bottom:8px"><code>SELECT c.name,
+  (SELECT COUNT(*)         FROM orders o WHERE o.customer_id = c.id) AS n,
+  (SELECT SUM(total_cents) FROM orders o WHERE o.customer_id = c.id) AS spend,
+  (SELECT MAX(placed_at)   FROM orders o WHERE o.customer_id = c.id) AS last
+FROM customers c;</code></pre>
+  <p style="margin-bottom:0">
+    Rewrite as one pre-aggregated join — one pass over <code>orders</code> instead of three per
+    customer. This is a favourite “optimise this query” exercise in screening tests precisely
+    because the fix is mechanical once you see it.
+  </p>
+</div>
+
+<pre><code>SELECT c.name, COALESCE(o.n, 0) AS n, COALESCE(o.spend, 0) AS spend, o.last
+FROM customers c
+LEFT JOIN (
+  SELECT customer_id, COUNT(*) AS n, SUM(total_cents) AS spend, MAX(placed_at) AS last
+  FROM orders GROUP BY customer_id
+) o ON o.customer_id = c.id;</code></pre>
+
+<h2 id="lateral">LATERAL and APPLY: a join that can see the left row</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The top-N-per-group tool</div>
+  <p style="margin-bottom:0">
+    A normal derived table in <code>FROM</code> cannot reference columns from tables to its left.
+    <code>LATERAL</code> (standard, PostgreSQL, Oracle 12c+, MySQL 8.0.14+) and
+    <code>CROSS APPLY</code> / <code>OUTER APPLY</code> (SQL Server) lift that restriction. That
+    makes “the three most recent orders for each customer” expressible directly — and it is often
+    faster than the window-function version, because it can stop after three rows per customer
+    instead of ranking all of them.
+  </p>
+</div>
+
+<pre><code>-- PostgreSQL / MySQL 8 / Oracle
+SELECT c.name, o.id, o.placed_at
+FROM customers c
+CROSS JOIN LATERAL (
+  SELECT id, placed_at FROM orders
+  WHERE customer_id = c.id                -- ← sees the outer row
+  ORDER BY placed_at DESC LIMIT 3
+) o;
+
+-- SQL Server: CROSS APPLY, and OUTER APPLY to keep customers with no orders.
+SELECT c.name, o.id, o.placed_at
+FROM customers c
+CROSS APPLY (SELECT TOP (3) id, placed_at FROM orders
+             WHERE customer_id = c.id ORDER BY placed_at DESC) o;</code></pre>
+
+<div class="box note">
+  <div class="box-title">CROSS vs OUTER</div>
+  <p style="margin-bottom:0">
+    <code>CROSS APPLY</code> / <code>CROSS JOIN LATERAL</code> drops left rows whose subquery
+    returned nothing — so customers with no orders disappear. <code>OUTER APPLY</code> /
+    <code>LEFT JOIN LATERAL … ON TRUE</code> keeps them with nulls. Same relationship as inner and
+    left joins, and the same bug when you pick the wrong one.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- Compare the two ways to get "the latest order per customer".
+-- Window function: ranks everything, then filters.
+SELECT * FROM (
+  SELECT o.*, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY placed_at DESC) rn
+  FROM orders o
+) t WHERE rn = 1;
+
+-- LATERAL: seeks the top row per customer. Usually faster when customers are few
+-- and orders are many, and there is an index on (customer_id, placed_at DESC).</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>A scalar subquery must return one row and one column, or it is a runtime error — not a null.</li>
+    <li><code>EXISTS</code> is the default for existence checks: null-safe, non-duplicating, short-circuiting.</li>
+    <li><code>EXISTS</code>, <code>IN</code> and a de-duplicated join usually produce the same plan. Choose on meaning, not on folklore.</li>
+    <li>Never <code>NOT IN</code> over a nullable column. <code>NOT EXISTS</code> instead.</li>
+    <li>Three correlated subqueries over the same table is three passes. Pre-aggregate and join once.</li>
+    <li>A correlated subquery the optimiser cannot decorrelate is an N+1 inside the database.</li>
+    <li><code>LATERAL</code> / <code>APPLY</code> lets a derived table see the outer row — the natural top-N-per-group tool.</li>
+    <li><code>CROSS APPLY</code> drops rows with an empty subquery; <code>OUTER APPLY</code> keeps them.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Difference between <code>EXISTS</code> and <code>IN</code>?</p>
+  <p class="a">Semantically, <code>EXISTS</code> asks whether any row matches and short-circuits;
+    <code>IN</code> compares a value against a set. They plan the same way in most engines for the
+    positive case. The real difference is negative: <code>NOT IN</code> returns nothing if the set
+    contains a null, and <code>NOT EXISTS</code> does not.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Get the three most recent orders per customer.</p>
+  <p class="a">Two good answers. <code>ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY
+    placed_at DESC)</code> filtered to <code>&lt;= 3</code>, which is portable; or
+    <code>CROSS APPLY</code>/<code>LATERAL</code> with <code>ORDER BY … LIMIT 3</code>, which can
+    stop early per customer and is usually faster with the right index.</p>
+</div>
+
+<div class="qa">
+  <p class="q">This query has four correlated subqueries and is slow. What do you do?</p>
+  <p class="a">Collapse them into one pre-aggregated derived table joined once. Four correlated
+    subqueries over the same child table can mean four executions per outer row; one
+    <code>GROUP BY</code> plus a join is a single pass.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+# =============================================================================
+#  CI — six jobs that fail for six different reasons.
+#
+#  A pipeline where every failure looks the same teaches people to re-run it
+#  rather than read it. Each job below answers a distinct question:
+#
+#    integrity  · has a cross-reference rotted?
+#    api        · does the service still behave?
+#    reference  · does the schema still build, and do its invariants hold?
+#    labs       · are the exercises STILL RED? (somebody committing the answers
+#                 over the exercises is a real failure mode)
+#    generated  · is a generated file stale?
+#    prose      · does the writing still say true things about itself?
+#
+#  Zero dependencies, so there is nothing to install and nothing to cache.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  # --------------------------------------------------------------- integrity
+  integrity:
+    name: cross-references
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: The integrity gate — 11 checks
+        run: node tools/doctor.mjs
+
+  # --------------------------------------------------------------------- api
+  api:
+    name: accounts service
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Tests against a real SQLite engine
+        run: node api/tests/run.mjs
+
+      - name: The service must refuse to start without a signing key
+        run: |
+          set +e
+          NODE_ENV=production node api/server.mjs
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::error::the service started in production with no QF_JWT_SECRET"
+            exit 1
+          fi
+          echo "refused to start, as it should (exit $code)"
+
+  # --------------------------------------------------------------- reference
+  reference:
+    name: reference database
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: Build it from the schema and the seed
+        run: |
+          sqlite3 forge.db < reference/schema/01-schema.sql
+          sqlite3 forge.db < reference/schema/02-seed.sql
+
+      - name: The seed must load with constraints ON
+        run: |
+          # A seed that only loads with foreign keys disabled is not testing the
+          # schema, it is working around it.
+          violations=$(sqlite3 forge.db "PRAGMA foreign_key_check;" | wc -l)
+          test "$violations" -eq 0 || { echo "::error::$violations FK violations"; exit 1; }
+
+      - name: Schema invariants must hold
+        run: |
+          out=$(sqlite3 forge.db < reference/labs/schema-invariants.sql)
+          echo "$out"
+          echo "$out" | grep -q "^PASS" || { echo "::error::a schema invariant failed"; exit 1; }
+
+      - name: The invariants must be able to FAIL
+        run: |
+          # A check that never fires is worthless. Introduce each violation and
+          # require the check to report it.
+          cp forge.db broken.db
+          sqlite3 broken.db "
+            CREATE TABLE bad_no_pk (a INT, b INT);
+            CREATE TABLE bad_float (id INTEGER PRIMARY KEY, unit_price REAL);
+            CREATE TABLE bad_fk (id INTEGER PRIMARY KEY, customer_id INTEGER REFERENCES customers(id));
+            CREATE TABLE bad_status (id INTEGER PRIMARY KEY, status TEXT NULL);"
+          out=$(sqlite3 broken.db < reference/labs/schema-invariants.sql)
+          for v in "no primary key" "float money" "unindexed foreign key" "nullable status"; do
+            echo "$out" | grep -q "$v" || { echo "::error::the invariant for '$v' did not fire"; exit 1; }
+          done
+          echo "all four invariants detected their violation"
+
+      - name: The seed is deterministic
+        run: |
+          # Two builds from the same files must produce identical data, or every
+          # lab assertion is a coin flip.
+          sqlite3 again.db < reference/schema/01-schema.sql
+          sqlite3 again.db < reference/schema/02-seed.sql
+          a=$(sqlite3 forge.db "SELECT COUNT(*), SUM(total_cents), SUM(quantity) FROM orders, order_lines;")
+          b=$(sqlite3 again.db "SELECT COUNT(*), SUM(total_cents), SUM(quantity) FROM orders, order_lines;")
+          test "$a" = "$b" || { echo "::error::the seed is not deterministic: $a vs $b"; exit 1; }
+          echo "identical: $a"
+
+  # -------------------------------------------------------------------- labs
+  labs:
+    name: the labs must still be red
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the database
+        run: |
+          sqlite3 forge.db < reference/schema/01-schema.sql
+          sqlite3 forge.db < reference/schema/02-seed.sql
+
+      - name: Every exercise lab must FAIL its own assertion
+        run: |
+          # Somebody committing the answers over the exercises is a real failure
+          # mode, and it is silent: the labs would still run, and teach nothing.
+          fail=0
+          for lab in reference/labs/0*.sql; do
+            cp forge.db work.db
+            out=$(sqlite3 work.db < "$lab" 2>&1 || true)
+            rm -f work.db
+            if echo "$out" | grep -q "FAIL"; then
+              echo "  ✓ $lab is still an exercise"
+            elif [ "$lab" = "reference/labs/06-claim-a-queue-row.sql" ]; then
+              # Graded by a human; its assertion only checks the index exists.
+              echo "  · $lab is human-graded"
+            else
+              echo "::error::$lab passes without being solved — the answer has been committed over it"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  # --------------------------------------------------------------- generated
+  generated:
+    name: generated files are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: The playground database matches the schema
+        run: node tools/build-playground-db.mjs --check
+
+      - name: The service-worker cache name matches the content
+        run: node tools/stamp-sw.mjs --check
+
+      - name: The viva deck matches the golden rules
+        run: |
+          node tools/viva-deck.mjs
+          if ! git diff --quiet -- course/GOLDEN-RULES.md site/assets/rules.js; then
+            echo "::error::the viva deck is stale. Run: node tools/viva-deck.mjs"
+            git diff --stat -- course/GOLDEN-RULES.md site/assets/rules.js
+            exit 1
+          fi
+
+      - name: Every script parses
+        run: |
+          for f in site/assets/*.js site/sw.js tools/*.mjs api/server.mjs api/src/*.mjs; do
+            node --check "$f" || exit 1
+          done
+          echo "all scripts parse"
+
+  # ------------------------------------------------------------------- prose
+  prose:
+    name: the writing says true things
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: No unfinished scaffolding survived
+        run: |
+          # new-chapter.mjs leaves a TODO in the advert box. A chapter that ships
+          # with it has a body but no argument for existing.
+          if grep -rn "TODO: one sentence" site/chapters/ ; then
+            echo "::error::a scaffolded chapter was never written"
+            exit 1
+          fi
+          if grep -rln "<!-- BODY -->" site/chapters/ ; then
+            echo "::error::a chapter still has an empty body marker"
+            exit 1
+          fi
+          echo "no scaffolding left"
+
+      - name: Every chapter has the parts that make it a chapter
+        run: |
+          node -e '
+            const fs = require("fs");
+            const missing = [];
+            for (const f of fs.readdirSync("site/chapters")) {
+              const t = fs.readFileSync("site/chapters/" + f, "utf8");
+              const need = {
+                "a golden-rules card": /<div class="rules">/,
+                "an interview question": /<div class="qa">/,
+                "a simple box": /<div class="box kid">/,
+                "a professional box": /<div class="box pro">/,
+                "the quiz mount point": /id="chapter-quiz"/,
+                "the pager": /id="pager"/,
+              };
+              for (const [what, re] of Object.entries(need))
+                if (!re.test(t)) missing.push(`${f}: no ${what}`);
+            }
+            if (missing.length) { console.error(missing.join("\n")); process.exit(1); }
+            console.log("every chapter is complete");
+          '
+
+      - name: The counts in prose match reality
+        run: node tools/doctor.mjs

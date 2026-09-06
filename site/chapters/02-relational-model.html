@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>02 &middot; The relational model: sets, keys and NULL &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="02-relational-model">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 1 — The relational foundation <span>&rsaquo;</span> Chapter 02</p>
+<h1>The relational model: sets, keys and NULL</h1>
+<p class="lede">Why a table is a set and not a list, what a key really guarantees, and where NULL came from.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Progettazione e modellazione di basi dati relazionali&rdquo;</em> &mdash; you can read a paragraph of
+  business description and produce tables and keys that make the wrong state impossible to write
+  down. That skill is this chapter and the four after it.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="a-set">A table is a set, not a list</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A table is like a bag of cards, not a stack of them. Nobody promises the cards come out in the
+    order you put them in, and asking “what is the third card?” is not a real question. If order
+    matters, one of the things written on each card has to say so.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p>
+    A relation is an <strong>unordered set of tuples over a heading</strong>. Three practical
+    consequences, all of which are tested:
+  </p>
+  <ul style="margin-bottom:0">
+    <li><strong>There is no row order without <code>ORDER BY</code>.</strong> A query that appears
+      sorted is sorted by accident — because the plan happened to use an ordered index. Add a
+      parallel scan or a different index and the accident stops happening, in production, on a
+      Friday.</li>
+    <li><strong>There is no “row number” a row carries.</strong> If position is part of the
+      business meaning — line 1, line 2, line 3 of an order — it is a <em>column</em>
+      (<code>line_no</code>), not an artefact of storage.</li>
+    <li><strong>Duplicate rows are meaningless.</strong> A true set has none. SQL permits them,
+      which is the language's most famous deviation from the model, and it is why
+      <code>UNION</code> deduplicates while <code>UNION ALL</code> does not.</li>
+  </ul>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    <strong>“It came back in the right order when I tested it.”</strong> This is the single most
+    expensive false belief in SQL. Without <code>ORDER BY</code> the engine is free to return rows
+    in any order it likes, and it will change its mind when the data grows, when statistics
+    update, or when it decides to go parallel. If the order is part of the answer, say so.
+  </p>
+</div>
+
+<h2 id="keys">What a key actually guarantees</h2>
+
+<p>
+  A <strong>candidate key</strong> is a minimal set of columns whose values are unique across the
+  whole relation. “Minimal” is load-bearing: if <code>(email)</code> is unique then
+  <code>(email, id)</code> is unique too, but it is not a candidate key because you could remove a
+  column and still be unique.
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Term</th><th>What it means</th><th>What it guarantees</th></tr></thead>
+<tbody>
+<tr><td><strong>Candidate key</strong></td><td>Minimal unique identifier</td><td>No two rows share these values</td></tr>
+<tr><td><strong>Primary key</strong></td><td>The candidate key you nominated</td><td>Unique <em>and</em> <code>NOT NULL</code>; usually decides physical order</td></tr>
+<tr><td><strong>Alternate key</strong></td><td>A candidate key you did not nominate</td><td>Enforce it with <code>UNIQUE</code> anyway, or it is not enforced</td></tr>
+<tr><td><strong>Foreign key</strong></td><td>Values must exist in another relation's key</td><td>Referential integrity — no order line pointing at a deleted order</td></tr>
+<tr><td><strong>Natural key</strong></td><td>Made of real-world data (VAT number, ISBN)</td><td>Meaningful, and changes when the real world does</td></tr>
+<tr><td><strong>Surrogate key</strong></td><td>Meaningless, engine-generated</td><td>Stable forever, and tells you nothing</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Natural or surrogate? The answer that gets you hired</div>
+  <p style="margin-bottom:0">
+    <strong>Both.</strong> A surrogate primary key for stability and narrow foreign keys, plus a
+    <code>UNIQUE</code> constraint on the natural key so the business rule is still enforced.
+    Choosing a surrogate key <em>instead of</em> declaring the natural key unique is the actual
+    mistake, and it is extremely common: you get an <code>id</code> column and two rows for the
+    same customer. Say that sentence in an interview and you will sound like someone who has
+    cleaned up the aftermath — because you will have described it.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- Surrogate for the plumbing, natural for the truth.
+CREATE TABLE customers (
+  id          INTEGER PRIMARY KEY,           -- stable, meaningless, narrow
+  vat_number  VARCHAR(13) NOT NULL UNIQUE,   -- the business rule, ENFORCED
+  email       VARCHAR(200) NOT NULL UNIQUE,
+  name        VARCHAR(200) NOT NULL
+);</code></pre>
+</div>
+
+<h2 id="null">Where NULL came from, and what it costs</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    <code>NULL</code> is not “nothing” and it is not zero. It is a shrug. It means <em>I do not
+    know</em>. And two shrugs are not the same as each other — if I do not know your age and I do
+    not know mine, that does not mean we are the same age.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    <code>NULL</code> is a marker for <em>unknown or inapplicable</em>, and it turns SQL's boolean
+    logic into <strong>three-valued logic</strong>: <code>TRUE</code>, <code>FALSE</code>,
+    <code>UNKNOWN</code>. Any comparison with <code>NULL</code> yields <code>UNKNOWN</code>, and
+    <code>WHERE</code> keeps only rows where the predicate is <code>TRUE</code> — so
+    <code>WHERE x = NULL</code> returns nothing, <em>including</em> the rows where x is null. The
+    full damage is <a href="09-null-and-three-valued-logic.html">chapter 09</a>; what matters here
+    is that every nullable column you declare is a decision to import that logic into your
+    queries.
+  </p>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    Nullable by default is a design failure, not a convenience. Ask of every column: <em>is there a
+    legitimate business state in which this is unknown?</em> If not, write <code>NOT NULL</code>.
+    Adding it later means cleaning up rows that already violate it, which is a migration, a
+    backfill and an argument — see <a href="36-migrations.html">chapter 36</a>.
+  </p>
+</div>
+
+<h2 id="cardinality">Relationships, and the table people forget</h2>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 220" role="img" aria-labelledby="d2t d2d">
+    <title id="d2t">One-to-many and many-to-many modelled with tables</title>
+    <desc id="d2d">A customer has many orders, shown as a foreign key on orders. An order has many products and a product appears on many orders, which requires a third junction table holding both foreign keys.</desc>
+
+    <rect class="d-box-a" x="20" y="30" width="150" height="58" rx="9"/>
+    <text class="d-t-b" x="95" y="54" text-anchor="middle">customers</text>
+    <text class="d-t-m" x="95" y="74" text-anchor="middle">id (PK)</text>
+
+    <rect class="d-box-a" x="20" y="130" width="150" height="58" rx="9"/>
+    <text class="d-t-b" x="95" y="154" text-anchor="middle">orders</text>
+    <text class="d-t-m" x="95" y="174" text-anchor="middle">customer_id (FK)</text>
+
+    <path class="d-line-a" d="M95 88 V130" marker-end="url(#a2)"/>
+    <text class="d-t-c" x="106" y="114">1 : N</text>
+
+    <rect class="d-box" x="330" y="30" width="150" height="58" rx="9"/>
+    <text class="d-t-b" x="405" y="54" text-anchor="middle">orders</text>
+    <text class="d-t-m" x="405" y="74" text-anchor="middle">id (PK)</text>
+
+    <rect class="d-box" x="640" y="30" width="150" height="58" rx="9"/>
+    <text class="d-t-b" x="715" y="54" text-anchor="middle">products</text>
+    <text class="d-t-m" x="715" y="74" text-anchor="middle">id (PK)</text>
+
+    <rect class="d-box-g" x="470" y="140" width="180" height="62" rx="9"/>
+    <text class="d-t-b" x="560" y="164" text-anchor="middle">order_lines</text>
+    <text class="d-t-m" x="560" y="184" text-anchor="middle">(order_id, product_id)</text>
+
+    <path class="d-line" d="M405 88 V120 H500 V140" marker-end="url(#a2)"/>
+    <path class="d-line" d="M715 88 V120 H620 V140" marker-end="url(#a2)"/>
+    <text class="d-t-c" x="560" y="116" text-anchor="middle">N : M needs a table of its own</text>
+
+    <defs>
+      <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" class="d-fill"/>
+      </marker>
+    </defs>
+  </svg>
+  <figcaption>One-to-many is a foreign key. Many-to-many is always a third table.</figcaption>
+</figure>
+
+<p>
+  The junction table is where juniors lose marks, because they describe it as “just a link table”.
+  It is not. It is an <strong>entity in its own right</strong>, and it almost always grows
+  attributes: <code>order_lines</code> needs <code>quantity</code> and the
+  <strong>price at the time of sale</strong> — which cannot live on <code>products</code>, because
+  that price changes and last year's invoice must not change with it.
+</p>
+
+<div class="box good">
+  <div class="box-title">✔ Say this in an interview</div>
+  <p style="margin-bottom:0">
+    “A many-to-many needs a junction table, and I would expect it to carry its own columns — on an
+    order line, the quantity and the price as it was when the order was placed, because
+    historical documents must not move when the price list does.” That second clause is the whole
+    answer.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>A table is an unordered set. Without <code>ORDER BY</code> there is no order, no matter what you observed in testing.</li>
+    <li>If position is part of the meaning, it is a column, not an artefact of storage.</li>
+    <li>A candidate key is <em>minimal</em> and unique; a primary key is the candidate key you nominated, and is also <code>NOT NULL</code>.</li>
+    <li>Use a surrogate primary key <strong>and</strong> a <code>UNIQUE</code> constraint on the natural key. Choosing one instead of the other is the mistake.</li>
+    <li><code>NULL</code> means unknown, not empty, and it is never equal to anything — including another <code>NULL</code>.</li>
+    <li>Declare <code>NOT NULL</code> unless there is a real business state where the value is unknown.</li>
+    <li>One-to-many is a foreign key; many-to-many is always a third table, and that table earns its own columns.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">What is the difference between a primary key and a unique constraint?</p>
+  <p class="a">A primary key is a nominated candidate key: unique and implicitly <code>NOT NULL</code>,
+    one per table, and in most engines it also determines physical row order. A unique constraint
+    enforces the same uniqueness but permits nulls (how many is dialect-specific — SQL Server allows
+    one, PostgreSQL and Oracle allow many) and you can have as many as you need.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Natural key or surrogate key?</p>
+  <p class="a">Surrogate as the primary key so foreign keys stay narrow and never have to change,
+    plus a unique constraint on the natural key so the business rule is still enforced. The failure
+    mode of surrogate-only is duplicate customers; the failure mode of natural-only is a VAT number
+    correction that has to cascade through six tables.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why can't <code>NULL = NULL</code> be true?</p>
+  <p class="a">Because <code>NULL</code> means “unknown”, and two unknowns cannot be shown to be
+    equal. The comparison evaluates to <code>UNKNOWN</code>, and <code>WHERE</code> keeps only
+    <code>TRUE</code>. Use <code>IS NULL</code>, or <code>IS NOT DISTINCT FROM</code> where the
+    dialect has it.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

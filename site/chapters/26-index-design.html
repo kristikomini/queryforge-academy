@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>26 &middot; Index design: order, covering, selectivity &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="26-index-design">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 4 — Fast at scale <span>&rsaquo;</span> Chapter 26</p>
+<h1>Index design: order, covering, selectivity</h1>
+<p class="lede">Why (a, b) is not (b, a), what INCLUDE is for, and the real cost of the index nobody uses.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottimizzazione e tuning delle query&rdquo;</em> &mdash; adding an index is easy.
+  Knowing which one, in which column order, and which existing three to delete, is the job.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="order">Column order is the whole game</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A phone book is sorted by surname, then first name. Finding “Rossi, Marco” is easy. Finding
+    <em>everyone called Marco</em> is not — you have to read the whole book, because first names
+    are scattered all through it. The order you sorted by decides which questions are cheap.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 The leftmost-prefix rule</div>
+  <p>
+    An index on <code>(a, b, c)</code> can seek on <code>a</code>, on <code>(a, b)</code>, and on
+    <code>(a, b, c)</code>. It cannot seek on <code>b</code> alone, or on <code>(b, c)</code>,
+    because those values are not sorted independently — they are only sorted <em>within</em> a
+    value of <code>a</code>.
+  </p>
+  <p style="margin-bottom:0">
+    So an index on <code>(customer_id, placed_at)</code> serves “this customer's orders” and “this
+    customer's recent orders”. An index on <code>(placed_at, customer_id)</code> serves “orders in
+    March” — and serves “this customer's orders” not at all.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Query</th><th>Index (a, b, c) can…</th></tr></thead>
+<tbody>
+<tr><td><code>WHERE a = 1</code></td><td>✅ seek</td></tr>
+<tr><td><code>WHERE a = 1 AND b = 2</code></td><td>✅ seek on both</td></tr>
+<tr><td><code>WHERE a = 1 AND c = 3</code></td><td>✅ seek on a, then filter c inside the range</td></tr>
+<tr><td><code>WHERE b = 2</code></td><td>❌ scan</td></tr>
+<tr><td><code>WHERE a &gt; 1 AND b = 2</code></td><td>⚠ seek the range on a; b cannot narrow it further</td></tr>
+<tr><td><code>ORDER BY a, b</code></td><td>✅ no sort needed</td></tr>
+<tr><td><code>ORDER BY b</code></td><td>❌ sort required</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — a range column stops the index dead</div>
+  <p style="margin-bottom:0">
+    In row 5 above, once you use an inequality on <code>a</code> the entries are no longer grouped
+    by <code>b</code>, so <code>b</code> can only filter rows already read, not narrow the seek.
+    Hence the ordering rule: <strong>equality columns first, then the range column, then
+    anything only needed for sorting or covering.</strong> This one sentence is the answer to most
+    “design an index for this query” questions.
+  </p>
+</div>
+
+<pre><code>-- SELECT ... WHERE status = 'shipped' AND placed_at &gt;= ? ORDER BY placed_at
+CREATE INDEX ix ON orders (status, placed_at);
+--                          ^equality  ^range and sort. Correct order.
+
+-- Reverse it and the seek becomes a scan of every shipped-or-not row in the range.</code></pre>
+
+<h2 id="covering">Covering indexes</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 An index that answers the query by itself</div>
+  <p style="margin-bottom:0">
+    If every column a query touches — in <code>SELECT</code>, <code>WHERE</code>,
+    <code>JOIN</code>, <code>ORDER BY</code> — is in the index, the engine never reads the table at
+    all. No key lookup, no random reads. In a plan this shows as an index-only scan (PostgreSQL) or
+    an index seek with no key lookup beside it (SQL Server), and it is often a 10–100× improvement
+    on a wide table.
+  </p>
+</div>
+
+<pre><code>-- SQL Server: INCLUDE puts columns in the LEAF only — not in the key.
+-- They do not affect ordering or seekability, they cost nothing in the upper
+-- levels, and they remove the lookup.
+CREATE INDEX ix_orders_status_cov
+  ON orders (status, placed_at)      -- key: used for seeking and ordering
+  INCLUDE (customer_id, total_cents); -- payload: available without a lookup
+
+-- PostgreSQL 11+ has the same thing:
+CREATE INDEX ix ON orders (status, placed_at) INCLUDE (customer_id, total_cents);
+
+-- MySQL has no INCLUDE: extra columns must go in the key.</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the covering index that covers everything</div>
+  <p style="margin-bottom:0">
+    It is tempting to <code>INCLUDE</code> every column so all queries are covered. That
+    reproduces the table inside the index: every insert writes twice, every update of an included
+    column updates two structures, and your buffer pool now holds two copies of the same data. Cover
+    the columns your <em>hot</em> queries need, not all of them.
+  </p>
+</div>
+
+<h2 id="selectivity">Selectivity: which column is worth indexing</h2>
+
+<p>
+  <strong>Selectivity</strong> is the fraction of rows a predicate eliminates. An index on a column
+  with two distinct values across a million rows cannot help a lookup — reading half the table
+  through an index is worse than scanning it.
+</p>
+
+<div class="box good">
+  <div class="box-title">✔ Except when it is skewed, which is the interesting case</div>
+  <p style="margin-bottom:0">
+    A <code>status</code> column that is 99% <code>'delivered'</code> and 1% <code>'failed'</code>
+    is <em>useless</em> for finding delivered orders and <em>excellent</em> for finding failed ones.
+    Which is exactly what a <strong>partial (filtered) index</strong> expresses:
+  </p>
+</div>
+
+<pre><code>CREATE INDEX ix_orders_failed ON orders (placed_at) WHERE status = 'failed';
+-- 1% of the size, seeks straight to the rows anyone actually queries for,
+-- and rows leave the index entirely when they stop being failed.
+
+-- The reference database uses the same idea for the outbox worker:
+CREATE INDEX ix_outbox_pending ON outbox (created_at) WHERE published_at IS NULL;
+-- stays tiny however large the outbox grows.</code></pre>
+
+<p class="small muted">
+  PostgreSQL calls them partial indexes, SQL Server calls them filtered indexes, Oracle achieves the
+  same with a function-based index that returns <code>NULL</code> for uninteresting rows. MySQL has
+  no equivalent.
+</p>
+
+<h2 id="cost">What an index costs</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The four costs, and the one people forget</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Write amplification.</strong> An insert into a table with six indexes is seven
+      writes. An update touching two indexed columns updates those two indexes as well.</li>
+    <li><strong>Space</strong>, in the buffer pool as much as on disk — every unused index is
+      evicting pages something else wanted.</li>
+    <li><strong>Maintenance</strong>: statistics, rebuilds, backups all get bigger.</li>
+    <li><strong>Optimiser choice.</strong> More indexes means a larger plan search space and more
+      opportunities to pick a wrong one. This is the cost nobody mentions and it is real.</li>
+  </ol>
+</div>
+
+<pre><code>-- Which indexes are you paying for and not using?
+-- SQL Server
+SELECT OBJECT_NAME(s.object_id) AS tbl, i.name, s.user_seeks, s.user_scans,
+       s.user_lookups, s.user_updates
+FROM sys.dm_db_index_usage_stats s
+JOIN sys.indexes i ON i.object_id = s.object_id AND i.index_id = s.index_id
+WHERE s.database_id = DB_ID() AND s.user_seeks + s.user_scans + s.user_lookups = 0
+ORDER BY s.user_updates DESC;      -- pure cost, no benefit
+
+-- PostgreSQL
+SELECT relname, indexrelname, idx_scan, pg_size_pretty(pg_relation_size(indexrelid))
+FROM pg_stat_user_indexes WHERE idx_scan = 0 ORDER BY pg_relation_size(indexrelid) DESC;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the stats reset on restart</div>
+  <p style="margin-bottom:0">
+    Those counters are cumulative since the last service restart (or since
+    <code>pg_stat_reset()</code>). An index used only by the quarterly report looks unused in
+    January. Check the uptime before you drop anything, and prefer disabling to dropping so you can
+    put it back in one statement.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>An index on <code>(a, b, c)</code> serves any leftmost prefix, and nothing else.</li>
+    <li>Equality columns first, then the range column, then columns needed only for sorting or covering.</li>
+    <li>Once you use an inequality on a column, later columns can only filter, not narrow the seek.</li>
+    <li>A covering index removes the lookup entirely and is often the single biggest win available.</li>
+    <li><code>INCLUDE</code> adds leaf-level payload without affecting seekability or key width.</li>
+    <li>Do not cover everything — that is a second copy of the table, written on every insert.</li>
+    <li>Low selectivity kills an index, unless the distribution is skewed — then use a partial index.</li>
+    <li>Every index costs writes, space, buffer pool and optimiser search space.</li>
+    <li>Usage statistics reset on restart. Check uptime before dropping an index nobody appears to use.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Design an index for
+    <code>WHERE status = ? AND placed_at &gt;= ? ORDER BY placed_at</code>.</p>
+  <p class="a"><code>(status, placed_at)</code>: equality first so it can seek, then the range
+    column — which also supplies the <code>ORDER BY</code>, so there is no sort. If the select list
+    is small I would <code>INCLUDE</code> those columns to make it covering.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why is <code>(a, b)</code> not the same as <code>(b, a)</code>?</p>
+  <p class="a">An index is sorted left to right, so <code>b</code> is only ordered within a given
+    <code>a</code>. A predicate on <code>b</code> alone therefore cannot seek. Only leftmost
+    prefixes are seekable.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Can you have too many indexes?</p>
+  <p class="a">Yes. Every one is written on insert and on updates to its columns, occupies buffer
+    pool, enlarges backups, and adds to the optimiser's search space. I would look at the usage
+    statistics for indexes with zero seeks and a high update count — checking server uptime first,
+    because those counters reset.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

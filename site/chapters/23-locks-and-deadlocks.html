@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>23 &middot; Locks, blocking and deadlocks &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="23-locks-and-deadlocks">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 3 — Changing data <span>&rsaquo;</span> Chapter 23</p>
+<h1>Locks, blocking and deadlocks</h1>
+<p class="lede">Shared and exclusive, lock escalation, and the deadlock you fix by swapping the order of two statements.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Esperienza su ambienti di produzione&rdquo;</em> &mdash; “the application froze at 09:15
+  and cleared by itself” is a blocking chain, and diagnosing one is a rite of passage.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="modes">Two lock modes, one rule</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Lots of people can <em>read</em> the same page over each other's shoulders at once. Only one
+    person can <em>write</em> on it, and while they are writing nobody else may read it. That is
+    the whole rule; everything else is bookkeeping about which pages are involved.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Mode</th><th>Taken by</th><th>Compatible with</th></tr></thead>
+<tbody>
+<tr><td><strong>Shared (S)</strong></td><td>Reads, under pessimistic isolation</td><td>Other S locks</td></tr>
+<tr><td><strong>Exclusive (X)</strong></td><td>Any write</td><td>Nothing</td></tr>
+<tr><td><strong>Update (U)</strong></td><td>The search phase of an update, in SQL Server</td><td>S but not U — which is precisely what stops a common deadlock</td></tr>
+<tr><td><strong>Intent (IS/IX)</strong></td><td>The table, when a row inside it is locked</td><td>Other intent locks</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 What intent locks are actually for</div>
+  <p style="margin-bottom:0">
+    Without them, a transaction wanting to lock a whole table would have to check every row to see
+    whether anyone holds a lock on it. An intent lock on the table is a flag saying “somebody has a
+    row lock in here”, so the table-level request can be refused in O(1). They exist to make lock
+    checking cheap, not to protect data — a genuinely satisfying answer to “what is an intent
+    lock?”.
+  </p>
+</div>
+
+<h2 id="escalation">Lock escalation</h2>
+
+<p>
+  Row locks cost memory. Above a threshold (about 5 000 locks in one statement in SQL Server) the
+  engine <strong>escalates</strong> to a table lock: cheaper for it, catastrophic for everyone
+  else, because a single large <code>UPDATE</code> now blocks the whole table. PostgreSQL does not
+  escalate — it stores lock information in the row itself — which is one of the concrete
+  behavioural differences worth knowing.
+</p>
+
+<div class="box good">
+  <div class="box-title">✔ The fix, and why it is the fix</div>
+  <p style="margin-bottom:0">
+    <strong>Batch the write.</strong> Update 2 000 rows at a time in separate transactions rather
+    than two million in one. Each batch stays under the escalation threshold, each commits and
+    releases its locks, and other work gets in between batches. It is slower in total and vastly
+    better for everyone — and “I would batch it” is the expected answer to “how would you update
+    ten million rows in production?”.
+  </p>
+</div>
+
+<h2 id="deadlock">Deadlocks</h2>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 240" role="img" aria-labelledby="d23t d23d">
+    <title id="d23t">A deadlock caused by two sessions locking rows in opposite order</title>
+    <desc id="d23d">Session A locks row 1 then waits for row 2; session B locks row 2 then waits for row 1. Neither can proceed and the engine kills one of them.</desc>
+
+    <rect class="d-box-a" x="40" y="40" width="200" height="46" rx="9"/>
+    <text class="d-t-b" x="140" y="60" text-anchor="middle">Session A</text>
+    <text class="d-t-m" x="140" y="78" text-anchor="middle">locks row 1 ✔</text>
+
+    <rect class="d-box-a" x="600" y="40" width="200" height="46" rx="9"/>
+    <text class="d-t-b" x="700" y="60" text-anchor="middle">Session B</text>
+    <text class="d-t-m" x="700" y="78" text-anchor="middle">locks row 2 ✔</text>
+
+    <rect class="d-box-b" x="40" y="140" width="200" height="46" rx="9"/>
+    <text class="d-t-m" x="140" y="168" text-anchor="middle">waits for row 2 …</text>
+
+    <rect class="d-box-b" x="600" y="140" width="200" height="46" rx="9"/>
+    <text class="d-t-m" x="700" y="168" text-anchor="middle">waits for row 1 …</text>
+
+    <path class="d-line-b" d="M240 163 H420 V70 H600" marker-end="url(#a23)"/>
+    <path class="d-line-b" d="M600 163 H460 V95 H240" marker-end="url(#a23)"/>
+    <text class="d-t-b" x="420" y="222" text-anchor="middle">the engine picks a victim, rolls it back, and returns error 1205 / 40P01</text>
+    <defs>
+      <marker id="a23" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" class="d-fill"/>
+      </marker>
+    </defs>
+  </svg>
+  <figcaption>Two sessions, opposite lock order, one cycle.</figcaption>
+</figure>
+
+<div class="box pro">
+  <div class="box-title">🎓 Blocking is not deadlocking</div>
+  <p style="margin-bottom:0">
+    <strong>Blocking</strong> is one session waiting for another; it resolves by itself when the
+    first commits, and it can last as long as the transaction does. A <strong>deadlock</strong> is
+    a <em>cycle</em> of waits that can never resolve, so the engine detects it and kills one
+    participant. Blocking is usually the more expensive problem in practice — deadlocks at least
+    announce themselves and get cleaned up in milliseconds; a blocking chain just makes everything
+    slow and produces no error to search for.
+  </p>
+</div>
+
+<h3>The four causes, and their fixes</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Cause</th><th>Fix</th></tr></thead>
+<tbody>
+<tr><td><strong>Inconsistent access order</strong> — A does orders then customers, B does customers then orders</td><td>Always touch tables (and rows) in the same order everywhere. Often a one-line change</td></tr>
+<tr><td><strong>Lock upgrade</strong> — both hold S on a row and both then want X</td><td>Take the stronger lock up front: <code>SELECT … FOR UPDATE</code>, or SQL Server's <code>UPDLOCK</code> hint</td></tr>
+<tr><td><strong>Missing index</strong> — a scan locks far more rows than it needed to</td><td>Index the predicate. A seek locks one row; a scan locks the range it walked</td></tr>
+<tr><td><strong>Long transactions</strong> — locks held far longer than necessary</td><td>Shorten them; never wait on a network call or a user inside one</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The answer that gets you the job</div>
+  <p style="margin-bottom:0">
+    “A deadlock is not a bug in the database; it is two transactions taking the same locks in a
+    different order. My first check is whether there is a consistent access order I can impose,
+    and my second is whether a missing index is causing a scan to lock rows it never needed. And
+    the application must retry — a deadlock victim is a <em>transient</em> failure, and code that
+    does not retry it turns a millisecond event into a user-facing error.”
+  </p>
+</div>
+
+<h2 id="finding">Finding them</h2>
+
+<pre><code>-- SQL Server: who is blocking whom, right now
+SELECT r.session_id, r.blocking_session_id, r.wait_type, r.wait_time,
+       DB_NAME(r.database_id) AS db, t.text
+FROM sys.dm_exec_requests r
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.blocking_session_id &lt;&gt; 0;
+-- Deadlock history lives in the system_health extended event session — it is on
+-- by default and nobody knows, which is why "we have no deadlock information" is
+-- almost always wrong.
+
+-- PostgreSQL: the blocking chain
+SELECT pid, state, wait_event_type, wait_event,
+       pg_blocking_pids(pid) AS blocked_by, left(query, 80) AS query
+FROM pg_stat_activity
+WHERE cardinality(pg_blocking_pids(pid)) &gt; 0;
+-- log_lock_waits = on writes the details to the log after deadlock_timeout.
+
+-- MySQL
+SHOW ENGINE INNODB STATUS;         -- LATEST DETECTED DEADLOCK section</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the retry that makes it worse</div>
+  <p style="margin-bottom:0">
+    Retrying a deadlock victim immediately, in a tight loop, against the same contended rows,
+    reproduces the deadlock. Retry with a <strong>short randomised backoff</strong> and a bounded
+    attempt count, and only for the transient error codes — 1205 in SQL Server, 40P01 in
+    PostgreSQL, 1213 in MySQL. Retrying a constraint violation forever is a different bug.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Shared locks share; exclusive locks share with nothing. Everything else is bookkeeping.</li>
+    <li>Intent locks exist so a table-level lock request can be answered without inspecting every row.</li>
+    <li>Lock escalation turns thousands of row locks into one table lock. Batch large writes to stay under the threshold.</li>
+    <li>PostgreSQL does not escalate; it stores lock information in the row.</li>
+    <li>Blocking is a wait and resolves itself; a deadlock is a cycle and the engine kills a victim.</li>
+    <li>The commonest deadlock cause is inconsistent access order, and the fix is usually one line.</li>
+    <li>A missing index causes a scan, and a scan locks rows a seek would never have touched.</li>
+    <li>A deadlock victim is a transient error. The application must retry, with randomised backoff and a bounded count.</li>
+    <li>SQL Server's system_health session already recorded the deadlock graph. Look before saying there is no information.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">What is a deadlock and how do you fix one?</p>
+  <p class="a">Two transactions each holding a lock the other needs — a cycle, which the engine
+    breaks by rolling one back. I would read the deadlock graph to see which resources and which
+    statements, then look for an inconsistent access order to normalise, and for a missing index
+    causing a scan to lock more than necessary. And the application retries, because a victim is a
+    transient failure.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Difference between blocking and deadlocking?</p>
+  <p class="a">Blocking is one session waiting for a lock another holds; it clears when that
+    transaction ends. A deadlock is a cycle of waits that cannot clear, so it is detected and one
+    party is killed. Blocking is often the more damaging in practice because it produces no error —
+    just slowness.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How would you update ten million rows in production?</p>
+  <p class="a">In batches — a few thousand rows per transaction, in a loop, driven by an indexed
+    key range. That keeps each transaction under the lock escalation threshold, releases locks
+    between batches, keeps the transaction log manageable, and lets other work through. One
+    statement would escalate to a table lock and hold it for the duration.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

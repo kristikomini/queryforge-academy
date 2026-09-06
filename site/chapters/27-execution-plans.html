@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>27 &middot; Reading an execution plan &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="27-execution-plans">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 4 — Fast at scale <span>&rsaquo;</span> Chapter 27</p>
+<h1>Reading an execution plan</h1>
+<p class="lede">Scan vs seek, nested loops vs hash vs merge, and the two numbers to look at before anything else.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottimizzazione e tuning delle query&rdquo;</em> &mdash; this is the skill the phrase
+  actually names. Everything else is guessing with confidence.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="getting">Getting a plan</h2>
+
+<pre><code>-- PostgreSQL. ANALYZE actually RUNS it and reports real numbers.
+EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT ...;
+
+-- SQL Server
+SET STATISTICS IO, TIME ON;          -- logical reads and CPU: often enough on its own
+-- then "Include Actual Execution Plan" (Ctrl+M), or:
+SET SHOWPLAN_ALL ON;                 -- estimated, without running
+
+-- MySQL
+EXPLAIN ANALYZE SELECT ...;          -- 8.0.18+
+-- Oracle
+EXPLAIN PLAN FOR SELECT ...;  SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Estimated is not actual</div>
+  <p style="margin-bottom:0">
+    An <em>estimated</em> plan is what the optimiser intends; an <em>actual</em> plan additionally
+    reports what happened. Nearly every performance problem is a <strong>gap between the two</strong>,
+    so a plan without actual row counts is missing the diagnostic information. In PostgreSQL that
+    means <code>EXPLAIN ANALYZE</code>, not plain <code>EXPLAIN</code> — and note it really executes
+    the statement, so wrap a <code>DELETE</code> in a transaction you roll back.
+  </p>
+</div>
+
+<h2 id="two-numbers">The two numbers to look at first</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Somebody planned a trip expecting twelve people and booked a small car. Four hundred turned up.
+    The car is not the problem — the guess about how many people were coming is the problem, and
+    everything that went wrong afterwards followed from it. When you read a plan, look first for the
+    place where the database expected a few and got a lot.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Before you read a single operator name</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Estimated rows vs actual rows.</strong> A gap of more than about 10× at any
+      operator is the root cause, and everything downstream of it is a <em>consequence</em>, not a
+      problem in itself. Fix the estimate — statistics, a rewritten predicate, a temp table — and
+      the plan often changes shape entirely.</li>
+    <li><strong>Where the time or the reads actually went.</strong> PostgreSQL prints
+      <code>actual time</code> per node; SQL Server gives a percentage-of-batch cost, and
+      <code>SET STATISTICS IO ON</code> gives logical reads per table, which is more trustworthy
+      than the percentage because it is measured rather than estimated.</li>
+  </ol>
+</div>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 250" role="img" aria-labelledby="d27t d27d">
+    <title id="d27t">Reading a plan: the estimate gap</title>
+    <desc id="d27d">A nested loops join estimated 12 rows on its outer input but actually produced 380,000, so the index seek on the inner side executed 380,000 times.</desc>
+
+    <rect class="d-box" x="300" y="20" width="240" height="46" rx="8"/>
+    <text class="d-t-b" x="420" y="42" text-anchor="middle">Nested Loops (inner join)</text>
+    <text class="d-t-s" x="420" y="58" text-anchor="middle">chosen because the outer looked tiny</text>
+
+    <rect class="d-box-b" x="40" y="120" width="290" height="70" rx="8"/>
+    <text class="d-t-b" x="185" y="143" text-anchor="middle">Index Scan on orders</text>
+    <text class="d-t-m" x="185" y="163" text-anchor="middle">estimated rows:      12</text>
+    <text class="d-t-m" x="185" y="180" text-anchor="middle">actual rows:    380 000  ← HERE</text>
+
+    <rect class="d-box-w" x="500" y="120" width="290" height="70" rx="8"/>
+    <text class="d-t-b" x="645" y="143" text-anchor="middle">Index Seek on order_lines</text>
+    <text class="d-t-m" x="645" y="163" text-anchor="middle">cost per execution: tiny</text>
+    <text class="d-t-m" x="645" y="180" text-anchor="middle">executions:     380 000  ← symptom</text>
+
+    <path class="d-line" d="M185 120 V90 H380 V66" marker-end="url(#a27)"/>
+    <path class="d-line" d="M645 120 V90 H460 V66" marker-end="url(#a27)"/>
+    <text class="d-t-c" x="420" y="228" text-anchor="middle">fix the estimate on the left, not the operator on the right</text>
+    <defs>
+      <marker id="a27" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" class="d-fill"/>
+      </marker>
+    </defs>
+  </svg>
+  <figcaption>The expensive operator is rarely the broken one.</figcaption>
+</figure>
+
+<h2 id="operators">The operators you actually need</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Operator</th><th>Means</th><th>Concerning when</th></tr></thead>
+<tbody>
+<tr><td><strong>Index Seek / Index Scan (PG)</strong></td><td>Navigating the tree to a range</td><td>Rarely — this is what you want</td></tr>
+<tr><td><strong>Index Scan (MSSQL) / Seq Scan (PG)</strong></td><td>Reading the whole structure</td><td>On a large table with a selective predicate</td></tr>
+<tr><td><strong>Key Lookup / Bitmap Heap Scan</strong></td><td>Fetching the row after finding the key</td><td>With a high execution count — make the index cover</td></tr>
+<tr><td><strong>Nested Loops</strong></td><td>Seek the inner side once per outer row</td><td>When the outer input is large or badly estimated</td></tr>
+<tr><td><strong>Hash Match / Hash Join</strong></td><td>Build a hash table, then probe</td><td>When it spills to disk</td></tr>
+<tr><td><strong>Merge Join</strong></td><td>Walk two sorted inputs</td><td>When it forced a sort to get them</td></tr>
+<tr><td><strong>Sort</strong></td><td>Ordering</td><td>Nearly always — can an index supply the order?</td></tr>
+<tr><td><strong>Spool / Materialize</strong></td><td>The engine caching an intermediate result</td><td>Often a sign of a correlated subquery it could not flatten</td></tr>
+<tr><td><strong>Parallelism / Gather</strong></td><td>Multiple workers</td><td>When repartitioning costs more than it saves on a small query</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="warnings">The warnings worth knowing by name</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Three that each explain a whole class of slowness</div>
+  <ul style="margin-bottom:0">
+    <li><strong>Spill to tempdb / external merge sort.</strong> A sort or hash asked for less
+      memory than it needed, because the row estimate was low, and finished on disk. Look at the
+      estimate that caused it, not at the sort.</li>
+    <li><strong>Implicit conversion / <code>CONVERT_IMPLICIT</code>.</strong> A type mismatch is
+      preventing a seek. See <a href="07-predicates-and-sargability.html">chapter 07</a>.</li>
+    <li><strong>Missing index suggestion.</strong> SQL Server will propose one. Treat it as
+      <em>evidence, not instruction</em>: it considers one query in isolation, routinely suggests
+      an index with fourteen included columns, and does not know you already have one that differs
+      by a single column. Read it, then design the index yourself.</li>
+  </ul>
+</div>
+
+<h2 id="method">A method, in order</h2>
+
+<ol>
+  <li><strong>Get an actual plan</strong> plus <code>STATISTICS IO</code> / <code>BUFFERS</code>.</li>
+  <li><strong>Find the largest estimate-versus-actual gap.</strong> Start there, not at the most
+    expensive-looking node.</li>
+  <li><strong>Find the table with the most logical reads.</strong> That is where the work is,
+    regardless of what the cost percentages claim.</li>
+  <li><strong>Ask what the engine had to do that it should not have:</strong> a scan where a seek
+    was possible, a sort an index could have supplied, a lookup a covering index would remove, a
+    spool over a correlated subquery.</li>
+  <li><strong>Change one thing, re-measure.</strong> Two changes at once and you have learned
+    nothing about either.</li>
+</ol>
+
+<div class="tryit">
+  <pre><code>-- In the playground: two forms of the same question, two plans.
+EXPLAIN QUERY PLAN
+SELECT * FROM orders WHERE customer_id = 7 ORDER BY placed_at DESC;
+--   SEARCH orders USING INDEX ix_orders_cust_date (customer_id=?)
+--   ...and no "USE TEMP B-TREE FOR ORDER BY" line, because the index is already
+--   in that order. That missing line is the win.
+
+EXPLAIN QUERY PLAN
+SELECT * FROM orders ORDER BY total_cents DESC LIMIT 10;
+--   SCAN orders
+--   USE TEMP B-TREE FOR ORDER BY      ← it sorted 1800 rows to return 10</code></pre>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ How to talk about a plan in an interview</div>
+  <p style="margin-bottom:0">
+    Narrate it as a story about work: <em>“It seeks the index on status, gets about four hundred
+    rows, then does a key lookup for each one to fetch the customer id — so four hundred random
+    reads. Making that index cover <code>customer_id</code> removes the lookup entirely.”</em> That
+    is more convincing than naming operators, because it shows you know what the operator
+    <em>costs</em>.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Get an <em>actual</em> plan. An estimated plan is missing the diagnostic half.</li>
+    <li>The biggest estimate-versus-actual gap is the root cause; everything below it is a consequence.</li>
+    <li>Logical reads are measured; cost percentages are estimated. Trust the measured one.</li>
+    <li>A scan is not automatically wrong, and a seek is not automatically right.</li>
+    <li>A key lookup with a high execution count means the index should cover the query.</li>
+    <li>A sort operator is an invitation to ask whether an index could supply the order.</li>
+    <li>A spill to disk means the memory grant was too small, which means the estimate was too low.</li>
+    <li>Missing-index suggestions are evidence, not instructions. They see one query and no existing indexes.</li>
+    <li>Change one thing and re-measure.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">How do you approach a slow query?</p>
+  <p class="a">Get the actual plan and the IO statistics. Look for the largest gap between
+    estimated and actual rows, because everything downstream of a bad estimate is a symptom. Then
+    look at which table did the most logical reads and ask what work the engine did that it should
+    not have — a scan instead of a seek, a sort an index could have supplied, a lookup per row.
+    Change one thing, re-measure.</p>
+</div>
+
+<div class="qa">
+  <p class="q">You see a key lookup executed 50 000 times. What does that mean?</p>
+  <p class="a">The index found the rows but did not contain every column the query needed, so the
+    engine is following the pointer back to the table once per row — 50 000 random reads. Adding
+    the missing columns to the index, as <code>INCLUDE</code> where available, removes the lookup
+    completely.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Should you always follow SQL Server's missing-index suggestions?</p>
+  <p class="a">No. They are generated per query in isolation, so they ignore indexes you already
+    have, propose very wide <code>INCLUDE</code> lists, and take no account of write cost. I treat
+    them as a hint about which columns matter, then design the index — often by extending one that
+    already exists rather than adding a fourth similar one.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>24 &middot; Concurrency patterns that actually hold &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="24-concurrency-patterns">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 3 — Changing data <span>&rsaquo;</span> Chapter 24</p>
+<h1>Concurrency patterns that actually hold</h1>
+<p class="lede">Optimistic vs pessimistic, SELECT … FOR UPDATE SKIP LOCKED, and a work queue in a table done properly.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">The reference database is built on these. They are also the fastest way to sound senior in an interview.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="optimistic">Optimistic concurrency</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Two ways to share a book. <em>Pessimistic:</em> take it off the shelf and hold it, so nobody
+    else can even open it while you decide what to write. <em>Optimistic:</em> note which edition
+    you read, go away and think, then come back and say “I want to change page 4 of edition 7” —
+    and if it is now edition 8, you are told, and you look again.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    A <code>version</code> column, incremented on every write, and every update carrying the
+    version it read. The <strong>row count is the answer</strong>: one means you won, zero means
+    somebody changed it since you read it, so you reload and either retry or tell the user. It
+    costs one integer column and holds no lock across the user's thinking time — which is why it
+    is the default choice for anything a human edits.
+  </p>
+</div>
+
+<pre><code>-- The reference database's orders table carries this column for exactly this.
+UPDATE orders
+SET    status = 'confirmed',
+       version = version + 1
+WHERE  id = ? AND version = ?;      -- the version the caller read
+
+-- rows affected = 1  -> committed
+-- rows affected = 0  -> someone else got there first: 409 Conflict, reload, retry</code></pre>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Engine</th><th>Idiomatic version column</th></tr></thead>
+<tbody>
+<tr><td>Any</td><td>An <code>INTEGER</code> you increment yourself. Portable, obvious, testable</td></tr>
+<tr><td>SQL Server</td><td><code>rowversion</code> / <code>timestamp</code> — maintained automatically, database-unique</td></tr>
+<tr><td>PostgreSQL</td><td>The system column <code>xmin</code> works, and is what Hibernate uses; an explicit column is clearer</td></tr>
+<tr><td>Oracle</td><td><code>ORA_ROWSCN</code>, with <code>ROWDEPENDENCIES</code> enabled on the table</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — a timestamp is not a version</div>
+  <p style="margin-bottom:0">
+    <code>WHERE updated_at = ?</code> looks equivalent and is not: two updates inside the same
+    clock tick produce the same value, and clock resolution is coarser than you think (SQL Server's
+    <code>DATETIME</code> is accurate to about 3&nbsp;ms). Under load that is a lost update with no
+    error. Use a counter or a real <code>rowversion</code>.
+  </p>
+</div>
+
+<h2 id="pessimistic">Pessimistic locking, and SKIP LOCKED</h2>
+
+<pre><code>-- Take the lock while reading, hold it to the end of the transaction.
+BEGIN;
+  SELECT on_hand FROM stock WHERE product_id = ? FOR UPDATE;   -- X lock, others wait
+  UPDATE stock SET on_hand = on_hand - ? WHERE product_id = ?;
+COMMIT;
+
+-- The two modifiers that make it usable:
+SELECT ... FOR UPDATE NOWAIT;       -- fail immediately rather than queue
+SELECT ... FOR UPDATE SKIP LOCKED;  -- ignore locked rows and take the next free one</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ <code>SKIP LOCKED</code> is the whole reason a queue in a table works</div>
+  <p style="margin-bottom:0">
+    Without it, ten workers polling the same job table all block on the first unclaimed row and you
+    have a one-worker system with nine spectators. With it, each worker takes a <em>different</em>
+    row on the first attempt. PostgreSQL 9.5+, MySQL 8+, Oracle. SQL Server spells it
+    <code>WITH (UPDLOCK, READPAST)</code>. It converts “a queue in a database is a bad idea” into
+    “a queue in a database is fine up to a few thousand jobs a second”.
+  </p>
+</div>
+
+<h2 id="queue">A work queue in a table, done properly</h2>
+
+<pre><code>-- PostgreSQL: claim ONE job atomically. No race, no double processing.
+UPDATE outbox
+SET    claimed_at = now(), claimed_by = $1, attempts = attempts + 1
+WHERE  id = (
+  SELECT id FROM outbox
+  WHERE  published_at IS NULL
+    AND (claimed_at IS NULL OR claimed_at &lt; now() - INTERVAL '5 minutes')  -- reclaim the dead
+  ORDER  BY created_at
+  FOR UPDATE SKIP LOCKED
+  LIMIT  1
+)
+RETURNING id, topic, payload;
+
+-- SQL Server
+UPDATE TOP (1) o
+SET    claimed_at = SYSUTCDATETIME(), claimed_by = @worker, attempts = attempts + 1
+OUTPUT inserted.id, inserted.topic, inserted.payload
+FROM   outbox o WITH (UPDLOCK, READPAST)
+WHERE  o.published_at IS NULL;</code></pre>
+
+<div class="box note">
+  <div class="box-title">Three details that make it production-grade</div>
+  <ol style="margin-bottom:0">
+    <li><strong>A claim timeout.</strong> A worker that dies holding a claim must not hold the job
+      forever. Reclaim anything claimed more than n minutes ago.</li>
+    <li><strong>An attempts counter and a dead-letter rule.</strong> A message that fails
+      permanently will otherwise be retried until the end of time.</li>
+    <li><strong>A partial index on exactly the worker's predicate.</strong>
+      <code>WHERE published_at IS NULL</code> — the index stays tiny however large the table grows,
+      because published rows leave it entirely.</li>
+  </ol>
+</div>
+
+<h2 id="outbox">The transactional outbox</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    You need to save the order <em>and</em> send the confirmation email. Send first and the save
+    might fail — you promised something that did not happen. Save first and the send might fail —
+    it happened and nobody was told. So instead you write the email into a <em>letters to post</em>
+    box in the same notebook, in the same stroke of the pen, and a postman empties the box later.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    There is no transaction spanning your database and a message broker, so “save and publish” is
+    a <strong>dual-write problem</strong> with no atomic solution. The outbox converts it into a
+    single local transaction: the row and the message are written together, and a separate worker
+    reads the outbox and publishes. Delivery becomes <strong>at-least-once</strong>, so consumers
+    must be idempotent (<a href="20-upsert-and-idempotency.html">chapter 20</a>) — and that is the
+    honest trade, not a flaw to hide.
+  </p>
+</div>
+
+<pre><code>BEGIN;
+  UPDATE orders SET status = 'shipped', shipped_at = now(), version = version + 1
+  WHERE id = $1 AND version = $2;
+  -- 0 rows -> ROLLBACK, 409
+
+  INSERT INTO order_events (order_id, from_status, to_status, actor)
+  VALUES ($1, 'confirmed', 'shipped', $3);
+
+  INSERT INTO outbox (topic, payload)
+  VALUES ('order.shipped', json_build_object('orderId', $1)::text);
+COMMIT;
+-- Everything or nothing. The worker publishes afterwards, and may publish twice.</code></pre>
+
+<h2 id="oversell">The last-unit problem</h2>
+
+<p>
+  Two customers order the last item at the same moment. Three defences, and the strongest one
+  is not the code:
+</p>
+
+<pre><code>-- 1. The constraint. Even if every other defence fails, the database refuses.
+CONSTRAINT ck_stock_nonneg CHECK (on_hand &gt;= 0)
+
+-- 2. An atomic, conditional update. No read-modify-write, so no window.
+UPDATE stock
+SET    on_hand = on_hand - :qty
+WHERE  product_id = :id AND on_hand &gt;= :qty;
+-- rows affected = 0 -> not enough stock. No SELECT involved, so nothing to race.
+
+-- 3. Only if you must serialise something more complex:
+SELECT on_hand FROM stock WHERE product_id = :id FOR UPDATE;</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ Say this in an interview</div>
+  <p style="margin-bottom:0">
+    “I would make the decrement a single conditional update rather than a read followed by a write,
+    so there is no window to race in, and I would still put a <code>CHECK (on_hand &gt;= 0)</code>
+    on the table — because the constraint is the only defence that holds when somebody writes a
+    second application against the same database.”
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- In the playground: the constraint refusing to be talked round.
+UPDATE stock SET on_hand = on_hand - 1000 WHERE product_id = 1;
+-- CHECK constraint failed: ck_stock_nonneg
+
+-- And the conditional form, which just declines:
+UPDATE stock SET on_hand = on_hand - 1000 WHERE product_id = 1 AND on_hand &gt;= 1000;
+SELECT changes();   -- 0. No error, no oversell, and the caller can say why.</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Optimistic concurrency: a version column and <code>WHERE version = ?</code>. Zero rows affected is the conflict signal.</li>
+    <li>A timestamp is not a version. Two updates in one clock tick share a value.</li>
+    <li>Pessimistic locking is correct and costs concurrency. Never hold a lock across a user's thinking time.</li>
+    <li><code>SKIP LOCKED</code> is what makes a queue-in-a-table work with more than one worker.</li>
+    <li>A production queue needs a claim timeout, an attempts counter and a partial index on the worker's predicate.</li>
+    <li>There is no transaction across a database and a broker. The outbox turns the dual write into one local transaction.</li>
+    <li>Outbox delivery is at-least-once, so consumers must be idempotent. Say so rather than implying exactly-once.</li>
+    <li>Prefer a single conditional update to read-modify-write: there is no window to race in.</li>
+    <li>Back every concurrency pattern with a constraint. It is the only defence that survives a second application.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Optimistic or pessimistic locking?</p>
+  <p class="a">Optimistic where conflicts are rare and the edit involves a human — a version column
+    costs nothing and holds no lock across thinking time. Pessimistic where a conflict is likely
+    and retrying is expensive, or where I must serialise a multi-step operation. For a simple
+    decrement I would use neither: a single conditional update has no window at all.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you stop two customers buying the last item?</p>
+  <p class="a">Make the decrement one atomic conditional statement — <code>UPDATE … SET on_hand =
+    on_hand - :q WHERE id = :id AND on_hand &gt;= :q</code> — and treat zero rows affected as
+    "out of stock". Then add <code>CHECK (on_hand &gt;= 0)</code> so the invariant holds even if
+    somebody later writes different code against the same table.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you publish an event reliably when you save a record?</p>
+  <p class="a">A transactional outbox: write the domain change and the message into the same
+    database transaction, and have a worker read the outbox and publish. It removes the dual-write
+    problem at the cost of at-least-once delivery, so consumers must be idempotent — usually a
+    unique constraint on the message id.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

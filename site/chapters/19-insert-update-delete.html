@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>19 &middot; INSERT, UPDATE, DELETE and RETURNING &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="19-insert-update-delete">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 3 — Changing data <span>&rsaquo;</span> Chapter 19</p>
+<h1>INSERT, UPDATE, DELETE and RETURNING</h1>
+<p class="lede">Bulk loading, UPDATE … FROM, the WHERE clause you forgot, and getting the changed rows back.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; the read half of SQL is where
+  you spend your time; the write half is where you can do real damage.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="delete">The habit that will save your career</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Before you rub something out, first draw a circle round exactly what you are about to rub out,
+    and count it. If the circle contains more than you expected, you have just saved yourself.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    Write the <code>SELECT</code> first, read the count, then convert it into the
+    <code>UPDATE</code> or <code>DELETE</code> — inside an explicit transaction, checking the
+    affected row count against the number you just read before committing. It costs fifteen
+    seconds. The alternative costs a restore.
+  </p>
+</div>
+
+<pre><code>-- 1. What am I about to touch?
+SELECT COUNT(*) FROM orders WHERE status = 'draft' AND placed_at &lt; DATE '2025-01-01';
+-- 412
+
+-- 2. Do it, but keep the door open.
+BEGIN;
+  DELETE FROM orders WHERE status = 'draft' AND placed_at &lt; DATE '2025-01-01';
+  -- read the affected row count: 412?  COMMIT.  Anything else?  ROLLBACK.
+COMMIT;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — autocommit</div>
+  <p style="margin-bottom:0">
+    Most clients run in <strong>autocommit</strong>: every statement commits as it finishes, so
+    <code>BEGIN</code> is not implied and there is nothing to roll back. SSMS, psql and DBeaver all
+    default this way. Know which mode your tool is in <em>before</em> you run a delete, not
+    after — and prefer a tool where the transaction state is visible on screen.
+  </p>
+</div>
+
+<h2 id="returning">Getting the changed rows back</h2>
+
+<p>
+  You almost always want to know what a write did — the generated id, the previous value, the rows
+  affected. Three dialects, three spellings, one idea:
+</p>
+
+<pre><code>-- PostgreSQL, SQLite 3.35+, MariaDB
+INSERT INTO customers (email, name, city_id) VALUES (?, ?, ?)
+RETURNING id, created_at;
+
+UPDATE orders SET status = 'confirmed', version = version + 1
+WHERE id = ? AND version = ?
+RETURNING id, version;                 -- zero rows back = somebody else won. See ch. 24
+
+-- SQL Server: OUTPUT, and it can capture both images
+UPDATE orders SET status = 'confirmed'
+OUTPUT inserted.id, deleted.status AS was, inserted.status AS now
+WHERE id = ?;
+
+-- Oracle
+UPDATE orders SET status = 'confirmed' WHERE id = :id
+RETURNING id INTO :out_id;</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ Why this matters more than it looks</div>
+  <p style="margin-bottom:0">
+    <code>RETURNING</code> makes “write then read what I wrote” <strong>one round trip and one
+    atomic step</strong>. The alternative — insert, then <code>SELECT last_insert_id()</code>, then
+    select the row — is three round trips and has a race in the middle in any connection-pooled
+    application. It is also the clean way to implement an optimistic-concurrency check: the row
+    count <em>is</em> the answer.
+  </p>
+</div>
+
+<h2 id="update-from">UPDATE from another table</h2>
+
+<pre><code>-- PostgreSQL
+UPDATE orders o
+SET total_cents = t.total
+FROM (SELECT order_id, SUM(quantity * unit_price_cents) AS total
+      FROM order_lines GROUP BY order_id) t
+WHERE t.order_id = o.id;
+
+-- SQL Server: same idea, the join goes in a FROM clause after SET
+UPDATE o SET total_cents = t.total
+FROM orders o
+JOIN (SELECT order_id, SUM(quantity * unit_price_cents) AS total
+      FROM order_lines GROUP BY order_id) t ON t.order_id = o.id;
+
+-- Portable everywhere, and correct even when a row has no lines:
+UPDATE orders
+SET total_cents = COALESCE(
+  (SELECT SUM(quantity * unit_price_cents) FROM order_lines l WHERE l.order_id = orders.id), 0);</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the non-deterministic UPDATE ... FROM</div>
+  <p style="margin-bottom:0">
+    In SQL Server, if the joined source produces <strong>more than one row per target row</strong>,
+    the update does not fail — it silently applies <em>one arbitrary</em> match and discards the
+    rest. PostgreSQL behaves the same way with <code>UPDATE … FROM</code>. The same statement can
+    produce a different result on the next run. Always make sure the source is aggregated or
+    otherwise unique on the join key, and if you are not sure, prove it with a
+    <code>GROUP BY … HAVING COUNT(*) &gt; 1</code> first.
+  </p>
+</div>
+
+<h2 id="bulk">Loading data in bulk</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Engine</th><th>Fast path</th></tr></thead>
+<tbody>
+<tr><td>PostgreSQL</td><td><code>COPY table FROM STDIN</code> — an order of magnitude faster than inserts</td></tr>
+<tr><td>SQL Server</td><td><code>BULK INSERT</code>, <code>bcp</code>, or <code>SqlBulkCopy</code></td></tr>
+<tr><td>MySQL</td><td><code>LOAD DATA INFILE</code>, or multi-row <code>INSERT … VALUES (…),(…)</code></td></tr>
+<tr><td>Any</td><td>Multi-row <code>INSERT</code> in batches of ~1 000 inside one transaction</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Why one-row-at-a-time is so much slower</div>
+  <p style="margin-bottom:0">
+    Each statement in autocommit is its own transaction, so each one waits for a <strong>log
+    flush to disk</strong>. That is the durability guarantee being paid for, ten thousand times.
+    Wrapping ten thousand inserts in one transaction turns ten thousand flushes into one and is
+    routinely 50–100× faster — with no loss of safety, because the whole batch is still atomic.
+    This is the single most useful performance fact about writing data.
+  </p>
+</div>
+
+<h2 id="truncate">DELETE, TRUNCATE and DROP</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th></th><th>Removes</th><th>Logging</th><th>Rollback?</th><th>Triggers?</th><th>Resets identity?</th></tr></thead>
+<tbody>
+<tr><td><code>DELETE</code></td><td>Chosen rows</td><td>Per row</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+<tr><td><code>TRUNCATE</code></td><td>All rows</td><td>Minimal (page deallocation)</td><td>Yes in SQL Server &amp; PostgreSQL; <strong>no</strong> in MySQL/Oracle</td><td>No</td><td>Usually yes</td></tr>
+<tr><td><code>DROP</code></td><td>The table itself</td><td>—</td><td>Depends on engine</td><td>—</td><td>—</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box note">
+  <div class="box-title">The detail interviewers listen for</div>
+  <p style="margin-bottom:0">
+    <code>TRUNCATE</code> is DDL, not DML, in most engines — which is why it fires no triggers,
+    takes a schema-level lock, cannot be filtered, and in MySQL and Oracle causes an
+    <strong>implicit commit</strong> that ends your transaction whether you wanted it to or not.
+    Saying “it is DDL” explains all five differences at once.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- In the playground: watch the row count, and roll it back.
+BEGIN;
+  UPDATE orders SET status = 'cancelled' WHERE status = 'draft';
+  SELECT changes() AS rows_affected;     -- SQLite; @@ROWCOUNT in T-SQL
+ROLLBACK;
+SELECT status, COUNT(*) FROM orders GROUP BY status;   -- unchanged</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Write the <code>SELECT</code> first, read the count, then convert it to the write.</li>
+    <li>Wrap destructive statements in an explicit transaction and check the affected row count before committing.</li>
+    <li>Know whether your client is in autocommit before you run a delete, not after.</li>
+    <li><code>RETURNING</code> / <code>OUTPUT</code> makes “write then read” one atomic round trip and removes a race.</li>
+    <li><code>UPDATE … FROM</code> with a non-unique source silently applies one arbitrary match. Aggregate the source.</li>
+    <li>Ten thousand inserts in one transaction is one log flush instead of ten thousand — routinely 50–100× faster.</li>
+    <li><code>TRUNCATE</code> is DDL: no triggers, no filtering, and an implicit commit in MySQL and Oracle.</li>
+    <li>A <code>DELETE</code> from a parent with unindexed foreign keys on children will scan every child table.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Difference between DELETE and TRUNCATE?</p>
+  <p class="a"><code>DELETE</code> is DML: it logs each row, fires triggers, can be filtered and
+    rolled back. <code>TRUNCATE</code> is DDL in most engines: it deallocates pages, is far faster,
+    fires no triggers, cannot have a <code>WHERE</code>, usually resets the identity, and in MySQL
+    and Oracle commits your transaction implicitly.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How would you insert a million rows?</p>
+  <p class="a">The engine's bulk path — <code>COPY</code>, <code>BULK INSERT</code>,
+    <code>LOAD DATA</code> — or batched multi-row inserts inside one transaction. The cost of
+    row-at-a-time is one log flush per statement; batching turns that into one flush per batch
+    without losing atomicity. I would also consider dropping and rebuilding non-clustered indexes
+    around a very large load.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you get the id of a row you just inserted?</p>
+  <p class="a"><code>RETURNING id</code> (PostgreSQL, SQLite, MariaDB) or <code>OUTPUT
+    inserted.id</code> (SQL Server) — one round trip, no race. The
+    <code>last_insert_id()</code>-style functions are connection-scoped and become fragile with
+    triggers or connection pooling.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

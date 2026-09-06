@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SQL playground — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+<style>
+  .pg { display: grid; gap: 14px; }
+  .pg-editor {
+    width: 100%; min-height: 190px; resize: vertical;
+    padding: 13px 15px; border: 1px solid var(--code-line); border-radius: var(--radius);
+    background: var(--code-bg); color: var(--code-ink);
+    font: 13.5px/1.62 var(--mono); tab-size: 2;
+  }
+  .pg-editor:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .pg-out { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+  .pg-out .hd {
+    display: flex; align-items: center; gap: 10px; padding: 8px 13px;
+    border-bottom: 1px solid var(--line-soft); background: var(--panel-2);
+    font: 600 12px var(--sans); color: var(--ink-faint);
+  }
+  .pg-out .body { overflow: auto; max-height: 460px; }
+  .pg-out table { font-size: 13px; }
+  .pg-out th { position: sticky; top: 0; z-index: 1; }
+  .pg-out td { white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
+  .pg-out td.null { color: var(--ink-faint); font-style: italic; }
+  .pg-side { display: grid; grid-template-columns: 220px minmax(0,1fr); gap: 14px; align-items: start; }
+  .pg-schema { font-size: 13px; }
+  .pg-schema details { border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 6px; background: var(--panel); }
+  .pg-schema summary { padding: 7px 11px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .pg-schema ul { margin: 0; padding: 0 11px 9px 26px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); }
+  .pg-recipes { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pg-recipes button { font-size: 12px; padding: 5px 10px; }
+  @media (max-width: 900px) { .pg-side { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body data-page="playground">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main wide" id="main">
+
+<p class="crumbs">Tools</p>
+<h1>SQL playground</h1>
+<p class="lede">
+  A real SQLite engine running in your browser, with the reference order-fulfilment
+  database loaded. Nothing is sent anywhere; the whole engine is 700&nbsp;KB of
+  WebAssembly served from this folder, so it works offline and from a USB stick.
+</p>
+
+<div id="boot" class="msg">Loading the engine…</div>
+
+<div class="pg" id="pg" hidden>
+  <div class="pg-recipes" id="recipes"></div>
+
+  <textarea class="pg-editor" id="sql" spellcheck="false" aria-label="SQL to run"></textarea>
+
+  <div class="row">
+    <button class="btn" id="run">Run  <span class="kbd" style="border-color:rgba(255,255,255,.4);color:#fff">Ctrl ⏎</span></button>
+    <button class="btn quiet" id="plan">Explain query plan</button>
+    <button class="btn quiet" id="reset">Reset database</button>
+    <span class="grow" style="flex:1"></span>
+    <span class="small muted" id="timing"></span>
+  </div>
+
+  <div class="pg-side">
+    <div class="pg-schema" id="schema"></div>
+    <div id="out"></div>
+  </div>
+</div>
+
+<h2 id="notes">Two honest notes</h2>
+<div class="box note">
+  <div class="box-title">This is SQLite, not SQL Server</div>
+  <p style="margin-bottom:0">
+    Everything in Parts 1–3 of this course runs here unchanged. What does <strong>not</strong>:
+    <code>DATEADD</code> and friends (SQLite uses <code>date()</code> and <code>strftime()</code>),
+    <code>OVER … RANGE INTERVAL</code>, <code>MERGE</code>, <code>PIVOT</code>, real
+    <code>EXPLAIN ANALYZE</code> output, and anything about locking or isolation — SQLite has one
+    writer, so chapters 22 and 23 cannot be demonstrated here. Where a chapter needs a server
+    engine, it says so and gives you the Docker one-liner.
+  </p>
+</div>
+<div class="box trap">
+  <div class="box-title">⚠ The plan output is deliberately primitive</div>
+  <p style="margin-bottom:0">
+    <code>EXPLAIN QUERY PLAN</code> tells you <em>scan or search, and using which index</em>. That
+    is genuinely enough to see the difference a sargable predicate makes, which is why it is here.
+    It is not a cost-based plan with row estimates and operators — for that you need PostgreSQL's
+    <code>EXPLAIN (ANALYZE, BUFFERS)</code> or SQL Server's actual execution plan, and
+    <a href="chapters/27-execution-plans.html">chapter 27</a> reads both.
+  </p>
+</div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script src="assets/forge-db.js"></script>
+<script src="vendor/sql.js/sql-wasm.js"></script>
+<script>
+(function () {
+  var db = null, SQL = null;
+  var boot = document.getElementById("boot");
+  var editor = document.getElementById("sql");
+  var out = document.getElementById("out");
+
+  var RECIPES = [
+    ["Orders by status",
+     "SELECT status, COUNT(*) AS n, SUM(total_cents)/100.0 AS eur\nFROM orders\nGROUP BY status\nORDER BY n DESC;"],
+    ["Monthly revenue",
+     "SELECT strftime('%Y-%m', placed_at)       AS month,\n       COUNT(*)                          AS orders,\n       SUM(total_cents)/100.0            AS revenue_eur,\n       ROUND(AVG(total_cents)/100.0, 2)  AS avg_order_eur\nFROM orders\nWHERE status <> 'cancelled'\nGROUP BY month\nORDER BY month;"],
+    ["Top-N per group (window)",
+     "-- The most recent order per customer. WHERE cannot see rn,\n-- so it needs the outer level. See chapter 13.\nWITH ranked AS (\n  SELECT o.*,\n         ROW_NUMBER() OVER (PARTITION BY customer_id\n                            ORDER BY placed_at DESC, id DESC) AS rn\n  FROM orders o\n)\nSELECT customer_id, id, placed_at, total_cents/100.0 AS eur\nFROM ranked WHERE rn = 1\nORDER BY customer_id\nLIMIT 20;"],
+    ["Anti-join: never ordered",
+     "-- NOT EXISTS, not NOT IN. One NULL in the subquery and NOT IN\n-- returns the empty set. See chapter 08.\nSELECT c.id, c.name\nFROM customers c\nWHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);"],
+    ["The fan-out bug",
+     "-- Joining two one-to-many children of the same parent MULTIPLIES rows.\n-- Compare the two totals for order 3. See chapter 08.\nSELECT o.id,\n       SUM(l.quantity * l.unit_price_cents)/100.0 AS lines_wrong,\n       SUM(p.amount_cents)/100.0                  AS paid_wrong\nFROM orders o\nJOIN order_lines l ON l.order_id = o.id\nJOIN payments    p ON p.order_id = o.id\nWHERE o.id = 3\nGROUP BY o.id;\n\n-- Now the correct version:\nSELECT order_id, line_total_cents/100.0, paid_cents/100.0\nFROM v_order_totals WHERE order_id = 3;"],
+    ["Sargability, side by side",
+     "-- Run 'Explain query plan' on each of these.\nEXPLAIN QUERY PLAN\nSELECT * FROM orders\nWHERE placed_at >= '2026-03-01' AND placed_at < '2026-04-01';"],
+    ["Recursive CTE: the org chart",
+     "WITH RECURSIVE org AS (\n  SELECT id, name, manager_id, 1 AS depth, name AS path\n  FROM employees WHERE manager_id IS NULL\n  UNION ALL\n  SELECT e.id, e.name, e.manager_id, o.depth + 1, o.path || ' > ' || e.name\n  FROM employees e\n  JOIN org o ON e.manager_id = o.id\n  WHERE o.depth < 20              -- the cycle guard. Always.\n)\nSELECT depth, path FROM org ORDER BY path;"],
+    ["Gaps and islands",
+     "-- Runs of consecutive days on which an order was placed.\nWITH days AS (\n  SELECT DISTINCT date(placed_at) AS d FROM orders\n),\nnumbered AS (\n  SELECT d, ROW_NUMBER() OVER (ORDER BY d) AS rn FROM days\n),\ngrouped AS (\n  SELECT d, julianday(d) - rn AS grp FROM numbered\n)\nSELECT MIN(d) AS run_start, MAX(d) AS run_end, COUNT(*) AS days\nFROM grouped GROUP BY grp\nHAVING COUNT(*) > 4\nORDER BY days DESC;"],
+    ["Conditional aggregation (pivot)",
+     "SELECT r.name AS region,\n       COUNT(*)                                                      AS orders,\n       COUNT(CASE WHEN o.status = 'delivered' THEN 1 END)            AS delivered,\n       COUNT(CASE WHEN o.status = 'cancelled' THEN 1 END)            AS cancelled,\n       ROUND(100.0 * COUNT(CASE WHEN o.status='cancelled' THEN 1 END)\n             / NULLIF(COUNT(*), 0), 1)                              AS cancel_pct\nFROM orders o\nJOIN customers c ON c.id = o.customer_id\nJOIN cities   ci ON ci.id = c.city_id\nJOIN regions   r ON r.id = ci.region_id\nGROUP BY r.name\nORDER BY orders DESC;"],
+    ["Working days (calendar table)",
+     "-- Why a dim_date table is worth its weight. See chapter 17.\nSELECT d.year, d.month,\n       COUNT(DISTINCT d.d)                                   AS days,\n       SUM(CASE WHEN d.is_weekend = 0 AND d.is_holiday = 0\n                THEN 1 ELSE 0 END)                           AS working_days\nFROM dim_date d\nWHERE d.year = 2026\nGROUP BY d.year, d.month ORDER BY d.month;"],
+    ["Constraints are real",
+     "-- Every one of these SHOULD fail. Run them one at a time.\nINSERT INTO order_lines (order_id, line_no, product_id, quantity, unit_price_cents)\nVALUES (1, 99, 1, -5, 1000);                     -- ck_lines_qty\n\n-- UPDATE orders SET status = 'teleported' WHERE id = 1;   -- ck_orders_status\n-- INSERT INTO payments (order_id, amount_cents, method, external_ref)\n--   VALUES (1, 100, 'card', 'PAY-00000001');              -- uq_payments_ref\n-- UPDATE stock SET reserved = on_hand + 1 WHERE product_id = 1;  -- ck_stock_reservable"],
+  ];
+
+  var rec = document.getElementById("recipes");
+  RECIPES.forEach(function (r, i) {
+    var b = document.createElement("button");
+    b.className = i === 0 ? "btn ghost" : "btn quiet";
+    b.textContent = r[0];
+    b.onclick = function () { editor.value = r[1]; editor.focus(); run(); };
+    rec.appendChild(b);
+  });
+  editor.value = RECIPES[0][1];
+
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+
+  function showTables(res, ms, label) {
+    out.innerHTML = "";
+    if (!res.length) {
+      var d = document.createElement("div");
+      d.className = "msg ok";
+      d.textContent = "Statement executed. No rows returned." +
+        (db ? "  Rows changed: " + db.getRowsModified() : "");
+      out.appendChild(d);
+      return;
+    }
+    res.forEach(function (r) {
+      var wrap = document.createElement("div");
+      wrap.className = "pg-out";
+      var hd = document.createElement("div");
+      hd.className = "hd";
+      hd.textContent = (label || "") + r.values.length + " row" + (r.values.length === 1 ? "" : "s") +
+        " · " + r.columns.length + " column" + (r.columns.length === 1 ? "" : "s");
+      wrap.appendChild(hd);
+
+      var body = document.createElement("div");
+      body.className = "body";
+      var html = "<table><thead><tr>";
+      r.columns.forEach(function (c) { html += "<th>" + esc(c) + "</th>"; });
+      html += "</tr></thead><tbody>";
+      r.values.slice(0, 500).forEach(function (row) {
+        html += "<tr>";
+        row.forEach(function (v) {
+          html += v === null ? '<td class="null">NULL</td>' : "<td>" + esc(v) + "</td>";
+        });
+        html += "</tr>";
+      });
+      html += "</tbody></table>";
+      body.innerHTML = html;
+      wrap.appendChild(body);
+      if (r.values.length > 500) {
+        var n = document.createElement("div");
+        n.className = "hd";
+        n.textContent = "showing the first 500 of " + r.values.length + " rows";
+        wrap.appendChild(n);
+      }
+      out.appendChild(wrap);
+    });
+    document.getElementById("timing").textContent = ms.toFixed(1) + " ms";
+  }
+
+  function run(prefix) {
+    if (!db) return;
+    var sql = (editor.selectionStart !== editor.selectionEnd)
+      ? editor.value.slice(editor.selectionStart, editor.selectionEnd)   // run the selection
+      : editor.value;
+    if (prefix) {
+      /* One statement at a time for EXPLAIN, because prefixing a whole script
+         with EXPLAIN QUERY PLAN would only explain the first statement anyway. */
+      sql = sql.split(";").map(function (s) { return s.trim(); })
+               .filter(function (s) { return s && !/^--/.test(s); })
+               .map(function (s) { return prefix + " " + s; }).join(";\n") + ";";
+    }
+    var t0 = performance.now();
+    try {
+      var res = db.exec(sql);
+      showTables(res, performance.now() - t0, prefix ? "plan · " : "");
+    } catch (e) {
+      out.innerHTML = "";
+      var d = document.createElement("div");
+      d.className = "msg err";
+      d.textContent = e.message;
+      out.appendChild(d);
+      document.getElementById("timing").textContent = "";
+    }
+  }
+
+  function buildSchemaTree() {
+    var host = document.getElementById("schema");
+    host.innerHTML = "";
+    var tabs = db.exec(
+      "SELECT name, type FROM sqlite_master WHERE type IN ('table','view') " +
+      "AND name NOT LIKE 'sqlite_%' ORDER BY type DESC, name");
+    if (!tabs.length) return;
+    tabs[0].values.forEach(function (row) {
+      var name = row[0], type = row[1];
+      var d = document.createElement("details");
+      var s = document.createElement("summary");
+      s.textContent = (type === "view" ? "◱ " : "▦ ") + name;
+      d.appendChild(s);
+      var ul = document.createElement("ul");
+      var cols = db.exec("PRAGMA table_info(" + name + ")");
+      if (cols.length) {
+        cols[0].values.forEach(function (c) {
+          var li = document.createElement("li");
+          li.textContent = c[1] + "  " + (c[2] || "").toLowerCase() +
+            (c[5] ? "  PK" : "") + (c[3] ? "  NOT NULL" : "");
+          ul.appendChild(li);
+        });
+      }
+      d.appendChild(ul);
+      var b = document.createElement("div");
+      b.style.padding = "0 11px 10px";
+      var q = document.createElement("button");
+      q.className = "btn quiet";
+      q.style.fontSize = "11.5px";
+      q.style.padding = "4px 9px";
+      q.textContent = "SELECT * LIMIT 20";
+      q.onclick = function () {
+        editor.value = "SELECT * FROM " + name + " LIMIT 20;";
+        run();
+      };
+      b.appendChild(q);
+      d.appendChild(b);
+      host.appendChild(d);
+    });
+  }
+
+  function load() {
+    db = new SQL.Database();
+    db.run("PRAGMA foreign_keys = ON;");
+    db.run(self.FORGE_DB_SQL);
+    buildSchemaTree();
+  }
+
+  document.getElementById("run").onclick = function () { run(); };
+  document.getElementById("plan").onclick = function () { run("EXPLAIN QUERY PLAN"); };
+  document.getElementById("reset").onclick = function () {
+    if (db) db.close();
+    load();
+    out.innerHTML = '<div class="msg ok">Database rebuilt from reference/schema/*.sql.</div>';
+  };
+  editor.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      var s = editor.selectionStart;
+      editor.value = editor.value.slice(0, s) + "  " + editor.value.slice(editor.selectionEnd);
+      editor.selectionStart = editor.selectionEnd = s + 2;
+    }
+  });
+
+  initSqlJs({ locateFile: function (f) { return "vendor/sql.js/" + f; } })
+    .then(function (lib) {
+      SQL = lib;
+      var t0 = performance.now();
+      load();
+      boot.remove();
+      document.getElementById("pg").hidden = false;
+      run();
+      document.getElementById("timing").textContent =
+        "engine + " + (self.FORGE_DB_SQL.length / 1024 | 0) + " KB of SQL loaded in " +
+        (performance.now() - t0).toFixed(0) + " ms";
+    })
+    .catch(function (e) {
+      boot.className = "msg err";
+      boot.textContent = "Could not start the SQL engine: " + e.message +
+        "  (WebAssembly may be blocked, or this page was opened from file:// in a browser that " +
+        "refuses to load a local .wasm — try the dev server: node tools/serve.mjs)";
+    });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Viva — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="viva">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Retrieval practice</p>
+<h1>Viva</h1>
+<p class="lede">
+  No options. You say the answer out loud, commit to it, and only then see the model —
+  beside your own words.
+</p>
+
+<div class="grid-3" id="stats" style="margin-bottom:20px"></div>
+
+<div class="row" style="margin-bottom:18px" id="controls"></div>
+
+<div id="host"></div>
+
+<div class="box trap" id="honesty">
+  <div class="box-title">⚠ This is self-marked, and that is the weakest link on this site</div>
+  <p>
+    A percentage you awarded yourself is a number about your generosity. Two things mitigate it and
+    neither solves it:
+  </p>
+  <ul style="margin-bottom:0">
+    <li><strong>Your own words stay on screen</strong> next to the model answer, so you are
+      comparing rather than remembering what you meant.</li>
+    <li><strong>The rule's own code terms are matched literally</strong> against what you wrote and
+      shown as hit or missed. It cannot tell whether you were <em>right</em> — but “you never
+      mentioned <code>SKIP LOCKED</code>” is a fact, and facts are harder to mark generously than
+      feelings.</li>
+  </ul>
+</div>
+
+<div class="box note">
+  <div class="box-title">Why the answer is hidden until you commit</div>
+  <p style="margin-bottom:0">
+    Retrieval only strengthens a memory when it is genuinely attempted. A button that reveals the
+    model answer while you are still thinking converts the exercise back into reading, which feels
+    productive and is not. So there are two ways forward from a card: answer it, or press
+    <strong>“I can't say it”</strong> — which grades it 0 <em>before</em> revealing anything.
+  </p>
+</div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/rules.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+(function () {
+  if (!window.LF || !window.RULES) return;
+  var LF = window.LF, RULES = window.RULES;
+  var byId = {};
+  RULES.forEach(function (r) { byId[r.id] = r; });
+
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+  var mode = "due";        // due | twelve | six | all | chapter
+  var speak = false;       // say it out loud instead of typing
+  var italiano = false;    // rispondi in italiano
+  var queue = [], at = 0;
+
+  /* ------------------------------------------------------------- stats -- */
+  function stats() {
+    var host = document.getElementById("stats");
+    host.innerHTML = "";
+    var s = LF.vivaStats(RULES.length);
+    function stat(k, v, sub, cls) {
+      var d = el("div", "stat");
+      d.appendChild(el("div", "k", k));
+      d.appendChild(el("div", "v" + (cls ? " " + cls : ""), String(v)));
+      d.appendChild(el("div", "s", sub));
+      host.appendChild(d);
+    }
+    stat("Due now", s.due, s.due ? "most overdue first" : "nothing scheduled for today", s.due ? "warn" : "ok");
+    stat("Recited", s.seen + " / " + s.total, s.strong + " strong · " + s.lapsed + " with a lapse");
+    var t12 = RULES.filter(function (r) { return r.tier === "twelve"; });
+    var got = t12.filter(function (r) { return LF.profile.viva[r.id] && LF.profile.viva[r.id].grade === 2; }).length;
+    stat("The twelve", got + " / " + t12.length, "graded “I was certain”", got === t12.length ? "ok" : "");
+  }
+
+  /* ---------------------------------------------------------- controls -- */
+  function controls() {
+    var host = document.getElementById("controls");
+    host.innerHTML = "";
+    [["due", "Due today"], ["twelve", "The twelve"], ["six", "The senior six"], ["all", "Everything, shuffled"]]
+      .forEach(function (m) {
+        var b = el("button", "btn " + (mode === m[0] ? "" : "quiet"), m[1]);
+        b.onclick = function () { mode = m[0]; build(); };
+        host.appendChild(b);
+      });
+
+    host.appendChild(el("span", "", " "));
+
+    var sp = el("button", "tb-btn" + (speak ? " on" : ""), "🗣 Speak, don't type");
+    sp.onclick = function () { speak = !speak; controls(); render(); };
+    host.appendChild(sp);
+
+    var it = el("button", "tb-btn" + (italiano ? " on" : ""), "🇮🇹 Rispondi in italiano");
+    it.title = "Answer in Italian. The technical nouns stay English — la query, il deploy, l'indice.";
+    it.onclick = function () { italiano = !italiano; controls(); render(); };
+    host.appendChild(it);
+  }
+
+  /* ------------------------------------------------------------- queue -- */
+  function build() {
+    if (mode === "due") {
+      queue = LF.vivaDue().map(function (d) { return byId[d.id]; }).filter(Boolean);
+      /* Nothing due and nothing seen yet: seed with the twelve, because a first
+         session that says "come back tomorrow" teaches nobody anything. */
+      if (!queue.length && !Object.keys(LF.profile.viva).length)
+        queue = RULES.filter(function (r) { return r.tier === "twelve"; });
+    } else if (mode === "twelve") queue = RULES.filter(function (r) { return r.tier === "twelve"; });
+    else if (mode === "six") queue = RULES.filter(function (r) { return r.tier === "six"; });
+    else queue = shuffle(RULES.slice()).slice(0, 40);
+    at = 0;
+    controls();
+    render();
+  }
+  function shuffle(a) {
+    for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; }
+    return a;
+  }
+
+  /* ------------------------------------------------------------ render -- */
+  function render() {
+    var host = document.getElementById("host");
+    host.innerHTML = "";
+
+    if (at >= queue.length) {
+      var done = el("div", "panel");
+      done.appendChild(el("h3", "", queue.length ? "Session finished" : "Nothing due"));
+      done.appendChild(el("p", "muted", queue.length
+        ? "You recited " + queue.length + " rule" + (queue.length === 1 ? "" : "s") + ". They are back in the schedule at the interval each one earned."
+        : "The schedule says nothing is due. Reviewing early is mostly wasted effort — the forgetting is what strengthens the memory. Pick a deck above if you want to practise anyway."));
+      host.appendChild(done);
+      stats();
+      return;
+    }
+
+    var r = queue[at];
+    var card = el("div", "viva-card");
+
+    var meta = el("div", "row");
+    meta.style.marginBottom = "10px";
+    meta.appendChild(el("span", "pill", (at + 1) + " / " + queue.length));
+    if (r.tier === "twelve") meta.appendChild(el("span", "pill req", "one of the twelve"));
+    if (r.tier === "six") meta.appendChild(el("span", "pill extra", "the senior six"));
+    var link = el("a", "pill", r.n + " · " + r.title);
+    link.href = "chapters/" + r.chapter + ".html";
+    meta.appendChild(link);
+    card.appendChild(meta);
+
+    var claim = el("p", "viva-claim");
+    claim.innerHTML = md(r.claim.split(".")[0] + ".");
+    card.appendChild(claim);
+
+    card.appendChild(el("p", "small muted", italiano
+      ? "Spiega questa affermazione a voce alta, in italiano. I termini tecnici restano in inglese."
+      : "Say the rest of it out loud, as you would to an interviewer: what it means and why it is true."));
+
+    var ta = el("textarea", "viva-ans");
+    ta.placeholder = speak
+      ? (italiano ? "Dillo ad alta voce, poi scrivi qui le parole chiave…" : "Say it out loud first, then type the key words you used…")
+      : (italiano ? "Scrivi la tua risposta…" : "Type your answer…");
+    if (!speak) ta.style.minHeight = "150px"; else ta.style.minHeight = "80px";
+    card.appendChild(ta);
+
+    var foot = el("div", "row");
+    foot.style.marginTop = "12px";
+
+    var check = el("button", "btn", "Check yourself  ⌃⏎");
+    check.onclick = function () { reveal(r, ta.value, card, foot); };
+    foot.appendChild(check);
+
+    var cant = el("button", "btn quiet", "I can't say it");
+    cant.title = "Grades this 0 before revealing anything. That is the honest option and it is not a failure — it is the schedule doing its job.";
+    cant.onclick = function () {
+      LF.vivaReview(r.id, 0);
+      reveal(r, ta.value, card, foot, true);
+    };
+    foot.appendChild(cant);
+
+    card.appendChild(foot);
+    host.appendChild(card);
+
+    ta.focus();
+    ta.addEventListener("keydown", function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); reveal(r, ta.value, card, foot); }
+    });
+  }
+
+  /* Minimal inline markdown: `code` only. The claims come from our own files. */
+  function md(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+            .replace(/`([^`]+)`/g, "<code>$1</code>");
+  }
+
+  function reveal(r, answer, card, foot, alreadyGraded) {
+    if (card.querySelector(".viva-model")) return;
+    var ta = card.querySelector(".viva-ans");
+    if (ta) ta.disabled = true;
+
+    /* Your own words stay on screen, above the model. */
+    if (answer && answer.trim()) {
+      var yours = el("div", "viva-yours");
+      yours.appendChild(el("b", "", "What you said"));
+      yours.appendChild(document.createTextNode(answer.trim()));
+      card.insertBefore(yours, foot);
+    }
+
+    var model = el("div", "viva-model");
+    model.appendChild(el("b", "", "The rule"));
+    var p = el("p");
+    p.style.margin = "0";
+    p.innerHTML = md(r.claim);
+    model.appendChild(p);
+    card.insertBefore(model, foot);
+
+    /* Checkpoints: the rule's own code terms, matched literally. */
+    if (r.checkpoints && r.checkpoints.length) {
+      var hay = (answer || "").toLowerCase();
+      var checks = el("div", "checks");
+      r.checkpoints.forEach(function (term) {
+        var hit = hay.indexOf(term.toLowerCase()) >= 0;
+        var c = el("span", "chk " + (hit ? "hit" : "miss"), (hit ? "✓ " : "✗ ") + term);
+        checks.appendChild(c);
+      });
+      card.insertBefore(checks, foot);
+      var note = el("p", "small muted");
+      note.style.marginTop = "-4px";
+      note.textContent = "These are the rule's own terms, matched literally in what you typed. "
+        + "It cannot tell whether you were right — only whether you said them.";
+      card.insertBefore(note, foot);
+    }
+
+    var refs = el("p", "small muted");
+    refs.innerHTML = 'Read it again: <a href="chapters/' + r.chapter + '.html">' + r.n + " · " + r.title + "</a>";
+    card.insertBefore(refs, foot);
+
+    foot.innerHTML = "";
+    if (alreadyGraded) {
+      var nx = el("button", "btn", "Next →");
+      nx.onclick = function () { at++; stats(); render(); };
+      foot.appendChild(nx);
+      foot.appendChild(el("span", "q-hint", "graded: not there yet"));
+    } else {
+      [[2, "btn", "Clean — I said all of it", "1"],
+       [1, "btn ghost", "Hedged — I got most of it", "2"],
+       [0, "btn quiet", "Not there", "3"]].forEach(function (g) {
+        var b = el("button", g[1], g[2]);
+        b.onclick = function () { LF.vivaReview(r.id, g[0]); at++; stats(); render(); };
+        foot.appendChild(b);
+      });
+      foot.appendChild(el("span", "q-hint", "keys 1 · 2 · 3"));
+    }
+  }
+
+  document.addEventListener("keydown", function (e) {
+    var t = e.target;
+    if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT")) return;
+    var foot = document.querySelector(".viva-card .row:last-of-type");
+    if (!foot) return;
+    var map = { "1": 0, "2": 1, "3": 2 };
+    if (e.key in map) {
+      var btns = foot.querySelectorAll("button");
+      if (btns[map[e.key]]) { e.preventDefault(); btns[map[e.key]].click(); }
+    }
+  });
+
+  LF.on("change", stats);
+  stats();
+  build();
+})();
+</script>
+</body>
+</html>

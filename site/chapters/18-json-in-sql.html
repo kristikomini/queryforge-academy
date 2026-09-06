@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>18 &middot; JSON and semi-structured data &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="18-json-in-sql">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 18</p>
+<h1>JSON and semi-structured data</h1>
+<p class="lede">When a JSON column is the right answer, when it is a schema you refused to design, and how to index one.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">Every engine grew JSON support and every legacy schema now has a “settings” column. Nobody advertises it; everybody meets it.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="when">When a JSON column is the right answer</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A filing cabinet has a drawer for each kind of thing, and that is why you can find anything.
+    A JSON column is a drawer labelled “miscellaneous”. Sometimes you genuinely need one. But if
+    everything ends up in it, you do not have a filing cabinet any more — you have a box.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p>Three cases where a JSON column is a good decision:</p>
+  <ol>
+    <li><strong>Genuinely open-ended attributes.</strong> Per-tenant custom fields, where the set of
+      keys is defined by customers and not by you.</li>
+    <li><strong>A payload you received and must keep verbatim.</strong> A webhook body, an API
+      response, an audit snapshot. You store it to prove what arrived, and you query the columns
+      you extracted from it — not the blob.</li>
+    <li><strong>A sparse, rarely-queried settings bag.</strong> Forty optional preferences that are
+      read as a unit and never filtered on.</li>
+  </ol>
+  <p style="margin-bottom:0">And the case where it is not: <strong>a field you filter, join or
+  aggregate on.</strong> That is a column. If you find yourself indexing a JSON path because
+  a query needs it, the schema is telling you something.</p>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    A JSON column has <strong>no constraints</strong>. No type checking, no <code>NOT NULL</code>,
+    no foreign key, no uniqueness. Every value in it is “whatever the application wrote last
+    Tuesday”, including the typo'd key name that has been silently accumulating for six months.
+    The relational engine cannot help you, which is the entire point of having chosen one.
+  </p>
+</div>
+
+<h2 id="dialects">Reading it, four ways</h2>
+
+<pre><code>-- PostgreSQL (jsonb — the binary, indexable one; prefer it to json)
+SELECT data -&gt;&gt; 'email'                    AS email,      -- ->> returns text, -> returns jsonb
+       (data -&gt; 'prefs' -&gt;&gt; 'lang')        AS lang,
+       jsonb_array_length(data -&gt; 'tags')  AS n_tags
+FROM events WHERE data @&gt; '{"type":"signup"}';             -- @> is the containment operator
+
+-- SQL Server 2016+
+SELECT JSON_VALUE(data, '$.email')          AS email,      -- scalar
+       JSON_QUERY(data, '$.prefs')          AS prefs       -- object or array
+FROM events WHERE ISJSON(data) = 1;
+
+-- MySQL 5.7+
+SELECT data -&gt;&gt; '$.email' AS email FROM events;
+
+-- Oracle 12c+
+SELECT JSON_VALUE(data, '$.email') FROM events;</code></pre>
+
+<div class="box note">
+  <div class="box-title">json vs jsonb in PostgreSQL</div>
+  <p style="margin-bottom:0">
+    <code>json</code> stores the exact text, preserving key order and whitespace, and re-parses on
+    every access. <code>jsonb</code> stores a parsed binary form: slightly slower to write, much
+    faster to read, deduplicates keys, loses formatting, and is <strong>the only one that can be
+    indexed usefully</strong>. Use <code>jsonb</code> unless you must reproduce the original bytes
+    exactly — which is really the "keep the payload verbatim" case, and then a
+    <code>text</code> column is more honest.
+  </p>
+</div>
+
+<h2 id="indexing">Indexing inside a document</h2>
+
+<pre><code>-- PostgreSQL: a GIN index supports containment (@>) and key-existence over the WHOLE document.
+CREATE INDEX ix_events_data ON events USING GIN (data jsonb_path_ops);
+
+-- Or, far more often what you want: index ONE extracted path with a B-tree.
+CREATE INDEX ix_events_email ON events ((data -&gt;&gt; 'email'));
+
+-- SQL Server has no JSON index. You index a computed column instead:
+ALTER TABLE events ADD email AS JSON_VALUE(data, '$.email') PERSISTED;
+CREATE INDEX ix_events_email ON events (email);</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ The pattern that actually works in production</div>
+  <p style="margin-bottom:0">
+    <strong>Promote the fields you query into real columns</strong> — as generated/computed columns
+    derived from the JSON, so there is still one source of truth — and keep the document for
+    everything else. You get constraints, types, statistics and ordinary indexes on the parts that
+    matter, and flexibility on the parts that do not. Describing this in an interview is a much
+    stronger answer than either “JSON is bad” or “we put everything in JSON”.
+  </p>
+</div>
+
+<pre><code>-- PostgreSQL 12+: a stored generated column. Always in step, indexable, typed.
+ALTER TABLE events
+  ADD COLUMN email TEXT GENERATED ALWAYS AS (data -&gt;&gt; 'email') STORED;
+CREATE INDEX ix_events_email ON events (email);</code></pre>
+
+<h2 id="shredding">Turning a document into rows</h2>
+
+<pre><code>-- PostgreSQL: expand an array into rows, then treat it as a normal table.
+SELECT e.id, t.tag
+FROM events e
+CROSS JOIN LATERAL jsonb_array_elements_text(e.data -&gt; 'tags') AS t(tag);
+
+-- SQL Server:
+SELECT e.id, t.value AS tag
+FROM events e
+CROSS APPLY OPENJSON(e.data, '$.tags') AS t;
+
+-- OPENJSON with an explicit schema is how you bulk-load a JSON payload into a table:
+INSERT INTO order_lines (order_id, sku, quantity)
+SELECT @order_id, j.sku, j.qty
+FROM OPENJSON(@payload, '$.lines')
+     WITH (sku VARCHAR(32) '$.sku', qty INT '$.quantity') AS j;</code></pre>
+
+<div class="tryit">
+  <pre><code>-- SQLite (the playground) has JSON1 built in:
+SELECT json_extract(data, '$.email')     AS email,
+       json_array_length(data, '$.tags') AS n_tags
+FROM events
+WHERE json_extract(data, '$.type') = 'signup';
+
+-- Then look at the query plan and notice: full scan. Now add
+CREATE INDEX ix_ev_type ON events (json_extract(data, '$.type'));
+-- and look again.</code></pre>
+</div>
+
+<h2 id="honest">The honest summary</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 What to say when asked “relational or document?”</div>
+  <p style="margin-bottom:0">
+    “A JSON column is the right tool for genuinely schemaless data inside an otherwise relational
+    system — custom fields, stored payloads, sparse settings. What it costs is every guarantee the
+    database exists to provide: types, constraints, referential integrity and statistics. So I use
+    it for the parts of a record nobody queries, promote anything I filter on into a real column,
+    and treat a JSON column that has grown an index on three different paths as a schema waiting to
+    be written.”
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>JSON is right for open-ended attributes, verbatim payloads and sparse settings — not for anything you filter, join or aggregate.</li>
+    <li>A JSON column has no types, no constraints and no foreign keys. Everything the engine could have checked, it now cannot.</li>
+    <li>PostgreSQL: use <code>jsonb</code>, not <code>json</code>. Only <code>jsonb</code> indexes usefully.</li>
+    <li>Index one extracted path with a B-tree far more often than the whole document with GIN.</li>
+    <li>SQL Server has no JSON index; index a <code>PERSISTED</code> computed column instead.</li>
+    <li>Promote queried fields into generated columns: one source of truth, real indexes and statistics.</li>
+    <li>Expand arrays into rows with <code>jsonb_array_elements</code> / <code>OPENJSON</code> and then use ordinary SQL.</li>
+    <li>Three indexes on three JSON paths is a schema asking to be written.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">When would you store JSON in a relational database?</p>
+  <p class="a">When the shape is genuinely defined by someone other than me — per-tenant custom
+    fields — or when I must keep a payload verbatim, or for sparse settings read as a unit. Not for
+    anything I filter or join on: that loses types, constraints and statistics for no benefit.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you make a query on a JSON field fast?</p>
+  <p class="a">Index the specific extracted path rather than the document: an expression index in
+    PostgreSQL, a persisted computed column plus an index in SQL Server. If several paths need
+    indexing, that is a signal to promote them to real columns.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What do you lose by using a JSON column?</p>
+  <p class="a">Type checking, <code>NOT NULL</code>, uniqueness, foreign keys, column statistics
+    and therefore good cardinality estimates. The engine can no longer prevent bad data or plan
+    well against it — which are the two reasons for using a relational database at all.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

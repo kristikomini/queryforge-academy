@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>07 &middot; Predicates, filtering and sargability &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="07-predicates-and-sargability">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 07</p>
+<h1>Predicates, filtering and sargability</h1>
+<p class="lede">WHERE, LIKE, IN, BETWEEN — and the one habit that quietly disables every index you own.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottimizzazione e tuning delle query&rdquo;</em> &mdash; most “tuning” turns out to be
+  one of the four habits in this chapter, found and removed.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="sargable">The word they will use: sargable</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A phone book is sorted by surname, so finding “Rossi” is instant. But if I ask for
+    <em>everyone whose surname has six letters</em>, the sorting is useless — you have to read
+    every page and count. The information was there; the way I asked destroyed the shortcut.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    A predicate is <strong>sargable</strong> (Search ARGument able) if the engine can use it to
+    seek into an index instead of scanning. The rule is short: <strong>the indexed column must
+    appear alone on one side of the comparison, untouched.</strong> Wrap it in a function, do
+    arithmetic on it, or force a type conversion, and the index on it becomes unusable — because
+    the index stores <code>column</code>, not <code>f(column)</code>, and the engine has no way to
+    know what range of stored values satisfies your expression.
+  </p>
+</div>
+
+<h2 id="four">The four ways people destroy an index</h2>
+
+<h3>1 · A function on the column</h3>
+<pre><code>-- Not sargable: the index stores placed_at, not YEAR(placed_at).
+WHERE YEAR(placed_at) = 2026
+
+-- Sargable: an ordinary range over stored values.
+WHERE placed_at &gt;= DATE '2026-01-01'
+  AND placed_at &lt;  DATE '2027-01-01'</code></pre>
+
+<div class="box note">
+  <div class="box-title">Why half-open, not BETWEEN</div>
+  <p style="margin-bottom:0">
+    <code>BETWEEN '2026-01-01' AND '2026-12-31'</code> silently drops everything that happened on
+    31 December after midnight, because a timestamp of 23:59:30 is greater than the date
+    <code>2026-12-31</code> at 00:00. The <code>&gt;= start AND &lt; next-start</code> form is
+    correct for dates, timestamps and every precision the column might later be changed to. Use it
+    always and you never have to think about it again.
+  </p>
+</div>
+
+<h3>2 · Arithmetic on the column</h3>
+<pre><code>WHERE total_cents / 100 &gt; 500      -- not sargable
+WHERE total_cents &gt; 50000          -- sargable: move the maths to the constant</code></pre>
+
+<h3>3 · A leading wildcard</h3>
+<pre><code>WHERE name LIKE '%rossi%'          -- scan. An index is sorted by prefix; there is no prefix.
+WHERE name LIKE 'rossi%'           -- seek: this is a range over names starting "rossi"</code></pre>
+<p>
+  If you genuinely need infix search, an index cannot help and you need a different tool: a
+  full-text index, a trigram index (<code>pg_trgm</code>), or a search engine
+  (<a href="43-nosql-and-limits.html">chapter 43</a>). “Add an index” is the wrong answer and
+  saying so is the right one.
+</p>
+
+<h3>4 · Implicit conversion — the invisible one</h3>
+<pre><code>-- vat_number is VARCHAR. The literal is a number.
+WHERE vat_number = 12345678901
+-- The engine converts the COLUMN to a number, on every row, to compare.
+-- Plan shows a scan and a CONVERT_IMPLICIT warning that nobody reads.
+
+WHERE vat_number = '12345678901'   -- sargable</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    Implicit conversion is the hardest of the four to spot because <strong>the query is correct
+    and returns the right answer</strong> — it is merely a hundred times slower. It appears when
+    an ORM binds a parameter as <code>NVARCHAR</code> against a <code>VARCHAR</code> column
+    (a classic .NET/SQL&nbsp;Server incident), or when a column that holds digits was declared as
+    text. In SQL Server the plan carries a <code>CardinalityEstimate</code> or
+    <code>PlanAffectingConvert</code> warning; in PostgreSQL you will see a cast in the filter.
+    Look for it whenever a query is slow and the index “obviously” exists.
+  </p>
+</div>
+
+<h2 id="or">OR, IN and the shape of the range</h2>
+
+<p>
+  <code>IN (a, b, c)</code> is a union of equality seeks and is generally fine.
+  <code>OR</code> across <em>different columns</em> is not: no single index covers both sides, so
+  the engine often falls back to a scan.
+</p>
+
+<pre><code>-- Frequently a scan: no index has both columns as a leading key.
+WHERE email = ? OR phone = ?
+
+-- Two seeks the optimiser can cost independently, then combine:
+SELECT ... WHERE email = ?
+UNION
+SELECT ... WHERE phone = ?</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 The optional-parameter pattern, and why it is poison</div>
+  <p>
+    This shape appears in every reporting screen ever built, and it is the single most common
+    cause of a catastrophically bad cached plan:
+  </p>
+  <pre style="margin-bottom:8px"><code>WHERE (@customer_id IS NULL OR customer_id = @customer_id)
+  AND (@status      IS NULL OR status      = @status)</code></pre>
+  <p style="margin-bottom:0">
+    One plan is compiled and reused for every combination of supplied and omitted parameters, so a
+    plan built for “no filters at all” gets reused when a single customer is requested, and vice
+    versa. The fixes are <code>OPTION (RECOMPILE)</code>, or building the statement with
+    <em>safe</em> dynamic SQL and parameters
+    (<a href="34-dynamic-sql-and-injection.html">chapter 34</a>). Naming this pattern in an
+    interview is a strong signal — it means you have maintained a reporting screen.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- In the playground, run both and compare the plan (EXPLAIN QUERY PLAN in SQLite,
+-- EXPLAIN ANALYZE in PostgreSQL, "Include Actual Execution Plan" in SSMS).
+EXPLAIN QUERY PLAN
+SELECT * FROM orders WHERE placed_at &gt;= '2026-01-01' AND placed_at &lt; '2026-02-01';
+
+EXPLAIN QUERY PLAN
+SELECT * FROM orders WHERE strftime('%Y-%m', placed_at) = '2026-01';</code></pre>
+</div>
+
+<h2 id="computed">When you cannot change the query</h2>
+
+<p>
+  Sometimes the non-sargable expression is in a vendor application you cannot edit. Two ways out,
+  both worth knowing by name:
+</p>
+
+<ul>
+  <li><strong>An expression index</strong> (PostgreSQL, Oracle):
+    <code>CREATE INDEX ix ON orders (date_trunc('month', placed_at));</code> — the index now stores
+    the expression, so the predicate becomes sargable against it.</li>
+  <li><strong>A persisted computed column plus an index</strong> (SQL Server): add
+    <code>order_month AS DATEFROMPARTS(YEAR(placed_at), MONTH(placed_at), 1) PERSISTED</code> and
+    index it. SQL Server will match the original expression to it automatically.</li>
+</ul>
+
+<div class="rules">
+  <ol>
+    <li>Sargable means the engine can seek. The indexed column must appear alone and untouched on one side of the comparison.</li>
+    <li>Never wrap the column in a function. Rewrite as a half-open range: <code>&gt;= start AND &lt; next_start</code>.</li>
+    <li><code>BETWEEN</code> on a timestamp loses the last day. Half-open ranges do not.</li>
+    <li>Move arithmetic to the constant side of the comparison.</li>
+    <li><code>LIKE 'x%'</code> seeks; <code>LIKE '%x%'</code> cannot. Infix search needs full-text or trigrams, not an index.</li>
+    <li>Implicit conversion silently disables an index and returns the right answer, so nothing looks broken. Check the plan for a convert warning.</li>
+    <li><code>OR</code> across different columns often defeats indexing; <code>UNION</code> of two seeks lets the optimiser cost each half.</li>
+    <li>The <code>(@p IS NULL OR col = @p)</code> pattern caches one plan for every parameter combination. Recompile it or build it dynamically with parameters.</li>
+    <li>If you cannot change the query, index the expression — an expression index or a persisted computed column.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">What does “sargable” mean?</p>
+  <p class="a">That a predicate can be used to seek into an index rather than forcing a scan. It
+    requires the indexed column to appear alone on one side of the operator — no function, no
+    arithmetic, no implicit conversion. The index stores the column's values, so an expression over
+    it cannot be turned into a range.</p>
+</div>
+
+<div class="qa">
+  <p class="q">This query has an index on the date column and still scans. Why?</p>
+  <p class="a">Almost certainly the predicate wraps it: <code>YEAR(placed_at) = 2026</code>,
+    <code>CAST(placed_at AS DATE) = …</code>, or a type mismatch causing an implicit convert.
+    Rewrite it as a half-open range on the raw column and the seek comes back.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How would you make <code>LIKE '%text%'</code> fast?</p>
+  <p class="a">You cannot, with a B-tree — there is no prefix to seek on. The honest answer is to
+    change the tool: a full-text index, a trigram GIN index in PostgreSQL, or an external search
+    engine if the requirement is really relevance-ranked search rather than substring matching.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

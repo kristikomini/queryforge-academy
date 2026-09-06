@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>51 &middot; The interview &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="51-the-interview">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 8 — The human requirements <span>&rsaquo;</span> Chapter 51</p>
+<h1>The interview</h1>
+<p class="lede">Mi parli di lei, the technical round, the questions to ask them, and how to talk about money.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Buone capacita comunicative&rdquo;</em> &mdash; the least technical
+  requirement on the list, and the one that decides the outcome once the technical bar is met.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="miparli">“Mi parli di lei”</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    The first question is always the same, everybody knows it is coming, and almost nobody
+    prepares for it. It is not a test. It is them handing you two minutes to set the agenda — and
+    if you do not set it, they will.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 A structure that works, in ninety seconds</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Where you are now,</strong> in one sentence.</li>
+    <li><strong>What you can do,</strong> with one concrete example — not a list.</li>
+    <li><strong>Why you are here,</strong> specific to <em>this</em> company.</li>
+  </ol>
+</div>
+
+<pre><code>"Vengo da [background]. Negli ultimi [tempo] mi sono concentrato sui database:
+ SQL avanzato, modellazione relazionale e tuning delle query. Il progetto su cui
+ ho imparato di più è un database di order fulfilment che ho costruito da zero —
+ macchina a stati sugli ordini applicata con i vincoli, concorrenza ottimistica,
+ outbox transazionale — perché volevo capire davvero cosa succede quando due
+ persone modificano lo stesso ordine nello stesso momento.
+
+ Cerco un ruolo junior dove il database non sia un dettaglio implementativo, e
+ la vostra posizione parla di ottimizzazione e reportistica, che è esattamente
+ la parte che mi interessa."</code></pre>
+
+<p class="small muted">
+  Note what it does: names a concrete artefact, gives a <em>reason</em> for a technical choice, and
+  ends by quoting their advert back at them. It also hands the interviewer three obvious follow-up
+  questions, all of which you can answer.
+</p>
+
+<h2 id="gaps">Answering about a gap</h2>
+
+<div class="box good">
+  <div class="box-title">✔ Own it, bound it, bridge it — in three sentences</div>
+  <p style="margin-bottom:0">
+    <em>“No, I have not administered a production instance — I have not been on call for one.
+    I understand the concepts: recovery models, the difference between RPO and RTO, why a
+    replica is not a backup. What I have not done is a real restore under pressure, and I would
+    want somebody to walk me through the first one.”</em>
+  </p>
+  <p style="margin-bottom:0">
+    Honest, precise about the boundary, and it demonstrates knowledge <em>while</em> admitting the
+    gap. Every interviewer has hired somebody who overclaimed; the memory is vivid and it is what
+    they are screening for.
+  </p>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ The three answers that end an interview quietly</div>
+  <ul style="margin-bottom:0">
+    <li><strong>Bluffing.</strong> One follow-up question exposes it, and now everything else you
+      said is in doubt.</li>
+    <li><strong>“I don't know” with nothing after it.</strong> Add the bridge: how you would find
+      out, or the nearest thing you do know.</li>
+    <li><strong>Criticising a previous employer or their stack.</strong> Interviewers hear a
+      preview of how you will talk about them.</li>
+  </ul>
+</div>
+
+<h2 id="technical">The technical round</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Answer in two layers, always</div>
+  <p style="margin-bottom:0">
+    <strong>The fact, then the why.</strong> “A clustered index stores the rows in key order — so
+    the primary key choice is a physical storage decision, and every non-clustered index carries
+    that key as its row locator, which is why a wide key makes them all bigger.” The first clause
+    is the answer; the second clause is the offer. This is the single highest-leverage habit in a
+    technical interview and it works for every question in this course.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>They ask</th><th>They are really asking</th></tr></thead>
+<tbody>
+<tr><td>“What is an index?”</td><td>Do you understand it as a data structure with costs, or as a magic speed-up?</td></tr>
+<tr><td>“What is a transaction?”</td><td>Have you thought about failure and concurrency, or only the happy path?</td></tr>
+<tr><td>“How do you optimise a query?”</td><td>Do you have a <em>method</em>, or a bag of tricks?</td></tr>
+<tr><td>“Tell me about a difficult bug”</td><td>How do you investigate, and do you say what you got wrong?</td></tr>
+<tr><td>“Where do you see yourself in five years?”</td><td>Will you still be here in two?</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box note">
+  <div class="box-title">When you genuinely do not know</div>
+  <p style="margin-bottom:0">
+    <em>“I do not know that. My guess would be X, because Y — but I would check before relying on
+    it.”</em> A reasoned guess, clearly labelled as a guess, is worth almost as much as the answer
+    and considerably more than silence. What it demonstrates is the thing they actually need: that
+    you can reason about unfamiliar territory without pretending.
+  </p>
+</div>
+
+<h2 id="ask">“Ha domande per noi?”</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ “No, I think you covered everything” is a bad answer</div>
+  <p style="margin-bottom:0">
+    It reads as low interest, and it wastes the only part of the interview where <em>you</em> are
+    evaluating <em>them</em>. Have five prepared; two will already have been answered.
+  </p>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Questions that are also signals</div>
+  <ul style="margin-bottom:0">
+    <li>“How do schema changes reach production? Are migrations versioned?” — <em>tells you a lot,
+      instantly.</em></li>
+    <li>“Do you have a restore drill? When was the last one?” — <em>the answer is often a pause,
+      and that is information.</em></li>
+    <li>“Who owns the database — is there a DBA, or is it shared by the team?”</li>
+    <li>“What does the first month look like? What would I be working on?”</li>
+    <li>“What is the largest customer database, roughly? How many rows in the biggest table?”</li>
+    <li>“What would make you say, in six months, that hiring me went well?”</li>
+  </ul>
+  <p style="margin-bottom:0">
+    Every one of those is a real question <em>and</em> a demonstration that you know what matters.
+    That double duty is what makes them worth preparing.
+  </p>
+</div>
+
+<h2 id="money">Talking about money</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The Italian specifics you need</div>
+  <ul style="margin-bottom:0">
+    <li><strong>RAL</strong> = <em>retribuzione annua lorda</em>: gross annual salary, before tax
+      and contributions. Every figure discussed is RAL unless stated otherwise.</li>
+    <li>It is paid in <strong>13 or 14 <em>mensilità</em></strong> — the RAL is the annual total, so
+      the monthly figure is RAL ÷ 13 or ÷ 14, not ÷ 12.</li>
+    <li><strong>Net is roughly 60–70% of RAL</strong> for these ranges. If you are given a net
+      figure, ask for the RAL.</li>
+    <li>The <strong>CCNL</strong> — usually <em>metalmeccanico</em> or <em>commercio</em> — sets the
+      minimum, the level, the notice period and holidays. Asking which one applies is a normal,
+      informed question.</li>
+    <li><strong>Buoni pasto</strong> (meal vouchers), <em>welfare aziendale</em>, training budget
+      and remote-work days are all real, negotiable, and often easier for them to move than RAL.</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ When they ask first, and they will</div>
+  <p style="margin-bottom:0">
+    <em>“La mia aspettativa è nella fascia 28–32k RAL, in base al ruolo complessivo. Mi interessa
+    anche capire formazione e possibilità di crescita. Qual è il range previsto per questa
+    posizione?”</em> — a range, a reason, a note that money is not the only variable, and the
+    question handed straight back. Naming a range is better than refusing to answer; refusing reads
+    as evasive in an Italian recruiter call, where the RAL question is routine and expected early.
+  </p>
+</div>
+
+<div class="box note">
+  <div class="box-title">On the offer</div>
+  <p style="margin-bottom:0">
+    Ask for it in writing with the CCNL level, the RAL, the number of <em>mensilità</em>, the
+    contract type (<em>indeterminato</em>, <em>determinato</em>, <em>apprendistato</em>) and the
+    start date. <em>Apprendistato</em> is common and normal for a junior in Italy: lower cost to
+    the employer, mandatory training, and it converts to <em>indeterminato</em> — worth
+    understanding rather than being alarmed by. Take a day. Nobody withdraws an offer because you
+    asked for twenty-four hours.
+  </p>
+</div>
+
+<h2 id="after">Afterwards</h2>
+
+<ul>
+  <li><strong>Write down every question you were asked</strong>, the same day. It is the single
+    best study list you will ever have, and it is gone by tomorrow.</li>
+  <li><strong>A short thank-you email</strong> is uncommon in Italy and costs nothing. Two
+    sentences; reference one specific thing discussed.</li>
+  <li><strong>If you are rejected, ask for feedback</strong> once, politely. Perhaps a third
+    answer, and that third is worth more than a week of study.</li>
+  <li><strong>Rejection at this level is usually not about you.</strong> The role changed, an
+    internal candidate appeared, the budget moved. Send the next application the same week.</li>
+</ul>
+
+<div class="rules">
+  <ol>
+    <li>“Mi parli di lei” is two minutes to set the agenda. Prepare ninety seconds: now, what you can do with one example, why here.</li>
+    <li>Answer in two layers: the fact, then the why. The second layer is the interview.</li>
+    <li>For a gap: own it, bound it precisely, bridge it. Overclaiming is what they are screening for.</li>
+    <li>A reasoned guess labelled as a guess beats silence and beats bluffing.</li>
+    <li>Never criticise a previous employer or their stack.</li>
+    <li>Always have questions. Ask about migrations, restore drills and database ownership — real questions that are also signals.</li>
+    <li>RAL is gross and annual, paid in 13 or 14 instalments; net is roughly 60–70%.</li>
+    <li>Give a range with a reason rather than refusing to name one.</li>
+    <li>Get the offer in writing with CCNL level, mensilità and contract type. Take a day.</li>
+    <li>Write down every question the same day. It is the best study list you will get.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Mi parli di lei.</p>
+  <p class="a">Ninety seconds, three parts: where you are now, what you can do with one concrete
+    example rather than a list, and why this company specifically — quoting something from their
+    advert or their product. It should hand them three follow-up questions you can answer.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Quali sono le sue aspettative economiche?</p>
+  <p class="a">Give a range in RAL with a brief reason, note that training and growth also matter,
+    and hand the question back by asking their budgeted range. Refusing to name a number reads as
+    evasive in an Italian recruiter call, where this question comes early and is routine.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Ha domande per noi?</p>
+  <p class="a">Always yes. How schema changes reach production and whether migrations are
+    versioned; whether there is a restore drill and when the last one was; who owns the database;
+    what the first month looks like. Each is a genuine question and each demonstrates that you know
+    what matters.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

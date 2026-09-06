@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Review — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="review">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Retrieval practice</p>
+<h1>Today's review</h1>
+<p class="lede" id="lede">Cards the schedule says you are about to forget.</p>
+
+<div class="grid-3" id="stats" style="margin-bottom:22px"></div>
+
+<div id="host"></div>
+
+<div class="box note" id="explain">
+  <div class="box-title">Why these cards, in this order</div>
+  <p>
+    Every question you answer anywhere on this site enters an <strong>SM-2 spaced repetition</strong>
+    schedule. A card you got right and were sure about comes back in four days, then ten, then
+    twenty-five. A card you got wrong comes back tomorrow, and its ease drops slightly — but only
+    slightly, because one bad day should not bury a card you actually know.
+  </p>
+  <p>
+    The queue is sorted <strong>most overdue first</strong>, ties broken by <strong>most
+    lapses</strong>, and it is <strong>global rather than per chapter</strong>. That is deliberate:
+    a session naturally mixes window functions with deadlocks with backup strategy. Interleaving is
+    harder, it retains better, and it is exactly what an interview does to you.
+  </p>
+  <p style="margin-bottom:0">
+    The <em>“I half-guessed”</em> button is the only signal the scheduler cannot work out for
+    itself. A right answer you had to dig for is not the same memory as one you knew, and
+    scheduling them identically is why so many flashcard apps stop working after a month.
+  </p>
+</div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+(function () {
+  if (!window.LF || !window.LFQuiz) return;
+  var LF = window.LF, CH = window.CHAPTERS || [];
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+  function stats() {
+    var host = document.getElementById("stats");
+    host.innerHTML = "";
+    var scheduled = Object.keys(LF.profile.cards).length;
+    var bank = LFQuiz.count();
+    var due = LF.due();
+    function stat(k, v, s, cls) {
+      var d = el("div", "stat");
+      d.appendChild(el("div", "k", k));
+      d.appendChild(el("div", "v" + (cls ? " " + cls : ""), String(v)));
+      d.appendChild(el("div", "s", s));
+      host.appendChild(d);
+    }
+    stat("Due now", due.length, due.length ? "sorted most overdue first" : "nothing to review", due.length ? "warn" : "ok");
+    stat("In schedule", scheduled + " / " + bank, "questions answered at least once");
+    stat("Strong", LF.recall() + "%", "2+ reps and a 4+ day interval");
+    return due;
+  }
+
+  function start() {
+    var due = stats();
+    var host = document.getElementById("host");
+    host.innerHTML = "";
+
+    if (!due.length) {
+      var p = document.createElement("div");
+      p.className = "panel";
+      var scheduled = Object.keys(LF.profile.cards).length;
+      if (!scheduled) {
+        p.appendChild(el("h3", "", "Nothing scheduled yet"));
+        p.appendChild(el("p", "", "Cards are created when you answer a chapter test. Read a chapter, take its test, and this page fills up."));
+        var a = el("a", "btn", "Start at chapter 00 →");
+        a.href = "chapters/00-the-job-posting.html";
+        p.appendChild(a);
+      } else {
+        p.appendChild(el("h3", "", "Nothing is due today"));
+        p.appendChild(el("p", "", "That is the schedule working. Reviewing a card before it is due is mostly wasted effort — the forgetting is the part that strengthens the memory."));
+        var next = Object.keys(LF.profile.cards)
+          .map(function (id) { return LF.profile.cards[id].due; })
+          .sort()[0];
+        if (next) p.appendChild(el("p", "small muted", "Next card due " + next + "."));
+        var row = el("div", "row");
+        var b1 = el("a", "btn ghost", "Practise anyway (ahead of schedule)");
+        b1.href = "#";
+        b1.onclick = function (e) { e.preventDefault(); ahead(); };
+        var b2 = el("a", "btn quiet", "Do a mock exam instead");
+        b2.href = "exam.html";
+        row.appendChild(b1);
+        row.appendChild(b2);
+        p.appendChild(row);
+      }
+      host.appendChild(p);
+      return;
+    }
+
+    run(due.slice(0, 40).map(function (d) { return LFQuiz.byId(d.id); }).filter(Boolean), false);
+  }
+
+  function ahead() {
+    /* Reviewing early does not reschedule anything — it is practice, not a review.
+       Pretending it was a review would corrupt the schedule with intervals based
+       on a recall you were not actually tested for. */
+    var ids = Object.keys(LF.profile.cards).sort(function (a, b) {
+      return (LF.profile.cards[a].due || "") < (LF.profile.cards[b].due || "") ? -1 : 1;
+    }).slice(0, 20);
+    run(ids.map(LFQuiz.byId).filter(Boolean), true);
+  }
+
+  function run(questions, practiceOnly) {
+    var host = document.getElementById("host");
+    host.innerHTML = "";
+    if (practiceOnly) {
+      var n = el("div", "msg warn");
+      n.textContent = "Practice mode: these are not due yet, so your answers will NOT change the schedule.";
+      host.appendChild(n);
+    }
+    var quizHost = document.createElement("div");
+    host.appendChild(quizHost);
+
+    LFQuiz.mount(quizHost, {
+      title: practiceOnly ? "Practice (ahead of schedule)" : "Review",
+      questions: questions,
+      onGrade: function (q, grade) { if (!practiceOnly) LF.review(q.id, grade); },
+      onDone: function () { stats(); },
+    });
+  }
+
+  LF.on("change", stats);
+  start();
+})();
+</script>
+</body>
+</html>

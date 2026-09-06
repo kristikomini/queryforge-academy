@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>34 &middot; Dynamic SQL and SQL injection &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="34-dynamic-sql-and-injection">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 5 — Building it properly <span>&rsaquo;</span> Chapter 34</p>
+<h1>Dynamic SQL and SQL injection</h1>
+<p class="lede">How injection actually works, why parameters are not string escaping, and safe dynamic SQL when you must.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Conoscenza dei principi di sicurezza dei dati e GDPR&rdquo;</em> &mdash; injection is the oldest
+  vulnerability on the OWASP list and it is still in the top three, because the mistake is so easy
+  to make and so invisible once made.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="how">How injection actually works</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    You dictate a letter to somebody and say “write: Dear Mr Rossi”. If they write exactly that,
+    fine. But if halfway through you say “…and now stop writing and go and burn the filing
+    cabinet”, and they <em>do it</em> — that is the bug. They could not tell your instructions
+    apart from the words you wanted written down.
+  </p>
+</div>
+
+<pre><code>-- The vulnerable pattern, in any language:
+sql = "SELECT * FROM users WHERE email = '" + input + "'"
+
+-- input:  x' OR '1'='1
+-- becomes: SELECT * FROM users WHERE email = 'x' OR '1'='1'    ← every row
+
+-- input:  x'; DROP TABLE users; --
+-- becomes: SELECT * FROM users WHERE email = 'x'; DROP TABLE users; --'</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 The root cause, stated precisely</div>
+  <p style="margin-bottom:0">
+    <strong>Data and code are travelling in the same channel.</strong> The parser cannot tell which
+    characters were meant as a value and which as syntax, because by the time it sees them they are
+    one string. Every mitigation is really an attempt to separate the two channels again — and only
+    one of them separates them properly.
+  </p>
+</div>
+
+<h2 id="parameters">Parameters are not escaping</h2>
+
+<div class="box good">
+  <div class="box-title">✔ The distinction that answers the question properly</div>
+  <p style="margin-bottom:0">
+    <strong>Escaping</strong> tries to neutralise dangerous characters in a string that is still
+    going to be concatenated. It is a blacklist, and blacklists lose — to multi-byte character-set
+    tricks, to a missed quote style, to a context you did not anticipate.
+    <strong>Parameterisation</strong> sends the query and the values <em>separately</em>: the
+    statement is parsed and planned first, and the values are bound to placeholders afterwards, as
+    values, never re-parsed. There is nothing to escape because nothing is ever concatenated. Saying
+    <em>“parameters are a different channel, not better escaping”</em> is the answer that lands.
+  </p>
+</div>
+
+<pre><code>-- Correct, everywhere:
+SELECT * FROM users WHERE email = ?      -- or $1, @email, :email
+-- The driver sends the SQL and the values in separate protocol fields.
+
+-- And it is FASTER: the same statement text means the same cached plan, instead
+-- of a new plan for every distinct literal filling the cache.</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — an ORM does not make you safe</div>
+  <p style="margin-bottom:0">
+    Every ORM has a raw-SQL escape hatch, and every ORM codebase uses it. String interpolation
+    inside <code>db.raw(...)</code>, <code>EntityManager.createNativeQuery("... " + x)</code> or an
+    f-string in a Django <code>.extra()</code> is injectable exactly as before. Grep for string
+    concatenation near the word <code>SELECT</code> — that, not the framework's name, is the audit.
+  </p>
+</div>
+
+<h2 id="identifiers">The thing parameters cannot do</h2>
+
+<p>
+  A parameter can be a <strong>value</strong>. It can never be a <strong>table name, a column name,
+  a sort direction or a keyword</strong> — because those change the shape of the statement, which
+  must be fixed before parsing. So this does not work:
+</p>
+
+<pre><code>ORDER BY ?          -- binds a STRING; it sorts by a constant, silently doing nothing
+SELECT * FROM ?     -- syntax error</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 So how do you build a sortable, filterable report?</div>
+  <p style="margin-bottom:0">
+    <strong>Allow-list.</strong> Map user input to a fixed set of known-good identifiers in code,
+    and if it is not in the map, reject the request. Never sanitise the input — <em>choose</em>
+    from a list you wrote.
+  </p>
+</div>
+
+<pre><code>// The only correct shape. Note there is no escaping anywhere.
+const SORTABLE = { date: "o.placed_at", total: "o.total_cents", customer: "c.name" };
+const col = SORTABLE[req.query.sort];
+if (!col) return badRequest("unknown sort column");
+const dir = req.query.dir === "asc" ? "ASC" : "DESC";     // also an allow-list
+
+const sql = `SELECT ... ORDER BY ${col} ${dir} LIMIT ?`;  // identifiers from the map
+db.query(sql, [pageSize]);                                // VALUES still parameterised</code></pre>
+
+<h2 id="safe-dynamic">Safe dynamic SQL inside the database</h2>
+
+<pre><code>-- SQL Server: sp_executesql takes parameters. EXEC(@sql) does not — that is the
+-- entire difference, and it is why one is safe and the other is not.
+DECLARE @sql NVARCHAR(MAX) = N'
+  SELECT id, total_cents FROM orders
+  WHERE customer_id = @cid AND placed_at &gt;= @from';
+
+IF @status IS NOT NULL
+  SET @sql += N' AND status = @status';   -- SHAPE varies; VALUES never concatenated
+
+EXEC sp_executesql @sql,
+     N'@cid INT, @from DATE, @status VARCHAR(12)',
+     @cid = @customer_id, @from = @from_date, @status = @status;
+
+-- If an IDENTIFIER genuinely must be dynamic, quote it with the engine's own
+-- quoting function — never with your own string manipulation:
+SET @sql = N'SELECT * FROM ' + QUOTENAME(@table_name);   -- SQL Server
+-- PostgreSQL: format('SELECT * FROM %I', tbl)   -- %I quotes an identifier
+-- and %L quotes a literal, for the rare case that is genuinely needed.</code></pre>
+
+<div class="box note">
+  <div class="box-title">This is also the fix for the optional-parameter plan problem</div>
+  <p style="margin-bottom:0">
+    <code>WHERE (@p IS NULL OR col = @p)</code> caches one plan for every combination of supplied
+    parameters (<a href="07-predicates-and-sargability.html">chapter 07</a>). Building the
+    statement so it contains only the clauses actually needed produces a <em>different statement
+    text</em> per shape, and therefore a correctly-tailored cached plan for each — while the values
+    remain parameters. Safe dynamic SQL is a performance technique as much as it is a hazard.
+  </p>
+</div>
+
+<h2 id="defence">Defence in depth</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Layer</th><th>Does</th><th>Does NOT</th></tr></thead>
+<tbody>
+<tr><td><strong>Parameterised queries</strong></td><td>Removes the vulnerability</td><td>Help if you concatenate anyway</td></tr>
+<tr><td><strong>Least privilege</strong></td><td>Limits the damage: an app account with no <code>DROP</code> cannot drop</td><td>Prevent reading everything the app can read</td></tr>
+<tr><td><strong>Input validation</strong></td><td>Rejects nonsense early, useful for its own sake</td><td>Count as an injection defence — it is a blacklist</td></tr>
+<tr><td><strong>Stored procedures with <code>EXECUTE</code>-only grants</strong></td><td>Removes ad-hoc SQL from the app account entirely</td><td>Help if the procedure itself concatenates</td></tr>
+<tr><td><strong>A WAF</strong></td><td>Blocks known payload shapes; buys time</td><td>Fix anything. It is a smoke alarm, not a sprinkler</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Second-order injection</div>
+  <p style="margin-bottom:0">
+    A malicious string is <em>stored safely</em> via a parameterised insert. Later, a report builds
+    a query by concatenating that stored value — and it executes. The input was never "untrusted"
+    at the moment it mattered, because it came from your own database. The lesson: the rule is not
+    "validate user input", it is <strong>never concatenate a value into SQL, whatever its
+    origin</strong>.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Injection happens because data and code share one channel. Parameters give them two.</li>
+    <li>Parameterisation is not better escaping. Escaping is a blacklist; parameters are never parsed as syntax.</li>
+    <li>Parameterised queries are also faster: one cached plan instead of one per literal.</li>
+    <li>An ORM is not a defence. Its raw-SQL escape hatch is injectable like anything else.</li>
+    <li>A parameter can be a value, never an identifier, a keyword or a sort direction.</li>
+    <li>For dynamic identifiers, use an allow-list in code — choose from a map, do not sanitise input.</li>
+    <li>Inside the database, <code>sp_executesql</code> takes parameters and <code>EXEC(@sql)</code> does not.</li>
+    <li>Safe dynamic SQL is also the fix for the optional-parameter plan problem.</li>
+    <li>Second-order injection comes from your own tables. The rule is never to concatenate a value, whatever its origin.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">What is SQL injection and how do you prevent it?</p>
+  <p class="a">User input is concatenated into a statement, so the parser reads it as syntax rather
+    than as a value. The fix is parameterised queries — the SQL and the values travel in separate
+    protocol fields, so nothing is ever re-parsed. Not escaping, which is a blacklist. Then least
+    privilege to limit the blast radius if something else goes wrong.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you handle a user-supplied ORDER BY column?</p>
+  <p class="a">An allow-list. Map the input to a fixed set of known identifiers in code and reject
+    anything not in the map, because a parameter cannot be an identifier — bind it and you sort by
+    a constant, silently. The sort direction gets the same treatment.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Are stored procedures immune to injection?</p>
+  <p class="a">No. A procedure that builds a string and runs <code>EXEC(@sql)</code> is exactly as
+    vulnerable. What procedures give you is a permission boundary — the application account can be
+    granted <code>EXECUTE</code> and nothing else — which limits damage rather than preventing the
+    flaw.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

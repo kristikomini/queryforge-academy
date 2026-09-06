@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>01 · What a database engine actually is — QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="01-engines-and-storage">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 1 — The relational foundation <span>›</span> Chapter 01</p>
+<h1>What a database engine actually is</h1>
+<p class="lede">
+  Almost every performance conversation you will have is really a conversation about disk. If you
+  know what a page is, what the buffer pool is for, and why the log is written before the data,
+  you can reason about problems other people can only guess at.
+</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>“Solida conoscenza di MS SQL Server (versione ≥ 2008)”</em> —
+  nobody is checking that you have memorised a version's feature list. They are checking that you
+  have used <em>an</em> engine deeply enough to know it has moving parts.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="not-a-file">A database is not a file you read</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Imagine a library where the books are far away in a cold warehouse, and there is one small
+    warm room with a desk. Fetching a book from the warehouse takes ages, so the librarian keeps
+    the books people ask for most on the desk. When you write in a book, the librarian first
+    scribbles “I am about to change page 40 of this book” in a notebook by the door — because if
+    the lights go out mid-sentence, that notebook is how she knows what she was doing.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p>Every mainstream relational engine is built from the same four pieces:</p>
+  <ul style="margin-bottom:0">
+    <li><strong>Pages.</strong> Storage is divided into fixed-size blocks — 8&nbsp;KB in SQL Server
+      and PostgreSQL, 16&nbsp;KB by default in InnoDB. The engine never reads one row from disk; it
+      reads the page the row is on. This single fact explains row size, index design and why
+      <code>SELECT *</code> costs more than you think.</li>
+    <li><strong>The buffer pool.</strong> An in-memory cache of pages. A query that finds its pages
+      here is a <em>logical read</em>; one that does not is a <em>physical read</em>, and is
+      roughly four orders of magnitude slower. “Tuning” usually means reducing the number of pages
+      touched so more of the working set fits.</li>
+    <li><strong>The write-ahead log</strong> (WAL / transaction log / redo log). The change is
+      written to a sequential log and flushed to durable storage <em>before</em> the data page is.
+      This is the D in ACID and the reason a commit is fast: appending to a log is sequential,
+      rewriting scattered data pages is not.</li>
+    <li><strong>The optimiser.</strong> SQL says <em>what</em>, not <em>how</em>. A cost-based
+      optimiser turns your statement into a plan using statistics about the data. See
+      <a href="27-execution-plans.html">chapter 27</a>.</li>
+  </ul>
+</div>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 320" role="img" aria-labelledby="d1t d1d">
+    <title id="d1t">The path of a write through a database engine</title>
+    <desc id="d1d">A client statement enters the engine, is logged to the write-ahead log which is flushed to disk at commit, modifies a page in the buffer pool, and is written to the data files later by a background checkpoint.</desc>
+
+    <rect class="d-box" x="14" y="128" width="112" height="56" rx="9"/>
+    <text class="d-t" x="70" y="152" text-anchor="middle">Client</text>
+    <text class="d-t-s" x="70" y="170" text-anchor="middle">UPDATE …</text>
+
+    <rect class="d-box-a" x="176" y="34" width="252" height="244" rx="12"/>
+    <text class="d-t-c" x="302" y="56" text-anchor="middle">THE ENGINE (MEMORY)</text>
+
+    <rect class="d-box" x="196" y="70" width="212" height="46" rx="8"/>
+    <text class="d-t" x="302" y="92" text-anchor="middle">Parse → bind → optimise</text>
+    <text class="d-t-s" x="302" y="108" text-anchor="middle">produces a plan</text>
+
+    <rect class="d-box-w" x="196" y="132" width="212" height="52" rx="8"/>
+    <text class="d-t-b" x="302" y="153" text-anchor="middle">Log records</text>
+    <text class="d-t-s" x="302" y="171" text-anchor="middle">appended, in order</text>
+
+    <rect class="d-box-k" x="196" y="200" width="212" height="60" rx="8"/>
+    <text class="d-t-b" x="302" y="222" text-anchor="middle">Buffer pool</text>
+    <text class="d-t-s" x="302" y="240" text-anchor="middle">page 41 changed, still dirty</text>
+
+    <rect class="d-box-g" x="486" y="112" width="150" height="66" rx="9"/>
+    <text class="d-t-b" x="561" y="138" text-anchor="middle">Log file</text>
+    <text class="d-t-s" x="561" y="156" text-anchor="middle">fsync AT COMMIT</text>
+
+    <rect class="d-box" x="486" y="212" width="150" height="66" rx="9"/>
+    <text class="d-t-b" x="561" y="238" text-anchor="middle">Data files</text>
+    <text class="d-t-s" x="561" y="256" text-anchor="middle">written LATER</text>
+
+    <path class="d-line-a" d="M126 156 H176" marker-end="url(#a1)"/>
+    <path class="d-line-a" d="M408 158 H486 V145" marker-end="url(#a1)"/>
+    <path class="d-line" d="M408 230 H450 V245 H486" marker-end="url(#a1)" stroke-dasharray="5 4"/>
+    <text class="d-t-c" x="700" y="145" >durability lives here</text>
+    <text class="d-t-c" x="700" y="248" >checkpoint, in the background</text>
+
+    <defs>
+      <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" class="d-fill-a"/>
+      </marker>
+    </defs>
+  </svg>
+  <figcaption>A commit waits for the <em>log</em> to hit disk, never for the data pages.</figcaption>
+</figure>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    “The transaction log is full” is not a disk-space problem you fix by growing the disk. In SQL
+    Server it usually means the database is in <code>FULL</code> recovery model and nobody is
+    taking <strong>log</strong> backups — so the log cannot truncate and grows until the volume
+    fills. The fix is a log backup schedule, or <code>SIMPLE</code> recovery if point-in-time
+    restore genuinely is not required. See <a href="41-backup-restore-ha.html">chapter 41</a>.
+  </p>
+</div>
+
+<h2 id="pages">Why the page size decides so much</h2>
+
+<p>
+  A row lives inside a page, and a page is read or written whole. Three consequences follow, and
+  all three come up in interviews:
+</p>
+
+<ol>
+  <li><strong>Narrow rows are fast rows.</strong> If a row is 100 bytes, roughly 80 fit in an 8&nbsp;KB
+    page. At 800 bytes, ten fit. Scanning a million rows therefore costs eight times as many reads
+    for no other reason than column width. This is the real argument against
+    <code>SELECT *</code> and against storing a description you never query beside a key you
+    always do.</li>
+  <li><strong>A row that does not fit is stored elsewhere.</strong> Large values
+    (<code>TEXT</code>, <code>VARCHAR(MAX)</code>, <code>JSONB</code>) go off-page — SQL Server
+    calls it LOB storage, PostgreSQL calls it TOAST — leaving a pointer behind. Reading the column
+    then costs an extra jump. Not reading it costs nothing, which is exactly why
+    <code>SELECT *</code> can be dramatically worse than naming the columns.</li>
+  <li><strong>Updates that grow a row can split a page.</strong> If an update no longer fits, the
+    engine splits the page in two and leaves both half-empty. That is fragmentation: more pages
+    for the same data, so more reads forever after.</li>
+</ol>
+
+<div class="tryit">
+  <p>In the <a href="../playground.html">playground</a>, compare what the engine has to touch:</p>
+  <pre><code>-- Both answer the same business question.
+SELECT * FROM order_lines WHERE order_id = 42;
+SELECT sku, quantity FROM order_lines WHERE order_id = 42;
+
+-- Same rows, very different number of bytes moved off disk and over the wire.</code></pre>
+</div>
+
+<h2 id="mvcc">Two families: locking readers, and MVCC</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Two ways to stop people arguing over a book. One: whoever is writing in it holds it, and
+    readers wait. Two: the writer works on a photocopy, and readers keep reading the old copy
+    until the new one is finished. The second means nobody ever waits to read — but somebody has
+    to tidy up all the old photocopies afterwards.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p>
+    <strong>MVCC</strong> (multi-version concurrency control) keeps multiple versions of a row so
+    that a reader sees a consistent snapshot without blocking writers. PostgreSQL, Oracle and
+    InnoDB are MVCC by default. SQL Server historically used <em>pessimistic</em> locking, where
+    readers take shared locks and can block writers — and offers MVCC behaviour by opting in to
+    <code>READ_COMMITTED_SNAPSHOT</code> or <code>SNAPSHOT</code> isolation.
+  </p>
+  <p style="margin-bottom:0">
+    The cost of MVCC is that dead versions accumulate and must be cleaned up: PostgreSQL's
+    <code>VACUUM</code>, Oracle's undo segments, InnoDB's purge thread. “Why is my PostgreSQL table
+    100&nbsp;GB when it holds 2&nbsp;GB of data?” is almost always table bloat from a long-running
+    transaction holding back vacuum. See <a href="22-isolation-levels.html">chapter 22</a>.
+  </p>
+</div>
+
+<h2 id="engines">The four engines you will meet</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Engine</th><th>Page</th><th>Concurrency</th><th>Where you meet it in Italy</th></tr></thead>
+<tbody>
+<tr><td><strong>SQL Server</strong></td><td>8 KB</td><td>Locking; MVCC opt-in</td><td>Gestionali, manufacturing ERP, anything with a .NET front end</td></tr>
+<tr><td><strong>Oracle</strong></td><td>8 KB default</td><td>MVCC (undo)</td><td>Banks, insurance, utilities, large public sector</td></tr>
+<tr><td><strong>PostgreSQL</strong></td><td>8 KB</td><td>MVCC (in-table versions + VACUUM)</td><td>New builds, startups, anything cloud-native</td></tr>
+<tr><td><strong>MySQL / MariaDB</strong></td><td>16 KB (InnoDB)</td><td>MVCC (undo log)</td><td>Web applications, e-commerce, WordPress</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box note">
+  <div class="box-title">SQLite deserves a line</div>
+  <p style="margin-bottom:0">
+    It is a real, fully transactional SQL engine in a single file, and it is what the
+    <a href="../playground.html">playground</a> and this site's own accounts service run on. It is
+    not a toy — but it is single-writer, so it is the wrong choice for concurrent write workloads
+    and the right choice for almost everything else at small scale.
+  </p>
+</div>
+
+<h2 id="latency">The numbers that make the argument</h2>
+
+<p>
+  Learn these to one order of magnitude. Every optimisation decision in Part 4 is an argument
+  about which row of this table you are landing in.
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Operation</th><th>Roughly</th><th>Relative</th></tr></thead>
+<tbody>
+<tr><td>Read a page already in the buffer pool</td><td>~100 ns</td><td>1×</td></tr>
+<tr><td>Read a page from a local NVMe SSD</td><td>~100 µs</td><td>1 000×</td></tr>
+<tr><td>Read a page from a spinning disk</td><td>~10 ms</td><td>100 000×</td></tr>
+<tr><td>Round trip to a database on another host</td><td>~0.5 ms</td><td>5 000×</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>
+  The last row is why the <a href="38-the-orm-boundary.html">N+1 problem</a> is so destructive.
+  A thousand tiny correct queries, each 0.5&nbsp;ms of network, is half a second of doing nothing
+  — and it will not show up as a slow query anywhere, because every individual query was fast.
+</p>
+
+<div class="rules">
+  <ol>
+    <li>The engine reads pages, never rows. Everything about physical design follows from that.</li>
+    <li>A commit waits for the <strong>log</strong> to reach disk, not the data pages. Sequential writes are why that is affordable.</li>
+    <li>Narrow rows are fast rows: fewer bytes per row means more rows per page means fewer reads.</li>
+    <li>Large columns are stored off-page. Selecting them costs an extra jump; not selecting them costs nothing.</li>
+    <li>MVCC removes reader/writer blocking and adds a cleanup obligation. There is no version without a cost.</li>
+    <li>Memory is roughly a thousand times faster than SSD and a hundred thousand times faster than spinning disk. Tuning means keeping the working set in memory.</li>
+    <li>A thousand fast queries can be slower than one slow query, and no slow-query log will tell you.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">What happens when you COMMIT?</p>
+  <p class="a">The log records for the transaction are flushed to durable storage and the
+    transaction is marked committed. The modified data pages are still dirty in memory and get
+    written later by a checkpoint. That is what makes commits fast and what makes crash recovery
+    possible: on restart the engine replays committed log records and rolls back uncommitted ones.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why is <code>SELECT *</code> discouraged?</p>
+  <p class="a">Three reasons, in increasing order of how much they impress. It moves bytes nobody
+    asked for; it can force off-page LOB reads; and — the real one — it prevents a covering index
+    from covering, so a query that could have been an index-only scan becomes an index seek plus a
+    lookup per row. It also breaks silently when somebody adds a column.</p>
+</div>
+
+<div class="qa">
+  <p class="q">The application is slow. Where do you start?</p>
+  <p class="a">Establish whether it is one slow query or many fast ones, because the fixes are
+    opposite. Wait statistics and a top-N-by-total-duration list answer that in a minute; sorting
+    by <em>average</em> duration hides the N+1 case entirely. Chapter 42 is the method.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

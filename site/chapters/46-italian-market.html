@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>46 &middot; The Italian market: gestionali, ERP data and BI &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="46-italian-market">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 7 — What the market actually runs <span>&rsaquo;</span> Chapter 46</p>
+<h1>The Italian market: gestionali, ERP data and BI</h1>
+<p class="lede">What an Emilia-Romagna software house actually asks a database developer to do on a Tuesday morning.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">The single most useful chapter for actually getting hired here, and no advert can state it.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="who">Who is actually hiring</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Most of the companies with SQL jobs in Italy do not sell software to the public. They sell
+    software to <em>other companies</em> — the system that runs a factory, a warehouse, a
+    wholesaler, an accountant's office — and those systems are twenty years old, full of data, and
+    absolutely cannot stop working.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Employer type</th><th>What the job really is</th><th>Engine</th></tr></thead>
+<tbody>
+<tr><td><strong>Software house selling a <em>gestionale</em></strong></td><td>Reports, customisations per client, performance on the largest installs</td><td>SQL Server, sometimes Oracle</td></tr>
+<tr><td><strong>Manufacturing company, internal IT</strong></td><td>ERP integrations, production reporting, the MES-to-ERP data flow</td><td>SQL Server, Oracle</td></tr>
+<tr><td><strong>Consultancy / body-rental</strong></td><td>Placed with a client for months; whatever they run</td><td>Anything</td></tr>
+<tr><td><strong>Bank / insurance / public sector</strong></td><td>Batch processing, regulatory reporting, very old and very careful</td><td>Oracle, DB2</td></tr>
+<tr><td><strong>Product startup</strong></td><td>The whole data layer, plus the analytics nobody else wants to own</td><td>PostgreSQL, MySQL</td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="small muted">
+  In Emilia-Romagna specifically, the first two dominate: packaging machinery, ceramics, food
+  processing, automotive components and the software houses that serve them. Bologna, Modena and
+  Reggio Emilia are the density.
+</p>
+
+<h2 id="tuesday">What you actually do on a Tuesday</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The real distribution of work</div>
+  <ol style="margin-bottom:0">
+    <li><strong>“This report is wrong.”</strong> Reconcile a number against the source, find the
+      join that fans out or the filter that excludes cancelled orders in one query and not the
+      other. This is the single most common ticket, and
+      <a href="48-analysis-and-teamwork.html">chapter 48</a> is how to turn it into a
+      specification.</li>
+    <li><strong>“This is slow.”</strong> A screen, a report or a nightly job. Parts 4 and chapter
+      42.</li>
+    <li><strong>A new report or extract</strong> for a client, or for the finance department.</li>
+    <li><strong>An integration:</strong> data in or out of another system, by file, database link
+      or web service.</li>
+    <li><strong>A schema change</strong> to support a feature — and making it safe on a customer's
+      database you cannot see.</li>
+  </ol>
+</div>
+
+<div class="box note">
+  <div class="box-title">The constraint that shapes everything: multi-tenancy by installation</div>
+  <p style="margin-bottom:0">
+    A gestionale is installed <em>at</em> each customer, often on their own server, sometimes
+    versions behind. So your schema change must apply to forty databases you have never seen, whose
+    data volumes differ by three orders of magnitude, some of which have local customisations. That
+    is why <a href="36-migrations.html">versioned migrations</a> and backward-compatible changes
+    matter so much more here than in a single-tenant SaaS — and demonstrating that you understand
+    it is unusual and valuable.
+  </p>
+</div>
+
+<h2 id="sdi">Fatturazione elettronica and the SDI</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The Italy-specific thing worth knowing exists</div>
+  <p>
+    Since 2019, essentially all invoices between Italian businesses must be issued as
+    <strong>FatturaPA</strong> XML and routed through the <strong>Sistema di Interscambio</strong>
+    (SDI), the Revenue Agency's clearing house. It is a state-run message bus that every business
+    system in the country must speak, and it lands on the database in specific ways:
+  </p>
+  <ul style="margin-bottom:0">
+    <li><strong>Invoice numbering must be gapless and sequential per year.</strong> That is a legal
+      requirement, and it is a genuinely hard concurrency problem — an <code>IDENTITY</code> column
+      leaves gaps whenever a transaction rolls back
+      (<a href="24-concurrency-patterns.html">chapter 24</a>).</li>
+    <li><strong>Every invoice has a lifecycle of SDI outcomes</strong> — accepted, rejected,
+      not delivered, each with its own timestamp and receipt. That is a state machine and an event
+      log, exactly like the reference database's orders.</li>
+    <li><strong>Rejections must be re-sendable</strong>, which means idempotency keys and a queue
+      (<a href="20-upsert-and-idempotency.html">chapter 20</a>).</li>
+    <li><strong>Ten-year retention</strong> (<em>conservazione sostitutiva</em>) — which collides
+      with GDPR erasure, and is resolved by pseudonymisation
+      (<a href="35-security-and-gdpr.html">chapter 35</a>).</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Why the gapless-number problem is worth having an answer to</div>
+  <p style="margin-bottom:0">
+    An auto-increment leaves gaps, and gaps are not allowed. Serialising on a counter row is
+    correct and becomes a contention point. The usual production answer is to allocate the number
+    <strong>at the last possible moment</strong>, inside the same transaction as the commit of the
+    invoice, from a per-year counter row locked with <code>SELECT … FOR UPDATE</code> — accepting
+    the serialisation because invoices are not issued thousands per second. Being able to discuss
+    that trade-off is a very strong signal in an interview at an Italian software house, because it
+    is a problem they have definitely argued about.
+  </p>
+</div>
+
+<pre><code>-- The pattern, with the trade-off stated rather than hidden.
+BEGIN;
+  -- Serialises invoice issuance for this year. Deliberate: the law requires no
+  -- gaps, and gapless allocation is inherently serial. Volumes are low enough.
+  UPDATE invoice_counters SET next_no = next_no + 1
+  WHERE year = :year
+  RETURNING next_no - 1 AS invoice_no;
+
+  INSERT INTO invoices (year, invoice_no, customer_id, total_cents, sdi_status)
+  VALUES (:year, :invoice_no, :customer_id, :total, 'pending');
+COMMIT;
+-- If this rolls back, the number is released with it. That is the point.</code></pre>
+
+<h2 id="bi">Reporting: SSRS, Power BI, and the analyst</h2>
+
+<p>
+  Most “Power BI” roles at this level are not about DAX. They are about the layer underneath:
+  giving the analyst a model they cannot get wrong. Concretely:
+</p>
+
+<ul>
+  <li><strong>Views, not tables.</strong> The analyst gets <code>v_sales_by_month</code>, not
+    <code>orders</code> — so the joins, the cancelled-order exclusion and the VAT treatment are
+    decided once, by you, and every report agrees.</li>
+  <li><strong>A star schema, not a flat view.</strong> Power BI's engine is columnar and expects
+    one; a report built on a wide flat extract or on the OLTP schema will be slow in ways no DAX
+    fixes (<a href="39-oltp-vs-olap.html">chapter 39</a>).</li>
+  <li><strong>A <code>dim_date</code> with <code>is_holiday</code></strong>, because “sales per
+    working day” is a real request and Ferragosto is not a normal Friday.</li>
+  <li><strong>Import mode over DirectQuery</strong> for most reports — DirectQuery sends a query
+    per visual interaction straight at your production database, which is a load pattern nobody
+    plans for.</li>
+</ul>
+
+<h2 id="language">The language question</h2>
+
+<div class="box note">
+  <div class="box-title">Where Italian and English actually sit</div>
+  <p style="margin-bottom:0">
+    <strong>Technical vocabulary stays English</strong> — <em>la query, il deploy, fare il merge,
+    il database, la performance, il backup</em>. Translating those marks somebody who learned from
+    a textbook. What is genuinely Italian is the <strong>process and contract vocabulary</strong>:
+    <em>collaudo</em> (acceptance testing), <em>avvio in produzione</em> (go-live), <em>presa in
+    carico</em> (taking ownership of a ticket), <em>RAL</em> (gross annual salary),
+    <em>preventivo</em> (quote), <em>capitolato</em> (specification), <em>ticket aperto</em>. Those
+    are where a technically strong candidate loses an interview, and the
+    <a href="../glossary.html">glossary</a> and <a href="../italiano.html">phrasebook</a> exist for
+    exactly that.
+  </p>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the false friends that cost you</div>
+  <ul style="margin-bottom:0">
+    <li><strong><em>smart working</em></strong> means remote work. It is not a comment on how
+      smart the work is, and using it in the English sense will confuse everybody.</li>
+    <li><strong><em>Sono confuso</em></strong> is fine; <em>sono confuso/a</em> about a
+      specification is normal to say. But <em>«non ho capito»</em> lands much better than a long
+      hedge — Italian technical conversation is direct, and over-softening reads as evasive.</li>
+    <li><strong>Formal <em>lei</em> in the first interview</strong>, and switch to <em>tu</em> when
+      they do — which is usually within ten minutes at a small software house, and later or never
+      in a bank.</li>
+    <li><strong><em>Un attimo</em> is not a minute.</strong> Neither is <em>«ti richiamo
+      subito»</em>. Do not build a schedule on either.</li>
+  </ul>
+</div>
+
+<h2 id="expect">What to expect from the process</h2>
+
+<ul>
+  <li><strong>The recruiter call is in Italian</strong>, is about availability, notice period and
+    RAL expectations, and is usually not technical at all.</li>
+  <li><strong>A written test</strong> is common: three to six SQL exercises, sometimes a take-home.
+    See <a href="50-the-screening-test.html">chapter 50</a>.</li>
+  <li><strong>The technical interview</strong> is often with the person you would work for, is
+    conversational rather than a quiz, and frequently includes “here is a slow query, what would
+    you do?”</li>
+  <li><strong>RAL is quoted gross and annual</strong>, in 13 or 14 monthly instalments. A junior
+    database developer in Emilia-Romagna is typically in the region of €25–32k RAL, mid €35–45k;
+    consultancies pay less and place you faster. Check current figures — this is the number that
+    dates fastest in this whole course.</li>
+  <li><strong>The CCNL matters.</strong> The national contract (usually <em>metalmeccanico</em> or
+    <em>commercio</em>) sets the minimum, the notice period and the holiday entitlement, and it is
+    a reasonable thing to ask about.</li>
+</ul>
+
+<div class="rules">
+  <ol>
+    <li>Most Italian SQL jobs are at software houses selling business systems, or inside manufacturing companies.</li>
+    <li>The commonest ticket is “this report is wrong”, not “write a new feature”.</li>
+    <li>A gestionale is installed per customer, so a schema change must apply safely to databases you cannot see.</li>
+    <li>Fatturazione elettronica means gapless per-year invoice numbering, an SDI state machine, re-sendable rejections and ten-year retention.</li>
+    <li>Gapless numbering is inherently serial. Allocate late, inside the transaction, and say why.</li>
+    <li>Ten-year retention collides with GDPR erasure; pseudonymisation resolves it.</li>
+    <li>Give analysts views and a star schema, not tables — so every report agrees.</li>
+    <li>Power BI wants a star schema and Import mode; DirectQuery aims your visuals at production.</li>
+    <li>Technical nouns stay English; process and contract vocabulary is where interviews are lost.</li>
+    <li>RAL is gross and annual, in 13 or 14 instalments, and the CCNL sets the floor.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Do you have experience with fatturazione elettronica?</p>
+  <p class="a">If not, say so and show you understand the shape: FatturaPA XML through the SDI, a
+    per-invoice state machine of outcomes with receipts, re-sendable rejections needing idempotency,
+    gapless per-year numbering — which is a genuinely interesting concurrency problem because an
+    identity column leaves gaps on rollback — and ten-year retention that has to be reconciled with
+    GDPR erasure. That answer is worth far more than a vague yes.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How would you support a Power BI reporting project?</p>
+  <p class="a">Build the model, not the visuals: a star schema with conformed dimensions and a
+    calendar table with working days and Italian holidays, exposed through views so the business
+    rules are decided once. Import mode rather than DirectQuery for most reports, because
+    DirectQuery sends a query per interaction at the production database.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Our product is installed at each customer. What does that change for you?</p>
+  <p class="a">Every schema change has to be safe on databases I cannot inspect, with very
+    different data volumes and possibly local customisations — so versioned migrations that are
+    re-runnable, backward-compatible expand-and-contract changes, and a lock timeout so a migration
+    fails fast rather than blocking a customer's system. I would also want to know how migrations
+    are currently delivered and rolled back.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

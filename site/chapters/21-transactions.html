@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>21 &middot; Transactions and ACID &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="21-transactions">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 3 — Changing data <span>&rsaquo;</span> Chapter 21</p>
+<h1>Transactions and ACID</h1>
+<p class="lede">BEGIN, COMMIT, ROLLBACK, savepoints — and what each of the four letters actually buys you.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Esperienza su ambienti di produzione&rdquo;</em> &mdash; production is where you find
+  out what a transaction actually guarantees, usually at the worst possible moment.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="acid">ACID, one letter at a time</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Moving money between two piggy banks is two actions: take out of one, put into the other. If
+    the lights go out in the middle, you must not end up with the money in neither. A transaction
+    is a promise that the pair either both happen or neither does — there is no in-between anyone
+    can see.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th></th><th>What it promises</th><th>What buys it</th><th>What it does NOT promise</th></tr></thead>
+<tbody>
+<tr><td><strong>Atomicity</strong></td><td>All statements or none</td><td>Undo log / rollback segments</td><td>That nobody sees the intermediate state (that is isolation)</td></tr>
+<tr><td><strong>Consistency</strong></td><td>Constraints hold at commit</td><td>Your constraints — the engine only enforces what you declared</td><td>That your data is <em>meaningful</em>. It is the weakest letter</td></tr>
+<tr><td><strong>Isolation</strong></td><td>Concurrent transactions do not corrupt each other</td><td>Locks or MVCC</td><td>Full serialisability, unless you asked for it. See ch. 22</td></tr>
+<tr><td><strong>Durability</strong></td><td>Committed means survives a crash</td><td>Write-ahead log flushed at commit</td><td>Survival of the disk itself. That is backups. See ch. 41</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 The C is the one worth being sceptical about</div>
+  <p style="margin-bottom:0">
+    Consistency in ACID means only <em>“the database moves from one state satisfying its declared
+    constraints to another”</em>. If you declared no constraints, it promises nothing at all. It is
+    not the same word as the C in CAP, and it is not a guarantee that your business rules hold —
+    it is a guarantee that <strong>the rules you wrote down</strong> hold. Saying that out loud in
+    an interview is a very cheap way to sound like you have thought about it.
+  </p>
+</div>
+
+<h2 id="syntax">Beginning, committing, and the thing about autocommit</h2>
+
+<pre><code>BEGIN;                          -- BEGIN TRANSACTION in T-SQL; implicit in Oracle
+  UPDATE accounts SET balance_cents = balance_cents - 5000 WHERE id = 1;
+  UPDATE accounts SET balance_cents = balance_cents + 5000 WHERE id = 2;
+COMMIT;                         -- or ROLLBACK</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — you are probably in autocommit right now</div>
+  <p style="margin-bottom:0">
+    Every mainstream client defaults to autocommit: each statement is its own transaction and
+    commits as it completes. So the two updates above, run without <code>BEGIN</code>, are
+    <strong>two transactions</strong>, and a crash between them leaves money that has left one
+    account and arrived nowhere. Oracle is the exception — it starts a transaction implicitly and
+    requires an explicit <code>COMMIT</code>, which surprises people coming the other way.
+  </p>
+</div>
+
+<h2 id="savepoints">Savepoints: a partial rollback</h2>
+
+<pre><code>BEGIN;
+  INSERT INTO orders (customer_id) VALUES (?);
+
+  SAVEPOINT before_lines;
+  INSERT INTO order_lines (...) VALUES (...);   -- this one violates a constraint
+  ROLLBACK TO SAVEPOINT before_lines;           -- undo the line, KEEP the order
+
+  INSERT INTO order_lines (...) VALUES (...);   -- corrected
+COMMIT;</code></pre>
+
+<p>
+  Savepoints are what an ORM uses to implement nested transactions — there is no such thing as a
+  genuinely nested transaction in SQL, so the inner “transaction” becomes a savepoint. Worth knowing
+  because it explains why an inner rollback in your ORM does not abort the outer one.
+</p>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — SQL Server's nested transaction count is a lie</div>
+  <p style="margin-bottom:0">
+    In T-SQL, a nested <code>BEGIN TRANSACTION</code> only increments <code>@@TRANCOUNT</code>. A
+    nested <code>COMMIT</code> decrements it and commits <strong>nothing</strong>; only the
+    outermost commit is real. But a <code>ROLLBACK TRANSACTION</code> — at any depth — rolls back
+    <strong>everything</strong> and sets the count to zero. So nesting looks symmetric and is not.
+    Use savepoints if you need partial rollback, and check <code>@@TRANCOUNT</code> in error
+    handlers.
+  </p>
+</div>
+
+<h2 id="length">Long transactions are the real production problem</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 What a long transaction costs, by engine</div>
+  <ul style="margin-bottom:0">
+    <li><strong>PostgreSQL:</strong> it holds back the vacuum horizon, so dead row versions
+      accumulate across the <em>whole database</em>. One forgotten open transaction is the single
+      most common cause of table bloat.</li>
+    <li><strong>SQL Server:</strong> the transaction log cannot truncate past the oldest active
+      transaction, so the log grows until the volume fills.</li>
+    <li><strong>All of them:</strong> locks are held to the end of the transaction, so everyone
+      else waits longer.</li>
+  </ul>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Never hold a transaction open across a network call</div>
+  <p style="margin-bottom:0">
+    <code>BEGIN</code> → call a payment API → <code>COMMIT</code> means your database transaction
+    now lasts as long as somebody else's HTTP timeout, holding locks the whole time. The same
+    applies to waiting for user input. Do the external work outside, and reconcile with an
+    idempotency key (<a href="20-upsert-and-idempotency.html">chapter 20</a>) or a
+    <a href="24-concurrency-patterns.html">transactional outbox</a>.
+  </p>
+</div>
+
+<h2 id="ddl">Is DDL transactional?</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Engine</th><th>DDL in a transaction?</th></tr></thead>
+<tbody>
+<tr><td><strong>PostgreSQL</strong></td><td>Yes — <code>CREATE TABLE</code>, <code>ALTER</code>, even <code>DROP</code>, all rollback-able. Migrations can be atomic</td></tr>
+<tr><td><strong>SQL Server</strong></td><td>Mostly yes</td></tr>
+<tr><td><strong>MySQL / MariaDB</strong></td><td><strong>No</strong> — DDL causes an implicit commit. A failed migration leaves you half-migrated</td></tr>
+<tr><td><strong>Oracle</strong></td><td><strong>No</strong> — implicit commit before and after</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>
+  This single difference shapes how you write migrations: on PostgreSQL a migration can be one
+  atomic unit, and on MySQL every step must be independently safe to have half-applied. See
+  <a href="36-migrations.html">chapter 36</a>.
+</p>
+
+<div class="tryit">
+  <pre><code>-- In the playground: atomicity, demonstrated in six lines.
+SELECT COUNT(*) FROM orders;                  -- 1800
+BEGIN;
+  DELETE FROM order_events;
+  DELETE FROM payments;
+  SELECT COUNT(*) FROM payments;              -- 0, inside the transaction
+ROLLBACK;
+SELECT COUNT(*) FROM payments;                -- 1440. Nothing happened.</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Atomicity is all-or-nothing; isolation is what other sessions can see meanwhile. They are different letters for a reason.</li>
+    <li>Consistency in ACID only means “the constraints you declared still hold”. Declare none and it promises nothing.</li>
+    <li>Durability means it survives a crash, not a dead disk. That is backups.</li>
+    <li>You are in autocommit unless you said otherwise — except in Oracle, where you are not.</li>
+    <li>Savepoints give partial rollback and are how ORMs fake nested transactions.</li>
+    <li>In T-SQL, a nested <code>COMMIT</code> commits nothing but a <code>ROLLBACK</code> at any depth rolls back everything.</li>
+    <li>Long transactions bloat PostgreSQL, grow the SQL Server log, and make everyone else wait.</li>
+    <li>Never hold a transaction open across a network call or user input.</li>
+    <li>DDL is transactional in PostgreSQL and SQL Server, and is not in MySQL or Oracle. That decides how migrations must be written.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Explain ACID.</p>
+  <p class="a">Atomicity: all statements or none, via the undo log. Consistency: declared
+    constraints hold at commit — which is weaker than people assume. Isolation: concurrent
+    transactions do not corrupt each other, to the degree the isolation level specifies.
+    Durability: once committed it survives a crash, because the log was flushed before the commit
+    returned.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why are long-running transactions a problem?</p>
+  <p class="a">They hold locks to the end, so contention rises. In PostgreSQL they hold back the
+    vacuum horizon and cause bloat across the whole database; in SQL Server they prevent the log
+    truncating. And a transaction held open across an external HTTP call lasts as long as somebody
+    else's timeout.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Can you roll back a <code>CREATE TABLE</code>?</p>
+  <p class="a">In PostgreSQL and SQL Server, yes — DDL is transactional, which is why a migration
+    can be atomic there. In MySQL and Oracle, no: DDL causes an implicit commit, so a failed
+    multi-step migration leaves the schema half-changed and every step must be independently safe.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

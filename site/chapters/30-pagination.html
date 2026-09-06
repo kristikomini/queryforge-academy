@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>30 &middot; Pagination that scales &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="30-pagination">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 4 — Fast at scale <span>&rsaquo;</span> Chapter 30</p>
+<h1>Pagination that scales</h1>
+<p class="lede">OFFSET 100000 reads a hundred thousand rows in order to throw them away. Keyset pagination does not.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">In no advert; in every application. Page 5 000 of a report is where OFFSET stops being acceptable.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="offset">Why OFFSET degrades</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    To read page 500 of a book with no page numbers, you count pages from the beginning. Every
+    time. Page 1 is instant, page 500 takes five hundred times as long — and you throw away
+    everything you counted.
+  </p>
+</div>
+
+<pre><code>SELECT * FROM orders ORDER BY placed_at DESC
+OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;   -- reads 100 020, returns 20</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    <code>OFFSET n</code> is not a seek. The engine must <em>produce</em> the first n rows in order
+    and discard them, so the cost is <strong>O(offset + limit)</strong> and grows linearly with page
+    number. Page 1 is free, page 5 000 is a table scan with extra steps. Worse, the cost is paid on
+    every page, so a user paging through results makes it slower as they go — which is exactly the
+    opposite of what they expect.
+  </p>
+</div>
+
+<h2 id="keyset">Keyset pagination</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Instead of counting from the front, use a bookmark: “carry on from where I left off”. Turning
+    to a bookmark costs the same whether it is page 2 or page 900.
+  </p>
+</div>
+
+<pre><code>-- Page 1
+SELECT id, placed_at, total_cents FROM orders
+ORDER BY placed_at DESC, id DESC
+LIMIT 20;
+
+-- Every subsequent page: remember the LAST ROW of the page you just showed
+-- (placed_at = :last_at, id = :last_id) and ask for what comes after it.
+SELECT id, placed_at, total_cents FROM orders
+WHERE (placed_at, id) &lt; (:last_at, :last_id)     -- row-value comparison
+ORDER BY placed_at DESC, id DESC
+LIMIT 20;</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 Two things make this work</div>
+  <ol style="margin-bottom:0">
+    <li><strong>The tie-breaker.</strong> <code>placed_at</code> alone is not unique, so two orders
+      with the same timestamp would be skipped or repeated across the page boundary. Adding
+      <code>id</code> makes the sort <strong>total</strong>, which is what makes the bookmark
+      unambiguous.</li>
+    <li><strong>The row-value comparison.</strong> <code>(a, b) &lt; (x, y)</code> is lexicographic
+      and — crucially — <strong>sargable against an index on <code>(a, b)</code></strong>.
+      Expanding it by hand into <code>a &lt; x OR (a = x AND b &lt; y)</code> is logically identical
+      and typically <em>not</em> optimised into a single seek. PostgreSQL, MySQL and Oracle support
+      the tuple form; SQL Server does not, so write the expanded form there and check the plan.</li>
+  </ol>
+</div>
+
+<pre><code>CREATE INDEX ix_orders_page ON orders (placed_at DESC, id DESC);
+-- Now every page is one seek plus twenty sequential rows. Page 5 000 costs
+-- exactly what page 1 costs.</code></pre>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 200" role="img" aria-labelledby="d30t d30d">
+    <title id="d30t">OFFSET versus keyset pagination cost by page number</title>
+    <desc id="d30d">The cost of OFFSET pagination rises linearly with page number, while keyset pagination stays flat.</desc>
+    <line class="d-line" x1="70" y1="160" x2="780" y2="160"/>
+    <line class="d-line" x1="70" y1="160" x2="70" y2="30"/>
+    <text class="d-t-c" x="425" y="188" text-anchor="middle">page number →</text>
+    <text class="d-t-c" x="24" y="96" transform="rotate(-90 24 96)" text-anchor="middle">rows read</text>
+    <path class="d-line-b" d="M70 158 L780 40" stroke-dasharray="0"/>
+    <text class="d-t-b" x="640" y="62">OFFSET — O(offset + limit)</text>
+    <path class="d-line-a" d="M70 152 H780"/>
+    <text class="d-t-b" x="560" y="142">keyset — O(limit), flat</text>
+  </svg>
+  <figcaption>Same query, same index, same result rows. Different amount of work discarded.</figcaption>
+</figure>
+
+<h2 id="tradeoffs">What keyset pagination cannot do</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ Be honest about this in an interview</div>
+  <ul style="margin-bottom:0">
+    <li><strong>No “jump to page 47”.</strong> You can only go forward and back from where you are.
+      For infinite scroll and “next page” that is fine; for a numbered pager it is not.</li>
+    <li><strong>No total page count</strong> without a separate <code>COUNT(*)</code>, which on a
+      large filtered set is itself expensive. Approximate counts
+      (<code>reltuples</code>, <code>sys.dm_db_partition_stats</code>) or "showing 1–20 of many"
+      are the usual compromises.</li>
+    <li><strong>The sort must be total</strong>, and the sort columns must be stable — you cannot
+      keyset-paginate by a column that changes while the user is paging.</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Keyset has one advantage nobody mentions</div>
+  <p style="margin-bottom:0">
+    It is <strong>correct under concurrent inserts</strong>. With <code>OFFSET</code>, a row
+    inserted before your position while you are reading shifts everything down by one, so page 2
+    repeats the last row of page 1 — and a deleted row skips one entirely. Users report it as
+    "duplicates in the list" and nobody can reproduce it. Keyset pagination anchors on a value, not
+    a count, so this cannot happen.
+  </p>
+</div>
+
+<h2 id="cursor">API cursors are keyset pagination with a wrapper</h2>
+
+<pre><code>-- Encode the bookmark opaquely so clients cannot construct one, and so you can
+-- change the sort later without breaking them.
+{ "items": [...],
+  "nextCursor": "eyJhdCI6IjIwMjYtMDMtMTRUMDk6MTIiLCJpZCI6ODgxfQ" }
+-- base64 of {"at":"2026-03-14T09:12","id":881}</code></pre>
+
+<div class="box note">
+  <div class="box-title">Sign it, or at least treat it as untrusted</div>
+  <p style="margin-bottom:0">
+    A cursor is user input that goes straight into a <code>WHERE</code> clause. Base64 is not
+    encryption — anyone can decode, edit and re-encode it. Bind it as a parameter like any other
+    input (<a href="34-dynamic-sql-and-injection.html">chapter 34</a>), and if the cursor carries
+    filter state as well as position, sign it, or a client can page through data they should not
+    see.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- In the playground, compare what each has to read.
+EXPLAIN QUERY PLAN
+SELECT * FROM orders ORDER BY placed_at DESC, id DESC LIMIT 20 OFFSET 1500;
+
+EXPLAIN QUERY PLAN
+SELECT * FROM orders
+WHERE (placed_at, id) &lt; ('2025-06-01T00:00:00Z', 0)
+ORDER BY placed_at DESC, id DESC LIMIT 20;</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li><code>OFFSET n</code> costs O(offset + limit): it produces and discards every earlier row.</li>
+    <li>Keyset pagination anchors on the last row's sort values and costs the same on every page.</li>
+    <li>The sort must be total — add a unique tie-breaker such as the primary key.</li>
+    <li>Row-value comparison <code>(a, b) &lt; (x, y)</code> is sargable; the hand-expanded <code>OR</code> form usually is not.</li>
+    <li>SQL Server has no row-value comparison. Write the expanded form and verify the plan.</li>
+    <li>Index on exactly the sort columns, in the sort direction.</li>
+    <li>Keyset cannot jump to an arbitrary page and cannot cheaply give a total count. Say so.</li>
+    <li>Keyset is also <em>correct</em> under concurrent inserts; <code>OFFSET</code> silently duplicates and skips rows.</li>
+    <li>An API cursor is untrusted user input. Parameterise it, and sign it if it carries filter state.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Why is page 5 000 slow?</p>
+  <p class="a">Because <code>OFFSET</code> is not a seek — the engine has to generate the first
+    100 000 rows in sorted order and throw them away. The cost is proportional to the offset, so it
+    grows as the user pages. Keyset pagination replaces the count with a value comparison and is
+    flat.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Implement keyset pagination.</p>
+  <p class="a">Order by a total sort — the display column plus a unique tie-breaker — and filter
+    with a row-value comparison against the last row of the previous page, with an index matching
+    the sort. And I would say what it costs: no jumping to page 47, and no cheap total count.</p>
+</div>
+
+<div class="qa">
+  <p class="q">A user reports seeing the same record on two consecutive pages. Why?</p>
+  <p class="a">Either the sort is not total, so equal-valued rows come back in a different order
+    each query, or rows are being inserted while they page and <code>OFFSET</code> is shifting the
+    window. Both are fixed by a stable total sort, and the second is fixed properly by keyset
+    pagination.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

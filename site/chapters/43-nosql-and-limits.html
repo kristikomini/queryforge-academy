@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>43 &middot; NoSQL, and when relational is the wrong answer &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="43-nosql-and-limits">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 6 — Data at work <span>&rsaquo;</span> Chapter 43</p>
+<h1>NoSQL, and when relational is the wrong answer</h1>
+<p class="lede">Document, key-value, column-family, graph — the honest trade, and how to say it in an interview.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Competenze sui database piu richieste: SQL Server, Oracle e MongoDB&rdquo;</em> &mdash; MongoDB appears in Italian
+  adverts constantly, usually beside SQL Server. They want somebody who is not frightened of it and
+  does not evangelise it either.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="families">Four families, four different problems</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Family</th><th>Model</th><th>Genuinely good at</th><th>Examples</th></tr></thead>
+<tbody>
+<tr><td><strong>Document</strong></td><td>Nested JSON keyed by id</td><td>Aggregates read and written whole; a schema that varies per document</td><td>MongoDB, Couchbase</td></tr>
+<tr><td><strong>Key–value</strong></td><td>A hash table</td><td>Caching, sessions, rate limiting, queues — sub-millisecond by key</td><td>Redis, Memcached</td></tr>
+<tr><td><strong>Column-family</strong></td><td>Wide rows partitioned by key</td><td>Enormous write volume, time-series, linear horizontal scaling</td><td>Cassandra, ScyllaDB, HBase</td></tr>
+<tr><td><strong>Graph</strong></td><td>Nodes and edges as first-class</td><td>Traversals of unknown depth: "who influences whom, six hops out"</td><td>Neo4j, TigerGraph</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A relational database is a filing system where everything is cross-referenced, so you can ask
+    almost any question — but somebody had to design the filing system first. The others are each
+    very good at <em>one shape</em> of question and much worse at the rest. The skill is knowing
+    which shape you actually have.
+  </p>
+</div>
+
+<h2 id="cap">CAP, stated honestly</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 What CAP does and does not say</div>
+  <p>
+    In the presence of a network <strong>Partition</strong>, you must choose between
+    <strong>Consistency</strong> and <strong>Availability</strong>. That is the whole theorem, and
+    two things follow that are usually got wrong:
+  </p>
+  <ul style="margin-bottom:0">
+    <li><strong>“Pick two of three” is a misreading.</strong> Partitions are not a choice — networks
+      fail. So the real choice is only between C and A, and only <em>during</em> a partition.</li>
+    <li><strong>The interesting trade is the rest of the time</strong>, which CAP says nothing
+      about. That is PACELC: <em>if Partition then A or C, Else Latency or Consistency</em>. Almost
+      every practical decision you will make is the "else" half — how much latency you are willing
+      to pay for a consistent read — and mentioning PACELC unprompted is a strong signal.</li>
+  </ul>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ “NoSQL scales, SQL doesn't” is out of date</div>
+  <p style="margin-bottom:0">
+    A single well-indexed PostgreSQL or SQL Server instance on modern hardware handles workloads
+    that would have needed a cluster in 2012 — tens of thousands of transactions a second, tables in
+    the billions of rows. Meanwhile MongoDB acquired multi-document ACID transactions (4.0) and a
+    schema validator, PostgreSQL acquired <code>jsonb</code> with indexing, and both moved toward
+    the middle. Most systems that adopted NoSQL "for scale" never approached the limit of a
+    relational database, and paid for it in lost joins and hand-written consistency.
+  </p>
+</div>
+
+<h2 id="when">When relational is genuinely the wrong answer</h2>
+
+<div class="box good">
+  <div class="box-title">✔ Four honest cases</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Caching and ephemeral state.</strong> Sessions, rate-limit counters, a leaderboard.
+      Redis is better at this than any relational database and it is not close. Do not put a cache
+      in your OLTP database.</li>
+    <li><strong>Write volume beyond one machine, with a natural partition key.</strong> IoT
+      telemetry, event streams. Cassandra scales writes linearly; you give up joins and ad-hoc
+      queries, which for that workload you did not need.</li>
+    <li><strong>Deep, variable-length graph traversal.</strong> "Everyone within six degrees" is a
+      recursive CTE that gets exponentially worse; a graph database stores adjacency directly and
+      it is what it was built for.</li>
+    <li><strong>Genuinely per-document schema.</strong> A product catalogue where every category
+      has different attributes, defined by the merchants. That is what documents are for — although
+      a <code>jsonb</code> column inside PostgreSQL covers a surprising amount of it
+      (<a href="18-json-in-sql.html">chapter 18</a>) while keeping transactions and joins.</li>
+  </ol>
+</div>
+
+<h2 id="cost">What you give up, itemised</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>You lose</th><th>Which means</th></tr></thead>
+<tbody>
+<tr><td><strong>Joins</strong></td><td>You denormalise, and now the same fact is in four documents. Updating it is your job, and it is not atomic</td></tr>
+<tr><td><strong>Constraints</strong></td><td>Referential integrity moves into application code, where every bug bypasses it</td></tr>
+<tr><td><strong>Ad-hoc queries</strong></td><td>The access pattern must be known at design time. A new question can mean a new collection and a backfill</td></tr>
+<tr><td><strong>A declarative language everyone knows</strong></td><td>SQL is forty years old and universally understood. That is worth a great deal</td></tr>
+<tr><td><strong>Mature tooling</strong></td><td>Backup, restore, monitoring, migration and BI integration are all more mature on the relational side</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box note">
+  <div class="box-title">Polyglot persistence, and its real cost</div>
+  <p style="margin-bottom:0">
+    "Use the right tool for each job" is correct and incomplete. Every additional data store is
+    another thing to back up, monitor, secure, patch, staff and — the expensive one —
+    <strong>keep consistent with the others</strong>, with no transaction spanning them. That is
+    the dual-write problem again (<a href="24-concurrency-patterns.html">chapter 24</a>), now
+    permanent. The honest position is that a second store must earn its operational cost, and the
+    bar is higher than it sounds.
+  </p>
+</div>
+
+<h2 id="answer">How to answer this in an interview</h2>
+
+<div class="box good">
+  <div class="box-title">✔ A position, with reasons, and no contempt</div>
+  <p style="margin-bottom:0">
+    <em>“I default to relational, because most business data is relational and transactions,
+    constraints and ad-hoc queries are genuinely hard to give up. I reach for Redis for caching and
+    ephemeral state without hesitation. I would use a document store where the schema really is
+    per-document, or a column store where write volume exceeds one machine and there is a natural
+    partition key. What I would want to be explicit about is what each extra store costs
+    operationally, because keeping two systems consistent has no transactional answer.”</em>
+  </p>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ The two answers that lose the room</div>
+  <p style="margin-bottom:0">
+    <strong>“NoSQL is a fad”</strong> — you will be interviewed by people running MongoDB, and it
+    reads as not having used one. <strong>“NoSQL scales and SQL doesn't”</strong> — a decade out of
+    date, and the follow-up question ("scales in what dimension?") is unanswerable if you believed
+    it.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Document, key–value, column-family and graph solve four different problems. Name the shape before naming the product.</li>
+    <li>CAP is a choice between consistency and availability <em>during a partition</em>; partitions are not optional.</li>
+    <li>PACELC covers the rest of the time — latency versus consistency — which is where most real decisions live.</li>
+    <li>A single well-indexed relational instance handles far more than the 2012 folklore suggests.</li>
+    <li>MongoDB has transactions and PostgreSQL has indexed JSON. The two families moved toward each other.</li>
+    <li>Redis for caching and ephemeral state is the least controversial NoSQL choice there is.</li>
+    <li>Giving up joins means denormalising, which means the same fact in several places and no atomic way to update it.</li>
+    <li>Document stores require knowing the access pattern at design time; a new question can cost a backfill.</li>
+    <li>Every extra store must earn its operational cost, and keeping two consistent has no transactional answer.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">When would you choose MongoDB over SQL Server?</p>
+  <p class="a">When the data genuinely is per-document — a catalogue where each category has
+    different attributes defined by merchants — and the access pattern is fetch-and-store the whole
+    aggregate by id. What I would weigh against it is losing joins and constraints, and I would
+    check first whether a <code>jsonb</code> or JSON column inside the relational database covers
+    it, because that keeps transactions and ad-hoc queries.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Explain the CAP theorem.</p>
+  <p class="a">During a network partition you must choose between consistency and availability.
+    The common "pick two of three" phrasing is misleading, because partitions are not something you
+    choose. The more useful extension is PACELC, which adds the normal case: when there is no
+    partition, the trade is latency against consistency — and that is the trade most systems are
+    actually making.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Is NoSQL faster than SQL?</p>
+  <p class="a">For its specific access pattern, often yes — a key–value store returning a document
+    by id will beat a join. For anything else, usually no, and the comparison is not like for like:
+    the relational database is enforcing constraints and offering ad-hoc queries the other is not.
+    "Faster" is only meaningful once you name the operation.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

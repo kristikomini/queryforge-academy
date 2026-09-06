@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>28 &middot; Statistics, cardinality and parameter sniffing &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="28-statistics-and-sniffing">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 4 — Fast at scale <span>&rsaquo;</span> Chapter 28</p>
+<h1>Statistics, cardinality and parameter sniffing</h1>
+<p class="lede">Why the same query is fast for one customer and slow for another, and the four things you can do about it.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottimizzazione e tuning delle query&rdquo;</em> &mdash; and the class of problem
+  where the query, the indexes and the data are all fine and it is still slow.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="stats">The optimiser is guessing, and statistics are the guess</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Before you set off you decide whether to walk or take the bus, and you decide using how far you
+    <em>think</em> it is. If your idea of the distance is six months out of date, you will make the
+    wrong choice — not because you chose badly, but because you were told the wrong distance.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    A cost-based optimiser picks a plan by estimating how many rows each step will produce, using
+    <strong>statistics</strong>: a histogram of value distribution per column plus a density
+    (average duplicates). Every join order, join algorithm and access method decision follows from
+    those estimates. Stale or missing statistics therefore do not make the optimiser slow — they
+    make it <em>confidently wrong</em>, which is much harder to see.
+  </p>
+</div>
+
+<pre><code>-- Look at what it believes
+DBCC SHOW_STATISTICS('dbo.orders', 'ix_orders_status');   -- SQL Server
+SELECT * FROM pg_stats WHERE tablename = 'orders';        -- PostgreSQL
+
+-- Tell it to look again
+UPDATE STATISTICS dbo.orders WITH FULLSCAN;               -- SQL Server
+ANALYZE orders;                                           -- PostgreSQL
+ANALYZE TABLE orders;                                     -- MySQL</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — auto-update fires later than you think</div>
+  <p style="margin-bottom:0">
+    SQL Server's classic threshold was <strong>20% of the rows plus 500</strong>. On a table with
+    100 million rows that is 20 million modifications before statistics refresh themselves — so a
+    table can be badly out of date for weeks while looking healthy. (2016+ uses a
+    square-root-based threshold that is much better, but only under a recent compatibility level.)
+    On a large, actively-loaded table, scheduled statistics maintenance is not optional.
+  </p>
+</div>
+
+<h2 id="sniffing">Parameter sniffing</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    The first customer through the door orders one coffee, so you set up a small tray. Then a coach
+    party arrives and you carry two hundred coffees one at a time on the small tray — because you
+    planned for the first person you saw and never reconsidered.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    On first execution, the engine compiles a plan using the <em>actual parameter values</em> of
+    that call — it “sniffs” them — and caches that plan for all subsequent calls. That is usually
+    correct and usually free. It goes wrong when the data is <strong>skewed</strong>: a plan
+    compiled for a customer with 3 orders (nested loops, index seek, lookup) is catastrophic when
+    reused for a customer with 400 000, and vice versa. The symptom is unmistakable: the same
+    stored procedure is fast for one input and slow for another, and restarting the service
+    "fixes" it — because it cleared the cache and re-sniffed.
+  </p>
+</div>
+
+<h3>The four fixes, and when each is right</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Fix</th><th>Does</th><th>Right when</th><th>Costs</th></tr></thead>
+<tbody>
+<tr><td><code>OPTION (RECOMPILE)</code></td><td>New plan every execution, using the real values</td><td>Infrequent, expensive, highly variable queries — and reporting screens with optional parameters</td><td>Compilation CPU on every call</td></tr>
+<tr><td><code>OPTIMIZE FOR (@p = 'x')</code></td><td>Always plan as if the parameter were x</td><td>One value dominates the workload</td><td>You have hard-coded an assumption that will age</td></tr>
+<tr><td><code>OPTIMIZE FOR UNKNOWN</code></td><td>Use average density, ignore the actual value</td><td>You want one mediocre plan rather than a coin flip</td><td>Never optimal for anybody</td></tr>
+<tr><td>Split the procedure</td><td>Separate code paths per shape, each with its own cached plan</td><td>There are genuinely two workloads</td><td>More code, and it is honest about why</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box note">
+  <div class="box-title">The local-variable trick, and why not to use it</div>
+  <p style="margin-bottom:0">
+    Assigning a parameter to a local variable inside a procedure defeats sniffing, because the
+    optimiser cannot see a local's value at compile time — so it uses average density. It is
+    equivalent to <code>OPTIMIZE FOR UNKNOWN</code>, but <strong>invisible</strong>: the next
+    person to read the procedure has no idea it is a performance decision and will "tidy" it away.
+    If you want that behaviour, ask for it by name in a hint.
+  </p>
+</div>
+
+<h2 id="estimation">Where estimation fails even with perfect statistics</h2>
+
+<ul>
+  <li><strong>Correlated columns.</strong> The optimiser assumes independence, so
+    <code>WHERE city = 'Modena' AND region = 'Emilia-Romagna'</code> is estimated as
+    <em>p(city) × p(region)</em> — a big underestimate, because every Modena row is already
+    Emilia-Romagna. PostgreSQL can be told: <code>CREATE STATISTICS … (dependencies) ON city,
+    region FROM customers</code>. SQL Server needs a multi-column statistic or a rewrite.</li>
+  <li><strong>Table variables</strong> in T-SQL historically estimate <strong>one row</strong>,
+    whatever they contain. That single fact explains an enormous number of slow procedures;
+    a temp table has real statistics and is usually the fix.</li>
+  <li><strong>Multi-statement table-valued functions</strong> estimate a fixed guess (1 row, or 100
+    in newer versions) regardless of reality. Inline table-valued functions do not have this
+    problem — they are expanded into the query.</li>
+  <li><strong>Scalar UDFs in a predicate</strong> are a black box: no estimate, no
+    parallelism, and pre-2019 SQL Server executed them once per row.</li>
+  <li><strong>Expressions the optimiser cannot see through</strong>: a parameter compared to a
+    computed value, a <code>LIKE</code> with a variable pattern, dynamic date arithmetic.</li>
+</ul>
+
+<div class="box good">
+  <div class="box-title">✔ The one-line diagnostic</div>
+  <p style="margin-bottom:0">
+    <strong>“The same query is fast for one input and slow for another”</strong> is parameter
+    sniffing until proven otherwise. <strong>“It got slow after the nightly load”</strong> is stale
+    statistics until proven otherwise. Being able to name the right suspect from the symptom is
+    most of what the interviewer is checking.
+  </p>
+</div>
+
+<h2 id="cache">The plan cache</h2>
+
+<pre><code>-- Which cached plans are costing the most in total? (Not average — total.)
+SELECT TOP 20
+       qs.execution_count,
+       qs.total_worker_time / 1000 AS cpu_ms,
+       qs.total_logical_reads,
+       qs.total_elapsed_time / qs.execution_count / 1000 AS avg_ms,
+       SUBSTRING(t.text, 1, 200) AS sql
+FROM sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t
+ORDER BY qs.total_worker_time DESC;
+
+-- PostgreSQL, with pg_stat_statements enabled:
+SELECT calls, total_exec_time, mean_exec_time, rows, left(query, 120)
+FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — sorting by average duration hides the real problem</div>
+  <p style="margin-bottom:0">
+    A query taking 4 ms and running two million times a day costs far more than one taking 9
+    seconds and running twice. Sort by <strong>total</strong>. This is also the only way the N+1
+    problem is ever visible in these views.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>The optimiser chooses by estimating rows. Statistics are the estimate.</li>
+    <li>Stale statistics do not make it slow — they make it confidently wrong.</li>
+    <li>SQL Server's classic auto-update threshold is 20% of rows plus 500, which is far too late on a large table.</li>
+    <li>Parameter sniffing caches a plan built for the first values seen and reuses it for all.</li>
+    <li>“Fast for one customer, slow for another” means sniffing. “Slow since the nightly load” means statistics.</li>
+    <li><code>RECOMPILE</code> for variable expensive queries; <code>OPTIMIZE FOR</code> when one shape dominates; splitting the procedure when there are genuinely two workloads.</li>
+    <li>The local-variable trick works and is invisible. Use a hint so the next reader knows it is deliberate.</li>
+    <li>The optimiser assumes columns are independent, so correlated predicates are underestimated.</li>
+    <li>Table variables and multi-statement TVFs estimate a fixed guess. Temp tables have real statistics.</li>
+    <li>Sort the plan cache by <em>total</em> time, never average.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">What is parameter sniffing?</p>
+  <p class="a">The optimiser compiles a plan using the parameter values of the first execution and
+    caches it. That is normally desirable; with skewed data it means a plan built for a tiny input
+    is reused for a huge one. The tell is a procedure that is fast for one argument and slow for
+    another, and that "fixes itself" after a restart.</p>
+</div>
+
+<div class="qa">
+  <p class="q">A query was fast yesterday and is slow today, and nothing was deployed. Why?</p>
+  <p class="a">Most likely stale statistics after a data load, or a recompiled plan that got
+    sniffed with a different parameter. I would compare estimated versus actual rows in the plan;
+    a large gap points at statistics, and a plan that changed shape points at sniffing.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why might a table variable make a procedure slow?</p>
+  <p class="a">It has no meaningful statistics — historically an estimate of exactly one row,
+    whatever it holds. So the optimiser plans the rest of the query as if it were joining to one
+    row, typically choosing nested loops, and then executes that against fifty thousand. A temp
+    table has real statistics and usually fixes it outright.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>36 &middot; Schema migrations and zero-downtime change &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="36-migrations">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 5 — Building it properly <span>&rsaquo;</span> Chapter 36</p>
+<h1>Schema migrations and zero-downtime change</h1>
+<p class="lede">Versioned migrations, the expand/contract pattern, and the ALTER that locks a table for eleven minutes.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Utilizzo di sistemi di versionamento (Git)&rdquo;</em> &mdash; the schema is code, and code
+  that is not in Git is a rumour. This chapter is how a schema gets a history.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="versioned">The schema is code</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    If the only record of how the cupboard is arranged is the cupboard, then two cupboards in two
+    houses drift apart and nobody can say which is right. Writing down each change, in order,
+    means any empty cupboard can be turned into the correct one by replaying the list.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    A <strong>migration</strong> is a numbered, immutable script that takes the schema from version
+    n to version n+1, recorded in a table in the database itself. Any environment can be brought to
+    any version by replaying them in order — which is what makes a new developer's laptop, CI, and
+    production the same schema rather than three schemas with a family resemblance. Flyway,
+    Liquibase, DbUp, Alembic, EF Core migrations and dbmate all implement the same idea.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Rule</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td><strong>Never edit an applied migration</strong></td><td>Its checksum is recorded. Editing it means environments that already ran it are permanently different from ones that have not</td></tr>
+<tr><td><strong>Forward-only</strong></td><td>A “down” script is written when calm and run when panicking, is rarely tested, and cannot restore data that a drop destroyed. Roll forward with a new migration</td></tr>
+<tr><td><strong>One logical change per migration</strong></td><td>So a failure has an obvious scope, and the log reads as a history</td></tr>
+<tr><td><strong>Data migrations are migrations too</strong></td><td>Backfills belong in the same ordered, versioned mechanism, not in a wiki page</td></tr>
+<tr><td><strong>The migration account is not the app account</strong></td><td>DDL rights belong to the deploy step, not to a running service (<a href="35-security-and-gdpr.html">chapter 35</a>)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="locking">The ALTER that stops the site</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ What each engine does when you add a column</div>
+  <ul style="margin-bottom:0">
+    <li><strong>PostgreSQL 11+:</strong> adding a nullable column, or one with a constant default,
+      is metadata-only and instant. Adding one with a <em>volatile</em> default rewrites the whole
+      table under an exclusive lock.</li>
+    <li><strong>SQL Server 2012+ Enterprise:</strong> adding a <code>NOT NULL</code> column with a
+      default is metadata-only. Standard edition rewrites.</li>
+    <li><strong>MySQL 5.6+:</strong> many <code>ALTER</code>s are online, but <em>not all</em> —
+      and the ones that are not take a metadata lock that queues behind every open transaction and
+      then blocks every new one. A single long-running <code>SELECT</code> can turn an instant
+      <code>ALTER</code> into a total outage.</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The habit that prevents the incident</div>
+  <p style="margin-bottom:0">
+    <strong>Always set a short lock timeout before DDL.</strong>
+    <code>SET lock_timeout = '3s'</code> in PostgreSQL, <code>SET LOCK_TIMEOUT 3000</code> in
+    T-SQL. If the lock cannot be taken quickly the migration fails fast and retries later —
+    instead of queueing and blocking every subsequent query for eleven minutes. This one line has
+    prevented more outages than any amount of planning.
+  </p>
+</div>
+
+<h2 id="expand">Expand and contract</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The pattern for changing a schema without downtime</div>
+  <p style="margin-bottom:0">
+    The application and the database deploy separately, so <strong>there is always a moment when
+    old code is running against the new schema</strong>. Every zero-downtime change follows from
+    accepting that: make the schema change <em>additive</em> first, migrate the code, and only then
+    remove the old shape.
+  </p>
+</div>
+
+<p>Renaming <code>customers.name</code> to <code>full_name</code>, safely — four deploys:</p>
+
+<pre><code>-- 1 · EXPAND. Add the new column. Old code is unaffected.
+ALTER TABLE customers ADD COLUMN full_name VARCHAR(200) NULL;
+
+-- 2 · BACKFILL, in batches so nothing locks for long. Idempotent, resumable.
+UPDATE customers SET full_name = name
+WHERE full_name IS NULL AND id BETWEEN :lo AND :hi;
+
+-- 3 · MIGRATE. Deploy code that WRITES BOTH and READS the new one.
+--    Both columns are now correct; either version of the app works.
+
+-- 4 · CONTRACT. Once every instance is on the new code, and only then:
+ALTER TABLE customers DROP COLUMN name;</code></pre>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 170" role="img" aria-labelledby="d36t d36d">
+    <title id="d36t">Expand and contract deployment sequence</title>
+    <desc id="d36d">Add the new column, backfill it, deploy code that writes both and reads the new one, then drop the old column once no running code refers to it.</desc>
+    <rect class="d-box-g" x="20" y="50" width="170" height="56" rx="9"/>
+    <text class="d-t-b" x="105" y="74" text-anchor="middle">1 · Expand</text>
+    <text class="d-t-s" x="105" y="92" text-anchor="middle">add, nullable</text>
+    <rect class="d-box-g" x="230" y="50" width="170" height="56" rx="9"/>
+    <text class="d-t-b" x="315" y="74" text-anchor="middle">2 · Backfill</text>
+    <text class="d-t-s" x="315" y="92" text-anchor="middle">batched, resumable</text>
+    <rect class="d-box-a" x="440" y="50" width="170" height="56" rx="9"/>
+    <text class="d-t-b" x="525" y="74" text-anchor="middle">3 · Migrate code</text>
+    <text class="d-t-s" x="525" y="92" text-anchor="middle">write both, read new</text>
+    <rect class="d-box-w" x="650" y="50" width="170" height="56" rx="9"/>
+    <text class="d-t-b" x="735" y="74" text-anchor="middle">4 · Contract</text>
+    <text class="d-t-s" x="735" y="92" text-anchor="middle">drop the old column</text>
+    <path class="d-line-a" d="M190 78 H230" marker-end="url(#a36)"/>
+    <path class="d-line-a" d="M400 78 H440" marker-end="url(#a36)"/>
+    <path class="d-line-a" d="M610 78 H650" marker-end="url(#a36)"/>
+    <text class="d-t-c" x="420" y="140" text-anchor="middle">at every point, both the old and the new version of the application work</text>
+    <defs><marker id="a36" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill-a"/></marker></defs>
+  </svg>
+  <figcaption>A rename is four deploys, and each one is individually reversible.</figcaption>
+</figure>
+
+<div class="box note">
+  <div class="box-title">The same shape for other changes</div>
+  <ul style="margin-bottom:0">
+    <li><strong>Adding <code>NOT NULL</code>:</strong> add nullable → backfill → add a
+      <code>CHECK … NOT VALID</code> and then <code>VALIDATE CONSTRAINT</code> (PostgreSQL takes
+      only a light lock for the validation) → set <code>NOT NULL</code>.</li>
+    <li><strong>Changing a type:</strong> new column, dual write, backfill, swap, drop.</li>
+    <li><strong>Adding an index:</strong> <code>CREATE INDEX CONCURRENTLY</code> in PostgreSQL, or
+      <code>WITH (ONLINE = ON)</code> in SQL Server Enterprise. Both are slower and do not block
+      writes — which is the trade you want on a live table.</li>
+  </ul>
+</div>
+
+<h2 id="testing">Testing a migration</h2>
+
+<ol>
+  <li><strong>Against a restored copy of production</strong>, or at least production-sized data.
+    An <code>ALTER</code> that takes 40&nbsp;ms against 200 rows tells you nothing about 200
+    million.</li>
+  <li><strong>Time it</strong>, and know the number before the deploy window.</li>
+  <li><strong>Run it twice.</strong> A migration that fails halfway must be safe to re-run — which
+    for MySQL and Oracle is not optional, because DDL there is not transactional and a failure
+    leaves the schema half-changed.</li>
+  <li><strong>Have a rollback plan that is not "run the down script"</strong> — usually: the
+    previous application version still works against the new schema, because you expanded rather
+    than replaced.</li>
+</ol>
+
+<div class="rules">
+  <ol>
+    <li>The schema is code. If it is not in version control it is a rumour.</li>
+    <li>A migration is numbered, immutable and recorded in the database. Never edit an applied one.</li>
+    <li>Forward-only. Down scripts are written calm and run panicking, and cannot undo a drop.</li>
+    <li>Set a short lock timeout before DDL, so a blocked migration fails instead of queueing.</li>
+    <li>DDL is transactional in PostgreSQL and SQL Server, not in MySQL or Oracle — so there, every step must be safe to have half-applied.</li>
+    <li>Expand, backfill, migrate the code, contract. Old code and new schema must coexist.</li>
+    <li>Backfills go in batches, and are idempotent and resumable.</li>
+    <li>Create indexes concurrently or online on a live table.</li>
+    <li>Test against production-sized data and time it before the window.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">How do you manage database schema changes?</p>
+  <p class="a">Versioned migration scripts in the same repository as the code, applied by a tool
+    that records what has run, forward-only, one logical change each and never edited once applied.
+    A separate account with DDL rights runs them at deploy time; the application account has no DDL
+    rights at all.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How would you rename a column with no downtime?</p>
+  <p class="a">Expand and contract. Add the new column nullable; backfill in batches; deploy code
+    that writes both and reads the new one; and once every instance is on that code, drop the old
+    column. Four deploys, and at every point both the old and new application versions work.</p>
+</div>
+
+<div class="qa">
+  <p class="q">A migration locked a table for eleven minutes in production. How do you prevent a repeat?</p>
+  <p class="a">Set a short lock timeout before the DDL so it fails fast rather than queueing behind
+    a long transaction and blocking everything behind it. Then check whether the operation is
+    metadata-only on that engine and version, use the concurrent or online variant where one exists,
+    and test the timing against production-sized data first.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

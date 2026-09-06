@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Italiano — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="italiano">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Reference</p>
+<h1>Dirlo in italiano</h1>
+<p class="lede">
+  Phrases for a technical interview and a working day, plus what you would actually say about each
+  topic. The technical nouns stay English on purpose.
+</p>
+
+<div class="box note">
+  <div class="box-title">The rule that governs all of this</div>
+  <p style="margin-bottom:0">
+    <strong>Technical terms stay English</strong> — <em>la query, il deploy, fare il merge,
+    l'indice, il backup</em>. Translating them marks somebody who learned the language from a
+    textbook rather than from a team. The trap is the small number that genuinely
+    <em>are</em> Italian: <strong>collaudo</strong> (acceptance testing), <strong>avvio in
+    produzione</strong> (go-live), <strong>presa in carico</strong> (taking a ticket),
+    <strong>segnalazione</strong> (a reported issue). Using the English word for those marks you
+    just as clearly.
+  </p>
+</div>
+
+<div class="row" style="margin:18px 0">
+  <button class="btn" id="tab-ph">Phrasebook</button>
+  <button class="btn quiet" id="tab-ch">By chapter</button>
+  <a class="btn quiet" href="glossary.html">Glossary →</a>
+</div>
+
+<div id="out"></div>
+
+<h2 id="honest">What this is not</h2>
+<div class="box trap">
+  <div class="box-title">⚠ It is not an Italian course</div>
+  <p style="margin-bottom:0">
+    It assumes you already speak enough Italian to hold the conversation, and fills in the
+    <em>specific</em> vocabulary of a technical interview and a development team — which is a small,
+    learnable set that general language courses never cover. If you are starting from zero, this is
+    the wrong tool and no amount of it will substitute for the language.
+  </p>
+</div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/italiano.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script src="assets/italiano-panel.js"></script>
+<script>
+(function () {
+  var out = document.getElementById("out");
+  var tp = document.getElementById("tab-ph"), tc = document.getElementById("tab-ch");
+  function show(which) {
+    tp.className = which === "ph" ? "btn" : "btn quiet";
+    tc.className = which === "ch" ? "btn" : "btn quiet";
+    if (which === "ph") window.LFItaliano.renderPhrasebook(out);
+    else window.LFItaliano.renderChapterIndex(out);
+  }
+  tp.onclick = function () { show("ph"); };
+  tc.onclick = function () { show("ch"); };
+  show("ph");
+})();
+</script>
+</body>
+</html>

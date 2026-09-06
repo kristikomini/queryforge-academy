@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mock exam — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="exam">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Retrieval practice</p>
+<h1>Mock exam</h1>
+<p class="lede">
+  A timed, mixed selection from the whole bank. Pass mark 80% — the same bar a chapter test uses,
+  and roughly the bar a screening test uses.
+</p>
+
+<div id="setup">
+  <div class="panel">
+    <h3 style="margin-top:0">Choose a length</h3>
+    <div class="row" id="presets"></div>
+    <p class="small muted" style="margin-top:14px;margin-bottom:0">
+      Questions are drawn at random from every chapter, including ones you have not read. That is
+      the point: a screening test does not restrict itself to the syllabus you have covered so far.
+    </p>
+  </div>
+
+  <div class="grid-3" style="margin-top:18px" id="stats"></div>
+
+  <div class="box note">
+    <div class="box-title">What the exam does and does not do</div>
+    <p style="margin-bottom:0">
+      Exam answers <strong>do not</strong> enter the spaced-repetition schedule. It is an
+      assessment, not a study session, and mixing the two would let a bad exam day reset intervals
+      on cards you know perfectly well. It records your best score, your attempt count, and 2 XP
+      per correct answer.
+    </p>
+  </div>
+</div>
+
+<div id="host"></div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+(function () {
+  if (!window.LF || !window.LFQuiz) return;
+  var LF = window.LF;
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+  var PRESETS = [
+    { n: 15, min: 10, label: "15 questions · 10 min" },
+    { n: 30, min: 22, label: "30 questions · 22 min" },
+    { n: 50, min: 40, label: "50 questions · 40 min" },
+    { n: 30, min: 0,  label: "30 questions · untimed" },
+  ];
+
+  function stats() {
+    var host = document.getElementById("stats");
+    host.innerHTML = "";
+    var p = LF.profile;
+    function stat(k, v, s, cls) {
+      var d = el("div", "stat");
+      d.appendChild(el("div", "k", k));
+      d.appendChild(el("div", "v" + (cls ? " " + cls : ""), v));
+      d.appendChild(el("div", "s", s));
+      host.appendChild(d);
+    }
+    stat("Bank size", String(LFQuiz.count()), "questions across " + (window.CHAPTERS || []).length + " chapters");
+    stat("Best score", ("examBest" in p && p.examCount) ? Math.round(p.examBest * 100) + "%" : "—",
+      (p.examCount || 0) + " attempt" + (p.examCount === 1 ? "" : "s"),
+      (p.examBest || 0) >= 0.8 ? "ok" : (p.examCount ? "warn" : ""));
+    stat("Pass mark", "80%", "and 95% earns the ace badge");
+  }
+
+  var box = document.getElementById("presets");
+  PRESETS.forEach(function (pr, i) {
+    var b = el("button", i === 1 ? "btn" : "btn ghost", pr.label);
+    b.onclick = function () { start(pr); };
+    box.appendChild(b);
+  });
+
+  function start(pr) {
+    var all = LFQuiz.all();
+    if (!all.length) return;
+    var qs = LFQuiz.shuffle(all).slice(0, Math.min(pr.n, all.length));
+    document.getElementById("setup").style.display = "none";
+    var host = document.getElementById("host");
+    host.innerHTML = "";
+
+    LFQuiz.mount(host, {
+      title: "Mock exam — " + qs.length + " questions" + (pr.min ? " · " + pr.min + " min" : ""),
+      questions: qs,
+      seconds: pr.min * 60,
+      passMark: 0.8,
+      onDone: function (r) {
+        var res = LF.recordExam(r.correct, r.total, r.seconds);
+        stats();
+        var back = el("div", "row");
+        back.style.justifyContent = "center";
+        back.style.marginTop = "14px";
+        var a = el("a", "btn quiet", "← Choose another length");
+        a.href = "exam.html";
+        back.appendChild(a);
+        if (r.score < 0.8) {
+          var b = el("a", "btn ghost", "Review the cards you missed");
+          b.href = "review.html";
+          back.appendChild(b);
+        }
+        host.appendChild(back);
+      },
+    });
+  }
+
+  LF.on("change", stats);
+  stats();
+})();
+</script>
+</body>
+</html>

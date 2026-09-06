@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>50 &middot; The screening test &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="50-the-screening-test">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 8 — The human requirements <span>&rsaquo;</span> Chapter 50</p>
+<h1>The screening test</h1>
+<p class="lede">The take-home and the live exercise: what they really check, and the twelve queries that keep appearing.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">Written from the exercises actually set by Italian software houses for junior database roles.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="checking">What they are really checking</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    They are not checking whether you can remember the exact word for something. They are checking
+    that when you are given a table and a question, something sensible happens — and that you say
+    out loud what you are doing while it happens.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Four things, in this order of weight</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Do you produce a correct query?</strong> Syntax is forgiven; a wrong answer stated
+      confidently is not.</li>
+    <li><strong>Do you handle the edge cases?</strong> Nulls, ties, zero rows, division by zero. This
+      is the single biggest discriminator, because most candidates write the happy path and stop.</li>
+    <li><strong>Do you narrate?</strong> An interviewer cannot mark silence. Saying “I will use a
+      left join here so customers with no orders are kept” is worth as much as the join.</li>
+    <li><strong>Do you ask about the data?</strong> “Can <code>customer_id</code> be null?” “Are
+      there ties?” Asking is a senior behaviour and it is being watched for explicitly.</li>
+  </ol>
+</div>
+
+<h2 id="twelve">The twelve exercises that keep appearing</h2>
+
+<p class="small muted">
+  Work each of these in the <a href="../playground.html">playground</a> against the reference
+  database before an interview. Not to memorise the answers — to make the <em>shape</em> automatic.
+</p>
+
+<h3>1 · Second-highest value</h3>
+<pre><code>-- DENSE_RANK, because "second highest salary" means the second DISTINCT value.
+SELECT DISTINCT salary_cents FROM (
+  SELECT salary_cents, DENSE_RANK() OVER (ORDER BY salary_cents DESC) AS r
+  FROM employees) t
+WHERE r = 2;
+-- Say why not ROW_NUMBER: with a tie at the top it returns the same salary again.</code></pre>
+
+<h3>2 · Nth per group (top-N per group)</h3>
+<pre><code>WITH r AS (SELECT o.*, ROW_NUMBER() OVER (PARTITION BY customer_id
+                                          ORDER BY placed_at DESC, id DESC) rn
+           FROM orders o)
+SELECT * FROM r WHERE rn = 1;
+-- The tie-breaker on id is the detail they are looking for.</code></pre>
+
+<h3>3 · Find and delete duplicates</h3>
+<pre><code>WITH d AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY LOWER(email)
+                                         ORDER BY id) rn FROM customers)
+SELECT * FROM d WHERE rn &gt; 1;         -- LOOK first
+-- DELETE FROM customers WHERE id IN (SELECT id FROM d WHERE rn > 1);
+-- Then say: "and I would add the unique constraint that should have prevented it."</code></pre>
+
+<h3>4 · Rows in A not in B</h3>
+<pre><code>SELECT c.* FROM customers c
+WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+-- Say why NOT EXISTS and not NOT IN. This is the most-tested single fact in SQL.</code></pre>
+
+<h3>5 · Running total</h3>
+<pre><code>SELECT placed_at, total_cents,
+       SUM(total_cents) OVER (PARTITION BY customer_id
+                              ORDER BY placed_at
+                              ROWS UNBOUNDED PRECEDING) AS running
+FROM orders;
+-- The explicit ROWS is the detail: the RANGE default gives every same-day row
+-- the same day-end total.</code></pre>
+
+<h3>6 · Month-on-month change</h3>
+<pre><code>WITH m AS (SELECT strftime('%Y-%m', placed_at) mo, SUM(total_cents) t
+           FROM orders GROUP BY mo)
+SELECT mo, t, LAG(t) OVER (ORDER BY mo) AS prev,
+       ROUND(100.0 * (t - LAG(t) OVER (ORDER BY mo))
+             / NULLIF(LAG(t) OVER (ORDER BY mo), 0), 1) AS pct
+FROM m ORDER BY mo;
+-- NULLIF guards the division. They will check.</code></pre>
+
+<h3>7 · Pivot without PIVOT</h3>
+<pre><code>SELECT strftime('%Y-%m', placed_at) mo,
+       COUNT(CASE WHEN status = 'delivered' THEN 1 END) delivered,
+       COUNT(CASE WHEN status = 'cancelled' THEN 1 END) cancelled
+FROM orders GROUP BY mo;</code></pre>
+
+<h3>8 · Gaps and islands</h3>
+<pre><code>-- Consecutive runs: group by (value − row_number). Chapter 14.</code></pre>
+
+<h3>9 · Hierarchy</h3>
+<pre><code>-- Recursive CTE with an anchor, UNION ALL, and a depth guard. Chapter 12.</code></pre>
+
+<h3>10 · Customers above average</h3>
+<pre><code>SELECT customer_id, SUM(total_cents) spend FROM orders GROUP BY customer_id
+HAVING SUM(total_cents) &gt; (SELECT AVG(t) FROM
+       (SELECT SUM(total_cents) t FROM orders GROUP BY customer_id));
+-- The trap: "average" of WHAT? Average order value, or average customer spend?
+-- Ask. The question is deliberately ambiguous and asking is the point.</code></pre>
+
+<h3>11 · Fill the gaps in a date series</h3>
+<pre><code>-- LEFT JOIN from a calendar table or a recursive date spine, with COALESCE(n, 0).
+-- The trap is putting the date filter in WHERE and re-inner-joining. Chapter 06.</code></pre>
+
+<h3>12 · “Optimise this query”</h3>
+<pre><code>-- Almost always one of: a function on the filtered column, a correlated subquery
+-- repeated three times, a fan-out hidden by DISTINCT, or SELECT *. Chapter 29.
+-- SAY WHAT YOU ARE LOOKING FOR as you scan it. That is the answer they want.</code></pre>
+
+<h2 id="edges">The edge cases that separate candidates</h2>
+
+<div class="box good">
+  <div class="box-title">✔ Five sentences to have ready</div>
+  <ul style="margin-bottom:0">
+    <li>“I will use <code>LEFT JOIN</code> and <code>COUNT(o.id)</code> so customers with no orders
+      show zero rather than one.”</li>
+    <li>“<code>NOT EXISTS</code> rather than <code>NOT IN</code>, because a single null in the
+      subquery makes <code>NOT IN</code> return nothing.”</li>
+    <li>“I will add <code>id</code> as a tie-breaker so the ordering is deterministic.”</li>
+    <li>“<code>NULLIF</code> on the denominator so a zero does not error.”</li>
+    <li>“Is this run often? Then I would want an index on
+      <code>(customer_id, placed_at)</code> — equality first, then the range.”</li>
+  </ul>
+</div>
+
+<h2 id="takehome">The take-home</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 What actually gets marked</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Does it run?</strong> Against a clean database, from the instructions in your
+      README. A submission that does not run is not marked.</li>
+    <li><strong>Is it readable?</strong> CTEs with names, consistent formatting, and a comment
+      wherever a decision was made rather than wherever the syntax was unusual.</li>
+    <li><strong>Did you handle the messy data</strong> they deliberately put in? There is always
+      a null, a duplicate or a negative value. Finding it and saying what you did about it is most
+      of the mark.</li>
+    <li><strong>Did you state your assumptions?</strong> A short README saying “I assumed cancelled
+      orders are excluded from revenue; if not, remove line 14” is worth more than getting the
+      ambiguous case right by luck.</li>
+  </ol>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Do not over-engineer it</div>
+  <p style="margin-bottom:0">
+    A take-home with a Docker Compose stack, a migration framework and ninety tests for a
+    four-query exercise signals poor judgement about scope, not enthusiasm. Do what was asked,
+    do it well, add <em>one</em> thing that shows care — usually the README with assumptions — and
+    stop. And respect the stated time limit; if it says four hours, spend four hours and note what
+    you would do with more.
+  </p>
+</div>
+
+<h2 id="live">The live exercise</h2>
+
+<div class="box good">
+  <div class="box-title">✔ How to behave when you are stuck on a call</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Restate the question.</strong> “So: one row per customer, with their most recent
+      order — including customers with no orders?” Half the time this reveals a misunderstanding
+      before you have written anything.</li>
+    <li><strong>Say the approach before the syntax.</strong> “I will rank orders per customer by
+      date and take the first.” If the approach is wrong they will stop you, which saves five
+      minutes of typing.</li>
+    <li><strong>Say what you are unsure about.</strong> “I think it is <code>ROWS UNBOUNDED
+      PRECEDING</code> — I would check the exact frame syntax.” Interviewers are fine with this and
+      are not fine with confident wrongness.</li>
+    <li><strong>If you are properly stuck, say so and offer a worse solution.</strong> “I cannot
+      remember the window syntax; I could do it with a correlated subquery, which is slower but
+      correct.” Getting to an answer is the point.</li>
+  </ol>
+</div>
+
+<div class="box note">
+  <div class="box-title">Looking things up</div>
+  <p style="margin-bottom:0">
+    Ask: “may I check the syntax?” Almost every interviewer says yes, because it is what you would
+    do at work. What they are watching is whether you know <em>what to look up</em> — which is the
+    real skill, and is unaffected by having the documentation open.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>They are checking correctness, edge cases, narration and whether you ask about the data.</li>
+    <li>Edge cases are the biggest discriminator: nulls, ties, zero rows, division by zero.</li>
+    <li>Narrate. An interviewer cannot mark silence.</li>
+    <li>Restate the question before writing anything.</li>
+    <li>Say the approach before the syntax, so a wrong approach is stopped early.</li>
+    <li>Say what you are unsure of. Confident wrongness is the thing that loses.</li>
+    <li>Practise the twelve shapes until they are automatic, not memorised.</li>
+    <li>On a take-home: make it run, state your assumptions, handle the deliberate mess, and stop.</li>
+    <li>Respect the stated time limit and note what you would do with more.</li>
+    <li>Ask to check syntax. Knowing what to look up is the skill being tested.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Write a query for the second-highest salary.</p>
+  <p class="a"><code>DENSE_RANK() OVER (ORDER BY salary DESC)</code> filtered to 2 — and say why:
+    the question means the second distinct salary, so <code>ROW_NUMBER</code> would return the same
+    value again if the top two are tied. Then ask what should happen if there is no second distinct
+    value.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Find customers who placed no orders last month.</p>
+  <p class="a">Watch the trap: the date filter must be inside the <code>NOT EXISTS</code> or the
+    <code>ON</code> clause, not in <code>WHERE</code>, or the outer join collapses to an inner one
+    and you get "customers with no orders at all" instead. Saying that out loud is the answer.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Here is a slow query. What would you do?</p>
+  <p class="a">Narrate the checklist as you read it: is a function wrapping a filtered column, is
+    there a correlated subquery repeated per row, is there a <code>DISTINCT</code> hiding a
+    fan-out, is it selecting columns nobody uses. Then say I would confirm with an actual plan and
+    look at the estimate-versus-actual gap before changing anything.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

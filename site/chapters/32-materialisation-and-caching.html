@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>32 &middot; Materialised views, pre-aggregation and caching &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="32-materialisation-and-caching">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 4 — Fast at scale <span>&rsaquo;</span> Chapter 32</p>
+<h1>Materialised views, pre-aggregation and caching</h1>
+<p class="lede">Trading freshness for speed on purpose, and the three questions to answer before you cache anything.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Reporting con SSRS e Power BI&rdquo;</em> &mdash; when the report takes forty
+  seconds and the query cannot be made faster, the remaining move is to compute it earlier.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="trade">The trade you are making</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Working out the total every time somebody asks is slow but always right. Writing the total on a
+    card and handing over the card is instant but might be out of date. There is no third option —
+    so the only real question is <em>how out of date is allowed</em>, and who decides.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 The three questions, before you cache anything</div>
+  <ol style="margin-bottom:0">
+    <li><strong>How stale may it be?</strong> A dashboard tile: minutes. A stock level on a
+      checkout page: zero. If the answer is “zero”, caching is not the tool.</li>
+    <li><strong>What invalidates it?</strong> A schedule, a trigger, an event, or a TTL. If you
+      cannot name the mechanism, you have not designed a cache — you have created a bug with a
+      delay.</li>
+    <li><strong>What happens when it is wrong?</strong> A slightly stale sales figure is fine.
+      A stale permission check is a security incident. The blast radius decides how much machinery
+      the invalidation deserves.</li>
+  </ol>
+</div>
+
+<h2 id="views">A plain view is not a cache</h2>
+
+<pre><code>CREATE VIEW v_order_totals AS SELECT ... ;   -- a NAME for a query, nothing more</code></pre>
+<p>
+  A view is expanded into whatever selects from it and re-executed every time. It is an excellent
+  <em>interface</em> — it lets the tables underneath change without every report changing — and it
+  does nothing at all for performance. People are surprised by this regularly enough that it is
+  worth saying explicitly.
+</p>
+
+<h2 id="matviews">Materialised views</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Engine</th><th>Feature</th><th>Refresh</th></tr></thead>
+<tbody>
+<tr><td><strong>PostgreSQL</strong></td><td><code>MATERIALIZED VIEW</code></td><td>Manual: <code>REFRESH MATERIALIZED VIEW</code>. Add <code>CONCURRENTLY</code> (needs a unique index) to avoid locking readers</td></tr>
+<tr><td><strong>SQL Server</strong></td><td><strong>Indexed view</strong></td><td><strong>Synchronous</strong> — maintained inside the transaction that changes the base table</td></tr>
+<tr><td><strong>Oracle</strong></td><td><code>MATERIALIZED VIEW</code></td><td>On commit, on demand, or incremental via a materialised view log</td></tr>
+<tr><td><strong>MySQL</strong></td><td>None</td><td>A summary table plus a scheduled job or triggers</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ SQL Server's indexed view is a different bargain</div>
+  <p style="margin-bottom:0">
+    It is <strong>always current</strong>, because every write to a base table updates it
+    synchronously — so the cost lands on your <em>writes</em>, permanently, not on a refresh
+    window. It also carries a long list of restrictions (<code>SCHEMABINDING</code>, no outer
+    joins, no subqueries, <code>COUNT_BIG(*)</code> required with <code>GROUP BY</code>, deterministic
+    expressions only). Knowing it is synchronous — and that PostgreSQL's is not — is the distinction
+    that matters, because it decides which one is safe on a write-heavy table.
+  </p>
+</div>
+
+<pre><code>-- PostgreSQL: refreshed on a schedule, readers never blocked.
+CREATE MATERIALIZED VIEW mv_monthly_sales AS
+SELECT date_trunc('month', o.placed_at) AS month,
+       r.name                           AS region,
+       COUNT(*)                         AS orders,
+       SUM(o.total_cents)               AS revenue_cents
+FROM orders o
+JOIN customers c ON c.id = o.customer_id
+JOIN cities   ci ON ci.id = c.city_id
+JOIN regions   r ON r.id = ci.region_id
+WHERE o.status &lt;&gt; 'cancelled'
+GROUP BY 1, 2;
+
+CREATE UNIQUE INDEX ON mv_monthly_sales (month, region);   -- required by CONCURRENTLY
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_monthly_sales;</code></pre>
+
+<h2 id="summary">Summary tables, and the incremental refresh</h2>
+
+<p>
+  A full refresh recomputes everything, which stops scaling once "everything" is two years of data.
+  The pattern that does scale is to refresh only what changed:
+</p>
+
+<pre><code>-- Recompute only the affected slice, inside one transaction. Naturally idempotent,
+-- so re-running it after a failure is safe. See chapter 20.
+BEGIN;
+  DELETE FROM summary_daily_sales WHERE d = :day;
+  INSERT INTO summary_daily_sales (d, region, orders, revenue_cents)
+  SELECT date(placed_at), region, COUNT(*), SUM(total_cents)
+  FROM v_orders_geo
+  WHERE date(placed_at) = :day AND status &lt;&gt; 'cancelled'
+  GROUP BY 1, 2;
+COMMIT;</code></pre>
+
+<div class="box note">
+  <div class="box-title">Always store when it was computed</div>
+  <p style="margin-bottom:0">
+    A <code>computed_at</code> column costs nothing and answers the only question anyone asks about
+    a summary table: <em>“is this current?”</em>. Show it on the report — “as at 06:00 today” —
+    and stale data stops being a support ticket and becomes a stated property. That one line of
+    UI saves more arguments than any amount of refresh engineering.
+  </p>
+</div>
+
+<h2 id="counters">Maintained counters, and why they hurt</h2>
+
+<pre><code>-- Tempting: keep orders.total_cents in step with a trigger on order_lines.
+-- Correct, and it serialises every concurrent write to the same order behind one
+-- row lock — because they all update the same parent row. On a hot parent this is
+-- a contention point you cannot index your way out of.</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 The standard fix: sharded counters</div>
+  <p style="margin-bottom:0">
+    Instead of one row per counter, keep <em>n</em> rows and have each writer update a random one;
+    read the counter as a <code>SUM</code> over the n. Writes spread across n locks, reads cost one
+    small aggregate. It is the same idea behind PostgreSQL's advice to avoid a single hot row, and
+    it is a good thing to know exists — although the honest first answer is usually “compute it on
+    read, with the right index, until measurement says otherwise”.
+  </p>
+</div>
+
+<h2 id="where">Where to cache</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Layer</th><th>Good at</th><th>Watch out for</th></tr></thead>
+<tbody>
+<tr><td><strong>Summary table / matview</strong></td><td>Shared by every consumer, queryable, joinable, transactional</td><td>Refresh cost and lag</td></tr>
+<tr><td><strong>Redis / Memcached</strong></td><td>Sub-millisecond key lookups, TTLs, cross-process</td><td>A second system to run and to invalidate; cache stampedes</td></tr>
+<tr><td><strong>Application memory</strong></td><td>Free and instant</td><td>Per-process, so <em>n</em> instances hold <em>n</em> different stale copies</td></tr>
+<tr><td><strong>HTTP caching</strong></td><td>Nothing reaches the database at all — the cheapest query</td><td>Only works for genuinely public, cacheable responses</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Cache stampede</div>
+  <p style="margin-bottom:0">
+    A popular cached value expires; a thousand concurrent requests all miss; a thousand identical
+    expensive queries hit the database at once and it falls over — <em>because</em> the cache was
+    working. Mitigations: a lock so only one request recomputes, serving stale while refreshing in
+    the background, or jittered expiry so a batch of keys does not expire together. Naming this
+    failure mode signals real production experience.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Caching trades freshness for speed. Decide the tolerated staleness first, in numbers.</li>
+    <li>If you cannot name the invalidation mechanism, you have not designed a cache.</li>
+    <li>A plain view is a name for a query and does nothing for performance.</li>
+    <li>PostgreSQL materialised views are refreshed manually; SQL Server indexed views are maintained synchronously on every write.</li>
+    <li>Refresh incrementally by slice. A full refresh stops scaling.</li>
+    <li>Store and display <code>computed_at</code>. Stale becomes a property, not a bug report.</li>
+    <li>Trigger-maintained counters serialise concurrent writes on the parent row.</li>
+    <li>Application-memory caches multiply by the number of instances.</li>
+    <li>Expiring a popular key can stampede the database. Use a lock, serve-stale, or jittered TTLs.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">A report takes 40 seconds and the query is already optimal. What now?</p>
+  <p class="a">Compute it earlier. I would ask how stale it may be — usually the answer is
+    "this morning is fine" — then build a summary table refreshed incrementally by day, with a
+    <code>computed_at</code> column shown on the report. A materialised view is the same idea with
+    engine support; on SQL Server an indexed view is always current but moves the cost onto every
+    write.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Difference between a view and a materialised view?</p>
+  <p class="a">A view is a stored query, expanded and re-executed each time — it is an interface,
+    not a cache. A materialised view stores the result, so reads are fast and the data is as fresh
+    as the last refresh. PostgreSQL refreshes on demand; SQL Server's indexed views are maintained
+    synchronously, which makes writes more expensive but removes staleness entirely.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What is a cache stampede?</p>
+  <p class="a">A hot cached value expires and every concurrent request misses at once, so the
+    database gets hundreds of identical expensive queries simultaneously. Fixes are a mutex so one
+    request recomputes while the others wait, serving the stale value while refreshing in the
+    background, or adding jitter to expiry times so keys do not expire together.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

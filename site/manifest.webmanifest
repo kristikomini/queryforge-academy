@@ -1,0 +1,23 @@
+{
+  "name": "QueryForge Academy — SQL, for the job you want",
+  "short_name": "QueryForge",
+  "description": "A free, offline-capable SQL course built from real job adverts, with spaced repetition, a viva drill and a timed mock interview.",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f7fb",
+  "theme_color": "#2f5bd7",
+  "lang": "en",
+  "categories": ["education", "productivity"],
+  "icons": [
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Today's review", "url": "review.html" },
+    { "name": "Viva", "url": "viva.html" },
+    { "name": "Mock interview", "url": "simulate.html" },
+    { "name": "Dashboard", "url": "dashboard.html" }
+  ]
+}

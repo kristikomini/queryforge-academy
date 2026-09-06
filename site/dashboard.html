@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dashboard — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="dashboard">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main wide" id="main">
+
+<p class="crumbs">Your progress</p>
+<h1>Dashboard</h1>
+<p class="lede" id="lede">Everything here is computed from what you have actually answered.</p>
+
+<div class="grid-3" id="stats"></div>
+
+<h2 id="mastery">Mastery by part</h2>
+<p class="small muted">
+  A chapter is worth <strong>0.25 for reading</strong> and <strong>0.75 × your best test
+  score</strong>. Reading every chapter and answering nothing caps you at 25%.
+</p>
+<div class="panel"><div class="bars" id="parts"></div></div>
+
+<h2 id="activity">The last twelve weeks</h2>
+<div class="panel">
+  <div class="heat" id="heat"></div>
+  <p class="small muted" id="heat-note" style="margin:12px 0 0"></p>
+</div>
+
+<h2 id="weak">What to fix next</h2>
+<div class="grid-2">
+  <div class="panel">
+    <h3 style="margin-top:0">Chapters you keep getting wrong</h3>
+    <p class="small muted">Ranked by how many times a card from that chapter has lapsed.</p>
+    <div id="weakest"></div>
+  </div>
+  <div class="panel">
+    <h3 style="margin-top:0">Not yet passed</h3>
+    <p class="small muted">Read but below 80%, or not attempted at all.</p>
+    <div id="unpassed"></div>
+  </div>
+</div>
+
+<h2 id="badges">Badges</h2>
+<div class="badge-grid" id="badge-grid"></div>
+
+<h2 id="data">Your data</h2>
+<div class="panel">
+  <p class="small">
+    Everything on this page lives in this browser under one <code>localStorage</code> key. There is
+    no analytics, no tracking and no server involved unless you
+    <a href="account.html">sign in to sync</a>.
+  </p>
+  <div class="row">
+    <button class="btn ghost" id="export">Export profile (.json)</button>
+    <label class="btn quiet" style="cursor:pointer">
+      Import <input type="file" id="import" accept="application/json" hidden>
+    </label>
+    <button class="btn quiet" id="reset">Reset everything</button>
+  </div>
+  <p class="small muted" id="storage-note" style="margin:12px 0 0"></p>
+</div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+(function () {
+  if (!window.LF) return;
+  var LF = window.LF, CH = window.CHAPTERS || [], PARTS = window.PARTS || [];
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+  function pct(n) { return Math.round(n * 100) + "%"; }
+
+  function render() {
+    var p = LF.profile, lvl = LF.level(), m = LF.mastery();
+    var bankSize = window.LFQuiz ? window.LFQuiz.count() : 0;
+    var scheduled = Object.keys(p.cards).length;
+    var due = LF.due().length, vDue = LF.vivaDue().length;
+
+    document.getElementById("lede").textContent =
+      lvl.name + " · " + p.xp + " XP" +
+      (lvl.next ? " · " + lvl.toNext + " XP to " + lvl.next.name : " · top level") + ".";
+
+    /* ---- headline stats ------------------------------------------------ */
+    var s = document.getElementById("stats");
+    s.innerHTML = "";
+    function stat(k, v, sub, cls) {
+      var d = el("div", "stat");
+      d.appendChild(el("div", "k", k));
+      d.appendChild(el("div", "v" + (cls ? " " + cls : ""), v));
+      d.appendChild(el("div", "s", sub));
+      return d;
+    }
+    s.appendChild(stat("Course mastery", m + "%",
+      LF.chaptersPassed() + " of " + CH.length + " chapters passed at 80%+"));
+    s.appendChild(stat("Level", lvl.name, p.xp + " XP"));
+    s.appendChild(stat("Streak", (p.streak.count || 0) + (p.streak.count === 1 ? " day" : " days"),
+      "best " + (p.streak.best || 0) + (LF.streakAlive() ? "" : " · cold, answer anything to restart"),
+      LF.streakAlive() ? "ok" : "warn"));
+    s.appendChild(stat("Recall strength", LF.recall() + "%",
+      "of scheduled cards are strong (2+ reps, 4+ day interval)"));
+    s.appendChild(stat("In your schedule", scheduled + " of " + bankSize,
+      "questions you have answered at least once"));
+    s.appendChild(stat("Due now", (due + vDue) || "0",
+      due + " cards · " + vDue + " rules", (due + vDue) ? "warn" : "ok"));
+
+    if ("examBest" in p && p.examCount) {
+      s.appendChild(stat("Best mock exam", pct(p.examBest),
+        p.examCount + " attempt" + (p.examCount === 1 ? "" : "s"),
+        p.examBest >= 0.8 ? "ok" : "warn"));
+    }
+
+    /* ---- mastery by part ----------------------------------------------- */
+    var host = document.getElementById("parts");
+    host.innerHTML = "";
+    PARTS.forEach(function (part) {
+      var list = CH.filter(function (c) { return c.part === part; });
+      if (!list.length) return;
+      var v = LF.partMastery(part);
+      var row = el("div", "bar-row");
+      row.appendChild(el("div", "nm", part));
+      row.appendChild(el("div", "mono", v + "%"));
+      var tr = el("div", "tr");
+      var i = el("i");
+      i.style.width = v + "%";
+      tr.appendChild(i);
+      row.appendChild(tr);
+      host.appendChild(row);
+    });
+
+    /* ---- activity heatmap ---------------------------------------------- */
+    var heat = document.getElementById("heat");
+    heat.innerHTML = "";
+    var today = LF.today(), days = 84, active = 0, totalXp = 0;
+    for (var i = days - 1; i >= 0; i--) {
+      var d = LF.addDays(today, -i);
+      var row = p.history[d];
+      var xp = row ? row.xp : 0;
+      totalXp += xp;
+      if (xp > 0) active++;
+      var lvl2 = xp === 0 ? 0 : xp < 30 ? 1 : xp < 80 ? 2 : xp < 160 ? 3 : 4;
+      var cell = el("i");
+      cell.setAttribute("data-l", String(lvl2));
+      if (d === today) cell.className = "today";
+      cell.title = d + " · " + xp + " XP" + (row ? " · " + row.answers + " answers" : "");
+      heat.appendChild(cell);
+    }
+    document.getElementById("heat-note").textContent =
+      active + " active day" + (active === 1 ? "" : "s") + " in the last twelve weeks · " +
+      totalXp + " XP earned. Daily card XP is capped at " + LF.CARD_XP_CAP +
+      " — reviewing four hundred cards in one sitting is not four hundred cards' worth of learning.";
+
+    /* ---- weakest -------------------------------------------------------- */
+    var w = document.getElementById("weakest");
+    w.innerHTML = "";
+    var weak = LF.weakest(6);
+    if (!weak.length) w.appendChild(el("p", "small muted", "Nothing has lapsed yet. This fills in once you get something wrong twice."));
+    weak.forEach(function (x) {
+      var ch = CH.filter(function (c) { return c.id === x.id; })[0];
+      var a = el("a", "sb-link");
+      a.href = "chapters/" + x.id + ".html";
+      a.appendChild(el("span", "num", ch ? ch.n : "—"));
+      a.appendChild(document.createTextNode(ch ? ch.title : x.id));
+      a.appendChild(el("span", "mark", x.lapses + " lapse" + (x.lapses === 1 ? "" : "s")));
+      w.appendChild(a);
+    });
+
+    /* ---- unpassed ------------------------------------------------------- */
+    var u = document.getElementById("unpassed");
+    u.innerHTML = "";
+    var un = CH.filter(function (c) { return !LF.passed(c.id); }).slice(0, 8);
+    if (!un.length) u.appendChild(el("p", "small muted", "Every chapter is passed. Go and do a mock interview."));
+    un.forEach(function (c) {
+      var st = p.chapters[c.id];
+      var a = el("a", "sb-link");
+      a.href = "chapters/" + c.id + ".html";
+      a.appendChild(el("span", "num", c.n));
+      a.appendChild(document.createTextNode(c.title));
+      a.appendChild(el("span", "mark", st && st.attempts ? Math.round(st.best * 100) + "%" : st && st.read ? "read" : ""));
+      u.appendChild(a);
+    });
+    if (CH.filter(function (c) { return !LF.passed(c.id); }).length > 8) {
+      u.appendChild(el("p", "small muted",
+        "…and " + (CH.filter(function (c) { return !LF.passed(c.id); }).length - 8) + " more."));
+    }
+
+    /* ---- badges --------------------------------------------------------- */
+    var b = document.getElementById("badge-grid");
+    b.innerHTML = "";
+    LF.BADGES.forEach(function (badge) {
+      var got = !!p.badges[badge.id];
+      var d = el("div", "badge" + (got ? " got" : ""));
+      d.appendChild(el("div", "ic", badge.icon));
+      d.appendChild(el("div", "nm", badge.name));
+      d.appendChild(el("div", "ht", got ? new Date(p.badges[badge.id]).toLocaleDateString() : badge.hint));
+      b.appendChild(d);
+    });
+
+    document.getElementById("storage-note").textContent = LF.memoryOnly
+      ? "⚠ localStorage is unavailable in this browser (private window?), so progress is kept in memory only and will be lost when you close the tab."
+      : "Storage key: " + LF.KEY;
+  }
+
+  document.getElementById("export").onclick = function () {
+    var blob = new Blob([JSON.stringify(LF.profile, null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "queryforge-profile-" + LF.today() + ".json";
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  };
+
+  document.getElementById("import").onchange = function (e) {
+    var f = e.target.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      try {
+        var doc = JSON.parse(r.result);
+        if (!doc || typeof doc !== "object") throw new Error("not an object");
+        if (!confirm("Replace your current progress with this file? Export first if you are not sure.")) return;
+        LF.replace(doc);
+        render();
+      } catch (err) { alert("That file is not a QueryForge profile: " + err.message); }
+    };
+    r.readAsText(f);
+  };
+
+  document.getElementById("reset").onclick = function () {
+    if (!confirm("Delete all local progress? This cannot be undone. Export first if you want a copy.")) return;
+    LF.reset();
+    render();
+  };
+
+  LF.on("change", render);
+  render();
+})();
+</script>
+</body>
+</html>

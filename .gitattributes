@@ -1,0 +1,20 @@
+# Normalise text to LF in the repository, whatever the checkout platform does.
+# Without this, a Windows clone commits CRLF and every file looks changed to
+# everyone else — which turns the first cross-platform pull request into a
+# 140-file diff about nothing.
+* text=auto eol=lf
+
+# Binary: never touch these.
+*.wasm binary
+*.db   binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+
+# Vendored, and not ours to review. Keeps it out of diffs and language stats.
+site/vendor/** linguist-vendored
+
+# Generated — read the generator, not the output.
+site/assets/rules.js    linguist-generated
+site/assets/forge-db.js linguist-generated
+course/GOLDEN-RULES.md  linguist-generated

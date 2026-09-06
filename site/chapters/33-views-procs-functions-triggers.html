@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>33 &middot; Views, procedures, functions and triggers &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="33-views-procs-functions-triggers">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 5 — Building it properly <span>&rsaquo;</span> Chapter 33</p>
+<h1>Views, procedures, functions and triggers</h1>
+<p class="lede">The four programmable objects, what each is genuinely for, and the one that causes most production incidents.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Sviluppo di stored procedure, viste, funzioni e trigger&rdquo;</em> &mdash; the codebase already has
+  business logic inside the database. You will maintain it whether or not you think that was a
+  good idea.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="four">The four objects, and what each is genuinely for</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Object</th><th>Genuinely for</th><th>Costs</th></tr></thead>
+<tbody>
+<tr><td><strong>View</strong></td><td>An interface: a stable name over a query, so the tables underneath can change</td><td>Nothing at runtime — it is expanded. Nesting them hides real cost</td></tr>
+<tr><td><strong>Stored procedure</strong></td><td>A multi-statement unit that belongs next to the data: a transaction, a batch, a permission boundary</td><td>Logic that is hard to version, test and diff</td></tr>
+<tr><td><strong>Function</strong></td><td>A reusable expression (inline table-valued) — genuinely useful</td><td><strong>Scalar</strong> ones are a plan disaster. See below</td></tr>
+<tr><td><strong>Trigger</strong></td><td>Auditing and invariants nothing else can express</td><td>Invisible action at a distance. The commonest source of "why did that happen?"</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="views">Views: an interface, not a cache</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A view is a nickname for a question. Saying the nickname does not make the answer arrive any
+    faster — somebody still has to go and count. What it does mean is that if the counting changes,
+    everyone using the nickname carries on unaffected.
+  </p>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — nested views</div>
+  <p style="margin-bottom:0">
+    A view selecting from a view selecting from two views is expanded into one enormous query the
+    optimiser then has to plan. Each level looks reasonable in isolation; four levels down, a
+    <code>SELECT</code> of three columns joins eleven tables and nobody can see why. Nesting more
+    than two deep is where "just use a view" goes wrong. Keep them shallow, and read the plan of
+    the query you are actually running rather than the view you think you are querying.
+  </p>
+</div>
+
+<div class="box note">
+  <div class="box-title">Updatable views and WITH CHECK OPTION</div>
+  <p style="margin-bottom:0">
+    A simple single-table view is updatable. Add <code>WITH CHECK OPTION</code> and rows that would
+    disappear from the view cannot be written through it — so a view defined as
+    <code>WHERE region = 'EMR'</code> cannot be used to insert a Lombardia row. It is a neat,
+    little-known way to express a scoping rule, and it is a genuine alternative to row-level
+    security on older engines.
+  </p>
+</div>
+
+<h2 id="procs">Stored procedures: the real argument</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 For</div>
+  <ul>
+    <li><strong>Fewer round trips.</strong> A five-statement transaction becomes one call.</li>
+    <li><strong>A permission boundary.</strong> Grant <code>EXECUTE</code> on the procedure and
+      nothing on the tables — the application cannot issue arbitrary SQL even if compromised.
+      This is a real security argument and the strongest one.</li>
+    <li><strong>Change without redeploying</strong> the application. Which is also the strongest
+      argument against.</li>
+    <li><strong>The logic lives with the data</strong>, so three applications sharing a database
+      share the rules.</li>
+  </ul>
+  <div class="box-title" style="margin-top:14px">🎓 Against</div>
+  <ul style="margin-bottom:0">
+    <li><strong>Version control is awkward</strong> and diffs are poor — an <code>ALTER
+      PROCEDURE</code> in a migration is not the same as a file whose history is the truth.</li>
+    <li><strong>Testing is harder</strong> and there are fewer tools.</li>
+    <li><strong>Business logic in two places</strong> is worse than in either, and that is what
+      usually happens.</li>
+    <li><strong>Changing without a deploy</strong> means changing without review, without CI, and
+      without anybody knowing.</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The answer that avoids the trap</div>
+  <p style="margin-bottom:0">
+    This question is often asked to see whether you have an ideology. “It depends on who owns the
+    data. One application, one team — I would keep logic in the application, where it is versioned
+    and tested. Several applications sharing one database, or a hard requirement that the app
+    account cannot run ad-hoc SQL — procedures, and I would keep them in source control as files,
+    deployed by a migration tool like anything else.” That is a position, with a reason, and no
+    contempt for the alternative.
+  </p>
+</div>
+
+<h2 id="functions">Functions: the one that matters</h2>
+
+<pre><code>-- SCALAR — avoid in a SELECT list or a WHERE clause over many rows.
+CREATE FUNCTION dbo.fn_OrderTotal(@id INT) RETURNS BIGINT AS
+BEGIN ... END
+SELECT id, dbo.fn_OrderTotal(id) FROM orders;   -- once per row, no estimate, serial plan
+
+-- INLINE TABLE-VALUED — a parameterised view. Expanded into the query and
+-- optimised WITH it. This one is genuinely good.
+CREATE FUNCTION dbo.fn_OrderTotals() RETURNS TABLE AS
+RETURN (SELECT order_id, SUM(quantity * unit_price_cents) AS total_cents
+        FROM order_lines GROUP BY order_id);
+
+SELECT o.id, t.total_cents
+FROM orders o
+CROSS APPLY dbo.fn_OrderTotals() t WHERE t.order_id = o.id;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ The three-way distinction to remember</div>
+  <p style="margin-bottom:0">
+    <strong>Inline table-valued:</strong> expanded, estimated, parallelisable — use freely.
+    <strong>Multi-statement table-valued:</strong> a black box with a fixed row estimate — avoid in
+    a join. <strong>Scalar:</strong> historically once per row, no costing, forces a serial plan —
+    avoid over large sets. SQL Server 2019's scalar UDF inlining helps, but only for functions
+    simple enough to inline, and you cannot tell by looking.
+  </p>
+</div>
+
+<h2 id="triggers">Triggers</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A trigger is a note stuck inside the drawer saying “whenever anyone puts something in here,
+    also do this”. Very useful. Also the reason somebody spends an afternoon asking why a row they
+    never touched changed.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 The rules that make them survivable</div>
+  <ol style="margin-bottom:0">
+    <li><strong>They fire per statement, not per row.</strong> In SQL Server the <code>inserted</code>
+      and <code>deleted</code> pseudo-tables contain <em>all</em> affected rows. A trigger written
+      as though a single row were being changed — <code>SELECT @id = id FROM inserted</code> — is
+      silently wrong the first time somebody updates two rows at once. This is the single most
+      common trigger bug.</li>
+    <li><strong>They run inside the caller's transaction.</strong> So a slow trigger makes every
+      write slow, and a failing trigger rolls back a statement that looked innocent.</li>
+    <li><strong>They can cascade.</strong> Trigger A writes to table B whose trigger writes back to
+      A. Nesting is limited (32 levels in SQL Server) and the error when you hit it is not obvious.</li>
+    <li><strong>They are invisible.</strong> Nothing in the calling code mentions them. Whatever
+      you do, make them findable: name them consistently, and list them in the schema
+      documentation.</li>
+  </ol>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Where a trigger is genuinely the right answer</div>
+  <p style="margin-bottom:0">
+    <strong>Auditing.</strong> An audit row written by a trigger is written no matter which
+    application, script or person made the change — which is exactly the property an audit trail
+    needs and exactly what application-level auditing cannot promise. Almost every other use of a
+    trigger has a better alternative: a generated column, a constraint, a job, or explicit code.
+  </p>
+</div>
+
+<pre><code>-- Set-based, so it is correct for a multi-row update. This is the shape.
+CREATE TRIGGER trg_orders_audit ON orders AFTER UPDATE AS
+BEGIN
+  SET NOCOUNT ON;                       -- or the row count of the trigger leaks to the caller
+  INSERT INTO order_events (order_id, from_status, to_status, at, actor)
+  SELECT i.id, d.status, i.status, SYSUTCDATETIME(), SUSER_SNAME()
+  FROM inserted i
+  JOIN deleted  d ON d.id = i.id
+  WHERE i.status &lt;&gt; d.status;           -- only real transitions
+END</code></pre>
+
+<div class="tryit">
+  <pre><code>-- In the playground: a view is expanded, not stored.
+EXPLAIN QUERY PLAN SELECT * FROM v_order_totals WHERE order_id = 42;
+-- You will see the underlying tables and the aggregates, not "read view".</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>A view is an interface, not a cache. It is expanded and re-executed every time.</li>
+    <li>Nested views hide cost. Two levels is plenty; read the plan of the query you actually run.</li>
+    <li><code>WITH CHECK OPTION</code> stops writes that would fall outside the view's own filter.</li>
+    <li>The strongest argument for procedures is the permission boundary: <code>EXECUTE</code> only, no table access.</li>
+    <li>The strongest argument against is logic that changes without review, CI or anyone knowing.</li>
+    <li>Inline table-valued functions are good; multi-statement ones estimate a fixed guess; scalar ones run per row.</li>
+    <li>Triggers fire per statement. A trigger that assumes one row is wrong the first time two are updated.</li>
+    <li>Triggers run in the caller's transaction, so a slow one makes every write slow.</li>
+    <li>Auditing is where a trigger genuinely wins, because it cannot be bypassed.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Should business logic live in stored procedures?</p>
+  <p class="a">It depends on who owns the data. One application and one team: I keep it in the
+    application, where it is versioned, reviewed and tested. Several applications sharing one
+    database, or a requirement that the app account cannot run ad-hoc SQL: procedures — kept as
+    files in source control and deployed by a migration tool, not edited in place.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What is wrong with scalar user-defined functions?</p>
+  <p class="a">Historically they execute once per row, the optimiser has no cardinality estimate
+    for them, and they force the whole query serial. An inline table-valued function used with
+    <code>CROSS APPLY</code> gets the same reuse and is expanded into the query, so it is estimated
+    and parallelisable.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What is the most common bug in a trigger?</p>
+  <p class="a">Assuming it fires once per row. It fires once per statement, with all affected rows
+    in <code>inserted</code>/<code>deleted</code>, so a trigger written with a scalar variable
+    silently processes one arbitrary row when somebody updates two. The fix is to write it
+    set-based.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

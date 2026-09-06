@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>20 &middot; UPSERT, MERGE and idempotent writes &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="20-upsert-and-idempotency">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 3 — Changing data <span>&rsaquo;</span> Chapter 20</p>
+<h1>UPSERT, MERGE and idempotent writes</h1>
+<p class="lede">ON CONFLICT, ON DUPLICATE KEY, MERGE — and why “check then insert” is a race, not a pattern.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Esperienza nello sviluppo ETL con SSIS&rdquo;</em> &mdash; the actual daily problem of
+  an ETL job is not transforming data. It is making the load safe to re-run after it failed
+  halfway through at 03:40.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="race">“Check then insert” is a race, not a pattern</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Two people look in the fridge, both see there is no milk, and both go and buy milk. Looking
+    and acting were two separate moments, and something changed in between. The fix is not to look
+    harder — it is to make “buy the milk if there isn't any” a single indivisible action.
+  </p>
+</div>
+
+<pre><code>-- The bug, written by everyone at least once:
+SELECT id FROM customers WHERE email = ?;      -- not found
+INSERT INTO customers (email, name) VALUES (?, ?);
+-- Another session inserted the same email between those two statements.
+-- Result: a duplicate, or a unique-violation exception in production only.</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    The gap between the check and the act is a <strong>time-of-check to time-of-use</strong> race,
+    and no isolation level below <code>SERIALIZABLE</code> closes it — because the row does not
+    exist yet, so there is nothing to lock. The two real fixes are: perform the operation
+    <strong>atomically</strong> with an upsert, or let a <strong>unique constraint</strong> catch
+    it and handle the violation. Both require the unique constraint. It is the constraint doing the
+    work, not the syntax.
+  </p>
+</div>
+
+<h2 id="upsert">The four spellings</h2>
+
+<pre><code>-- PostgreSQL, SQLite 3.24+ — the clearest of the four
+INSERT INTO customers (email, name, city_id)
+VALUES (?, ?, ?)
+ON CONFLICT (email) DO UPDATE
+  SET name = EXCLUDED.name, city_id = EXCLUDED.city_id
+RETURNING id;
+--       ^ EXCLUDED is the row that was proposed. DO NOTHING is the other option.
+
+-- MySQL / MariaDB
+INSERT INTO customers (email, name, city_id) VALUES (?, ?, ?)
+ON DUPLICATE KEY UPDATE name = VALUES(name), city_id = VALUES(city_id);
+--                                ^ note: it fires on ANY unique key, not one you name
+
+-- SQL Server / Oracle — MERGE
+MERGE INTO customers AS t
+USING (VALUES (?, ?, ?)) AS s (email, name, city_id)
+   ON t.email = s.email
+WHEN MATCHED THEN UPDATE SET t.name = s.name, t.city_id = s.city_id
+WHEN NOT MATCHED THEN INSERT (email, name, city_id) VALUES (s.email, s.name, s.city_id);
+--  SQL Server: terminate MERGE with a semicolon. It is required, and the error if
+--  you forget is unhelpful.</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — MERGE has a reputation, and it earned it</div>
+  <p>
+    SQL Server's <code>MERGE</code> has a documented history of bugs and surprises, and several
+    well-known SQL Server MVPs advise avoiding it outright:
+  </p>
+  <ul style="margin-bottom:0">
+    <li>It is <strong>not atomic against concurrent inserts</strong> unless you take an explicit
+      <code>HOLDLOCK</code> / <code>SERIALIZABLE</code> hint on the target — the default can still
+      raise a duplicate-key error under concurrency.</li>
+    <li>If the <code>USING</code> source produces more than one row per target row, it raises
+      error 8672 <em>sometimes</em>, depending on the plan.</li>
+    <li>It has historically interacted badly with triggers, filtered indexes and foreign keys.</li>
+  </ul>
+  <p style="margin-bottom:0">
+    Knowing that <code>MERGE</code> exists <em>and</em> that the safe SQL Server pattern is often a
+    plain <code>UPDATE</code> followed by an <code>INSERT … WHERE NOT EXISTS</code> in one
+    transaction is a genuinely senior answer.
+  </p>
+</div>
+
+<h2 id="idempotent">Idempotency: the actual requirement</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 What “idempotent” buys you</div>
+  <p style="margin-bottom:0">
+    An operation is idempotent if running it twice has the same effect as running it once. That is
+    what lets you <strong>retry safely</strong> — and every distributed system you will ever touch
+    retries: the ETL job that failed at 03:40, the payment webhook delivered twice, the message
+    queue that guarantees at-<em>least</em>-once. Without idempotency, “just re-run it” is a
+    sentence that creates duplicate invoices.
+  </p>
+</div>
+
+<h3>The three mechanisms</h3>
+
+<p><strong>1 · A natural business key with a unique constraint.</strong> The most robust, because
+the database enforces it whatever the application does.</p>
+
+<pre><code>-- The payment table in the reference database does exactly this:
+external_ref TEXT NOT NULL,
+CONSTRAINT uq_payments_ref UNIQUE (external_ref)
+
+-- so a re-delivered webhook is a no-op, not a second payment:
+INSERT INTO payments (order_id, amount_cents, method, external_ref)
+VALUES (?, ?, ?, ?)
+ON CONFLICT (external_ref) DO NOTHING;</code></pre>
+
+<p><strong>2 · A watermark.</strong> For incremental loads: record the highest source timestamp or
+id you have processed, and next time start from there.</p>
+
+<pre><code>-- Load only what is new since last time, and record the new high-water mark
+-- INSIDE THE SAME TRANSACTION as the load. If they are separate, a crash between
+-- them either loses rows or reprocesses them.
+BEGIN;
+  INSERT INTO fact_orders (...)
+  SELECT ... FROM staging.orders
+  WHERE updated_at &gt; (SELECT watermark FROM etl_state WHERE job = 'orders');
+
+  UPDATE etl_state
+  SET watermark = (SELECT MAX(updated_at) FROM staging.orders)
+  WHERE job = 'orders';
+COMMIT;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the strictly-greater-than watermark</div>
+  <p style="margin-bottom:0">
+    <code>&gt; watermark</code> loses rows whose timestamp ties with the maximum but which were
+    committed after you read it. <code>&gt;=</code> reprocesses the boundary — which is <em>fine,
+    and correct,</em> precisely because the load is idempotent. This is the pairing that matters:
+    an idempotent load lets you use the safe, overlapping window. If your load is not idempotent
+    you are forced into the lossy comparison.
+  </p>
+</div>
+
+<p><strong>3 · Delete-then-insert by partition.</strong> For a full daily reload of one slice:</p>
+
+<pre><code>BEGIN;
+  DELETE FROM fact_sales WHERE sale_date = ?;   -- the whole slice, whatever is there
+  INSERT INTO fact_sales SELECT ... WHERE sale_date = ?;
+COMMIT;
+-- Naturally idempotent: re-running replaces the slice with itself. On a
+-- partitioned table this becomes a partition swap and is nearly instant. See ch. 31.</code></pre>
+
+<h2 id="bulk-upsert">Upserting a batch, not a row</h2>
+
+<pre><code>-- Load a staging table first, then ONE set-based upsert. Row-at-a-time upsert
+-- from application code is the N+1 problem wearing a different hat.
+INSERT INTO customers (email, name, city_id)
+SELECT s.email, s.name, s.city_id
+FROM staging_customers s
+WHERE s.email IS NOT NULL
+ON CONFLICT (email) DO UPDATE
+  SET name = EXCLUDED.name, city_id = EXCLUDED.city_id
+  -- Only write when something actually changed: avoids pointless page writes,
+  -- pointless WAL, and pointless trigger firing on a nightly no-op load.
+  WHERE customers.name IS DISTINCT FROM EXCLUDED.name
+     OR customers.city_id IS DISTINCT FROM EXCLUDED.city_id;</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ That WHERE clause is the senior detail</div>
+  <p style="margin-bottom:0">
+    A nightly load where 99% of rows are unchanged still rewrites every row without it — bloating
+    the table, filling the log, and firing every trigger. Adding the “only if different” predicate
+    turns a two-hour job into a two-minute one, and it is the kind of thing nobody notices until
+    somebody looks.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- In the playground, prove the constraint is doing the work:
+INSERT INTO payments (order_id, amount_cents, method, external_ref)
+VALUES (1, 5000, 'card', 'PAY-00000001');
+-- UNIQUE constraint failed: payments.external_ref
+
+INSERT INTO payments (order_id, amount_cents, method, external_ref)
+VALUES (1, 5000, 'card', 'PAY-00000001')
+ON CONFLICT (external_ref) DO NOTHING;
+-- 0 rows. Re-delivered webhook handled.</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Check-then-insert is a race. No isolation level below serialisable closes it, because the row does not exist to be locked.</li>
+    <li>An upsert is only safe because of the unique constraint. The constraint does the work; the syntax is convenience.</li>
+    <li><code>ON CONFLICT</code> (PostgreSQL/SQLite) names the constraint; <code>ON DUPLICATE KEY</code> (MySQL) fires on any of them.</li>
+    <li>SQL Server's <code>MERGE</code> needs <code>HOLDLOCK</code> to be concurrency-safe, and has a long list of known issues. Update-then-insert in a transaction is often better.</li>
+    <li>Idempotent means running twice equals running once — which is what makes “just re-run it” safe.</li>
+    <li>Three mechanisms: a unique business key, a watermark, or delete-and-reload by slice.</li>
+    <li>Update the watermark in the same transaction as the load, and use <code>&gt;=</code> because an idempotent load can absorb the overlap.</li>
+    <li>Upsert a batch from a staging table, not a row at a time, and skip rows that have not changed.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">How do you make a nightly import safe to re-run?</p>
+  <p class="a">Give every source record a stable business key, put a unique constraint on it, and
+    load with an upsert — so a re-run updates rather than duplicates. For incremental loads,
+    advance the watermark inside the same transaction as the insert, and use an inclusive
+    comparison, which is safe precisely because the load is idempotent.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What is wrong with SELECT-then-INSERT?</p>
+  <p class="a">There is a window between the two in which another session can insert the same row.
+    It is a race that only appears under concurrency, so it passes every test and fails in
+    production. Use an atomic upsert, or let a unique constraint reject the duplicate and handle
+    the violation.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Would you use MERGE?</p>
+  <p class="a">In Oracle, yes. In SQL Server I am cautious: it is not concurrency-safe without
+    <code>HOLDLOCK</code>, it has a documented history of bugs, and it errors unpredictably when the
+    source has duplicate keys. For a simple upsert I would often write an update followed by an
+    insert-where-not-exists in one transaction, which is easier to reason about.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

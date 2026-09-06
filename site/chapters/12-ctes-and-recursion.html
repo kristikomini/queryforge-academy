@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>12 &middot; CTEs and recursive queries &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="12-ctes-and-recursion">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 12</p>
+<h1>CTEs and recursive queries</h1>
+<p class="lede">WITH for readability, WITH RECURSIVE for trees and hierarchies, and the optimisation fence that surprises people.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; a 200-line nested query and a
+  200-line query built from named steps contain the same SQL. Only one of them can be reviewed.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="what">A CTE is a name for a step</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A recipe that says “put the thing you made in step 2 into the thing you made in step 4” is
+    unreadable. A recipe that says “add the <em>sauce</em> to the <em>base</em>” is not. A CTE is
+    giving a step a name so the next line can say what it means.
+  </p>
+</div>
+
+<pre><code>WITH monthly AS (
+  SELECT customer_id,
+         DATE_TRUNC('month', placed_at) AS month,
+         SUM(total_cents)               AS spend
+  FROM orders
+  WHERE status &lt;&gt; 'cancelled'
+  GROUP BY customer_id, DATE_TRUNC('month', placed_at)
+),
+ranked AS (
+  SELECT *, RANK() OVER (PARTITION BY month ORDER BY spend DESC) AS pos
+  FROM monthly
+)
+SELECT month, customer_id, spend / 100.0 AS eur
+FROM ranked
+WHERE pos &lt;= 3
+ORDER BY month, pos;</code></pre>
+
+<p>
+  Written as nested derived tables that is the same logic with the reader's eye starting in the
+  middle. Written as a chain of CTEs it reads top to bottom, and each step can be run on its own
+  while you are debugging it — which is the practical benefit nobody mentions.
+</p>
+
+<h2 id="fence">The optimisation fence: the thing that surprises people</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Is a CTE materialised?</div>
+  <p>It depends on the engine, and it matters:</p>
+  <ul style="margin-bottom:0">
+    <li><strong>SQL Server, MySQL 8+</strong> — a CTE is an inline view. It is expanded into the
+      outer query and optimised as a whole, and a CTE referenced twice is
+      <strong>evaluated twice</strong>.</li>
+    <li><strong>PostgreSQL before 12</strong> — always materialised. This was a genuine
+      optimisation fence, used deliberately to stop predicate push-down.</li>
+    <li><strong>PostgreSQL 12+</strong> — inlined when referenced once and side-effect free;
+      materialised otherwise. You can force either with
+      <code>WITH x AS MATERIALIZED (…)</code> or <code>AS NOT MATERIALIZED</code>.</li>
+    <li><strong>Oracle</strong> — decides by cost; <code>/*+ MATERIALIZE */</code> forces it.</li>
+  </ul>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    “I put it in a CTE so it only runs once” is <strong>false in SQL Server and MySQL</strong>. If
+    an expensive CTE is referenced three times it runs three times. When you genuinely need
+    single evaluation, materialise it explicitly: a temporary table, or
+    <code>AS MATERIALIZED</code> in PostgreSQL. A temp table also gets statistics, which an inline
+    CTE does not — often the real reason the rewrite is faster.
+  </p>
+</div>
+
+<h2 id="recursive">Recursive CTEs: hierarchies, and how the machine runs them</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Start with the boss. Ask “who reports to the people I already have?” Write them down. Ask
+    again about the new ones. Keep going until an ask produces nobody new. Now you have the whole
+    company.
+  </p>
+</div>
+
+<pre><code>WITH RECURSIVE org AS (
+  -- ANCHOR: the starting rows, evaluated once.
+  SELECT id, name, manager_id, 1 AS depth, CAST(name AS VARCHAR(1000)) AS path
+  FROM employees
+  WHERE manager_id IS NULL
+
+  UNION ALL
+
+  -- RECURSIVE: joins the PREVIOUS ITERATION'S rows, not the whole result.
+  SELECT e.id, e.name, e.manager_id, o.depth + 1, o.path || ' > ' || e.name
+  FROM employees e
+  JOIN org o ON e.manager_id = o.id
+  WHERE o.depth &lt; 20                      -- the cycle guard. Put one in. Always.
+)
+SELECT depth, path FROM org ORDER BY path;</code></pre>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 220" role="img" aria-labelledby="d12t d12d">
+    <title id="d12t">How a recursive CTE iterates</title>
+    <desc id="d12d">The anchor query produces the first working set. Each iteration joins the previous working set to the base table to produce the next, accumulating into the result, until an iteration returns no rows.</desc>
+
+    <rect class="d-box-a" x="20" y="80" width="130" height="56" rx="9"/>
+    <text class="d-t-b" x="85" y="104" text-anchor="middle">ANCHOR</text>
+    <text class="d-t-s" x="85" y="122" text-anchor="middle">runs once</text>
+
+    <rect class="d-box-k" x="210" y="80" width="130" height="56" rx="9"/>
+    <text class="d-t-b" x="275" y="104" text-anchor="middle">working set</text>
+    <text class="d-t-s" x="275" y="122" text-anchor="middle">depth 1</text>
+
+    <rect class="d-box-k" x="400" y="80" width="130" height="56" rx="9"/>
+    <text class="d-t-b" x="465" y="104" text-anchor="middle">working set</text>
+    <text class="d-t-s" x="465" y="122" text-anchor="middle">depth 2</text>
+
+    <rect class="d-box" x="590" y="80" width="130" height="56" rx="9"/>
+    <text class="d-t-b" x="655" y="104" text-anchor="middle">empty</text>
+    <text class="d-t-s" x="655" y="122" text-anchor="middle">→ stop</text>
+
+    <path class="d-line-a" d="M150 108 H210" marker-end="url(#a12)"/>
+    <path class="d-line-a" d="M340 108 H400" marker-end="url(#a12)"/>
+    <path class="d-line-a" d="M530 108 H590" marker-end="url(#a12)"/>
+
+    <path class="d-line" d="M275 136 V180 H465 V136" />
+    <text class="d-t-c" x="370" y="196" text-anchor="middle">UNION ALL accumulates into the result</text>
+
+    <defs>
+      <marker id="a12" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0 0 L10 5 L0 10 z" class="d-fill-a"/>
+      </marker>
+    </defs>
+  </svg>
+  <figcaption>Each step sees only the <em>previous</em> iteration's rows. That is why a self-join to <code>org</code> terminates.</figcaption>
+</figure>
+
+<div class="box pro">
+  <div class="box-title">🎓 The three rules of a recursive CTE</div>
+  <ol style="margin-bottom:0">
+    <li>The recursive member may reference the CTE <strong>once</strong>, and not inside an outer
+      join, aggregate or subquery.</li>
+    <li><code>UNION ALL</code> keeps everything and is what you normally want.
+      <code>UNION</code> deduplicates each iteration, which also breaks cycles — at the cost of a
+      sort per step.</li>
+    <li><strong>Always bound it.</strong> A <code>depth</code> column with a
+      <code>WHERE depth &lt; n</code>, or SQL Server's <code>OPTION (MAXRECURSION 100)</code>. Real
+      hierarchy data contains cycles — an employee who is their own grandparent — and without a
+      guard the query runs until the server gives up.</li>
+  </ol>
+</div>
+
+<div class="tryit">
+  <pre><code>-- A date spine with no calendar table. Useful for filling gaps in reports:
+-- every day in 2026, whether or not anything happened on it.
+WITH RECURSIVE days(d) AS (
+  SELECT DATE '2026-01-01'
+  UNION ALL
+  SELECT d + INTERVAL '1 day' FROM days WHERE d &lt; DATE '2026-12-31'
+)
+SELECT d, COALESCE(o.n, 0) AS orders
+FROM days
+LEFT JOIN (SELECT CAST(placed_at AS DATE) d, COUNT(*) n FROM orders GROUP BY 1) o
+       ON o.d = days.d;</code></pre>
+</div>
+
+<div class="box note">
+  <div class="box-title">Recursive CTE or a hierarchy column?</div>
+  <p style="margin-bottom:0">
+    If you read a tree far more often than you change it, storing a materialised path
+    (<code>/1/14/97/</code>), a nested-set pair, or SQL Server's <code>hierarchyid</code> turns the
+    recursion into a single indexed <code>LIKE '/1/14/%'</code>. It costs more on write and needs
+    maintenance when a node moves. Naming that trade-off is the senior answer; reaching for it
+    before measuring is not.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>A CTE names a step. Its main value is readability and being able to run each step alone while debugging.</li>
+    <li>A CTE is <em>not</em> automatically materialised. In SQL Server and MySQL it is inlined and re-evaluated per reference.</li>
+    <li>When you need single evaluation, say so: <code>AS MATERIALIZED</code>, or a temp table — which also gets statistics.</li>
+    <li>A recursive CTE has an anchor and a recursive member joined by <code>UNION ALL</code>.</li>
+    <li>The recursive member sees only the previous iteration, which is why it terminates.</li>
+    <li>Always add a depth guard. Production hierarchy data contains cycles.</li>
+    <li><code>UNION</code> instead of <code>UNION ALL</code> breaks cycles by deduplication, and pays for a sort each iteration.</li>
+    <li>Read-heavy trees can be stored as materialised paths and queried without recursion at all.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">CTE or subquery — what is the difference?</p>
+  <p class="a">Mostly readability and reuse: a CTE is named, can be referenced more than once, and
+    can be recursive. Performance-wise they are usually identical because the CTE is inlined — the
+    exception is PostgreSQL, where <code>MATERIALIZED</code> makes it an explicit optimisation
+    fence.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you query a hierarchy of unknown depth?</p>
+  <p class="a">A recursive CTE: an anchor selecting the roots, then a recursive member joining the
+    table back to the CTE, combined with <code>UNION ALL</code>. I would carry a depth column and
+    bound it, because real data contains cycles and an unbounded recursion runs until the server
+    stops it.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Does putting an expensive query in a CTE make it run once?</p>
+  <p class="a">Not in SQL Server or MySQL — it is inlined, so three references mean three
+    evaluations. To guarantee one evaluation, materialise it: <code>AS MATERIALIZED</code> in
+    PostgreSQL, or a temporary table, which has the side benefit of getting statistics.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

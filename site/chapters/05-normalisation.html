@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>05 &middot; Normalisation, and denormalising on purpose &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="05-normalisation">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 1 — The relational foundation <span>&rsaquo;</span> Chapter 05</p>
+<h1>Normalisation, and denormalising on purpose</h1>
+<p class="lede">1NF to BCNF in plain words, the anomaly each form removes, and when to break the rules deliberately.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Progettazione e modellazione di basi dati relazionali&rdquo;</em> &mdash; this is the chapter they mean.
+  Expect to be asked to name the normal forms, and expect the follow-up to be “when would you
+  break them?”</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="the-point">What normalisation is actually for</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    If you write your friend's phone number on twenty different pages of your notebook, then one
+    day she changes it, you have twenty places to fix — and you will miss one. So you write it
+    once, on its own page, and everywhere else you write “see page 4”. That is the whole idea.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    Normalisation removes <strong>redundancy</strong>, and redundancy is what makes the three
+    <em>update anomalies</em> possible. <strong>Update:</strong> a fact stored twice can be changed
+    in one place and not the other, so the database now contradicts itself.
+    <strong>Insertion:</strong> you cannot record a supplier until they have a product, because
+    supplier facts only exist on product rows. <strong>Deletion:</strong> removing the last product
+    from a supplier erases the supplier's address. Every normal form is a rule that removes one
+    class of these.
+  </p>
+</div>
+
+<h2 id="forms">The forms, in the order you will be asked for them</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Form</th><th>The rule</th><th>The one-sentence version</th></tr></thead>
+<tbody>
+<tr><td><strong>1NF</strong></td><td>Atomic values; no repeating groups</td><td>No comma-separated lists, no <code>phone1 phone2 phone3</code></td></tr>
+<tr><td><strong>2NF</strong></td><td>1NF, and no non-key column depends on <em>part</em> of a composite key</td><td>Only matters when the key is composite</td></tr>
+<tr><td><strong>3NF</strong></td><td>2NF, and no non-key column depends on another non-key column</td><td>No transitive dependencies</td></tr>
+<tr><td><strong>BCNF</strong></td><td>Every determinant is a candidate key</td><td>3NF's edge case, when candidate keys overlap</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The mnemonic that actually works</div>
+  <p style="margin-bottom:0">
+    <em>“Every non-key attribute must depend on <strong>the key</strong> (1NF), <strong>the whole
+    key</strong> (2NF), and <strong>nothing but the key</strong> (3NF) — so help me Codd.”</em>
+    Say it and then <em>give an example of each</em>; the mnemonic alone reads as memorised.
+  </p>
+</div>
+
+<h2 id="worked">One table, normalised in three steps</h2>
+
+<p>Start with the table every legacy system has somewhere:</p>
+
+<pre><code>-- 0NF-ish. Everything about an order, flattened.
+order_id | customer_name | customer_city | city_region | products              | total
+---------+---------------+---------------+-------------+----------------------+-------
+    1001 | Rossi SpA     | Modena        | Emilia-R.   | "A12 x2, B7 x1"      | 89.00
+    1002 | Rossi SpA     | Modena        | Emilia-R.   | "C3 x5"              | 45.00</code></pre>
+
+<p><strong>1NF — make values atomic.</strong> <code>products</code> holds a list, so it cannot be
+joined, filtered or summed. Split it into rows in a child table:</p>
+
+<pre><code>orders(order_id, customer_name, customer_city, city_region, total)
+order_lines(order_id, sku, quantity)          -- composite key (order_id, sku)</code></pre>
+
+<p><strong>2NF — remove partial dependencies.</strong> If <code>order_lines</code> also carried
+<code>product_name</code>, that depends on <code>sku</code> alone — part of the composite key, not
+all of it. It moves to a <code>products</code> table.</p>
+
+<p><strong>3NF — remove transitive dependencies.</strong> In <code>orders</code>,
+<code>city_region</code> depends on <code>customer_city</code>, which depends on the customer, not
+on the order. Two hops from the key is one hop too many:</p>
+
+<pre><code>customers(customer_id, name, city_id)
+cities(city_id, name, region_id)
+regions(region_id, name)
+orders(order_id, customer_id, placed_at, total_cents)
+order_lines(order_id, line_no, product_id, quantity, unit_price_cents)
+products(product_id, sku, name, list_price_cents)</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the exception that is not a violation</div>
+  <p style="margin-bottom:0">
+    <code>order_lines.unit_price_cents</code> looks like a 3NF violation: the price is on
+    <code>products</code>, so why copy it? Because <strong>it is a different fact</strong>. The
+    product table holds <em>the current list price</em>; the order line holds <em>the price this
+    customer was actually charged on that day</em>. Copying it is not redundancy — it is capturing
+    a value at a point in time. If you normalise it away, reprinting last year's invoice silently
+    reprices it. Being able to explain this distinction is worth more in an interview than
+    reciting BCNF.
+  </p>
+</div>
+
+<h2 id="denormalise">Denormalising on purpose</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The three legitimate reasons</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Point-in-time capture.</strong> As above: the price charged, the address shipped
+      to, the VAT rate applied. Not really denormalisation; a different fact that happens to look
+      like one.</li>
+    <li><strong>A measured read problem.</strong> A dashboard joins nine tables and takes eleven
+      seconds. A summary table or materialised view fixes it. The word <em>measured</em> is
+      load-bearing — denormalising before you have a slow query is how you get a fast wrong
+      answer.</li>
+    <li><strong>Analytics.</strong> A star schema is deliberately denormalised because its
+      workload is different: bulk-loaded, rarely updated, and read with wide aggregate scans.
+      See <a href="39-oltp-vs-olap.html">chapter 39</a>.</li>
+  </ol>
+</div>
+
+<div class="box note">
+  <div class="box-title">If you denormalise, say how it stays true</div>
+  <p style="margin-bottom:0">
+    Every denormalised copy needs a named mechanism keeping it correct: a trigger, a scheduled
+    refresh, a materialised view, or an explicit “this may be up to 10 minutes stale and that is
+    acceptable because…”. A denormalised column with no stated mechanism is a bug that has not
+    happened yet. Answering <em>“…and I would keep it in step with X, accepting Y staleness”</em>
+    is the difference between sounding senior and sounding reckless.
+  </p>
+</div>
+
+<h2 id="how-far">How far should you go?</h2>
+
+<p>
+  <strong>3NF for anything transactional, and stop there unless you find a reason.</strong> BCNF,
+  4NF and 5NF exist and matter in edge cases, but almost every real schema in BCNF is already in
+  3NF, and I have never seen a production incident caused by a missing 5NF decomposition. Naming
+  them shows you read the book; knowing that 3NF is where the value is shows you have used one.
+</p>
+
+<div class="rules">
+  <ol>
+    <li>Normalisation removes redundancy; redundancy is what makes update, insertion and deletion anomalies possible.</li>
+    <li>The key, the whole key, and nothing but the key — with an example for each, or it sounds memorised.</li>
+    <li>1NF means atomic values: no comma-separated lists, no <code>phone1 phone2 phone3</code>.</li>
+    <li>2NF only ever applies when the primary key is composite.</li>
+    <li>3NF is the practical target for transactional schemas. Go further only for a reason you can state.</li>
+    <li>A value captured at a point in time — the price charged, the address shipped to — is a different fact, not redundancy.</li>
+    <li>Denormalise only after measuring, and always name the mechanism that keeps the copy true.</li>
+    <li>Analytics schemas are denormalised on purpose because their workload is different, not because the rules stopped applying.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Explain 1NF, 2NF and 3NF.</p>
+  <p class="a">Give the rule and an example for each. 1NF: a <code>products</code> column holding
+    <code>"A12 x2, B7 x1"</code> becomes child rows. 2NF: with a composite key
+    <code>(order_id, sku)</code>, a <code>product_name</code> column depends only on
+    <code>sku</code>, so it moves. 3NF: <code>city_region</code> depends on
+    <code>customer_city</code> rather than on the order key, so cities and regions get their own
+    tables.</p>
+</div>
+
+<div class="qa">
+  <p class="q">When would you denormalise?</p>
+  <p class="a">When I have measured a read problem the normalised design cannot solve, when the
+    workload is analytical, or when the "duplicate" is really a point-in-time capture. And I would
+    say in the same breath how the copy is kept correct and what staleness is acceptable.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Is storing the unit price on the order line a normalisation violation?</p>
+  <p class="a">No — it is a different fact. <code>products.list_price</code> is the current price;
+    <code>order_lines.unit_price</code> is what was charged that day. Normalising it away means
+    reprinting an old invoice reprices it, which is wrong and in some jurisdictions illegal.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

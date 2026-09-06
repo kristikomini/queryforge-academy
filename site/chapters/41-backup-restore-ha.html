@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>41 &middot; Backup, restore, PITR and replication &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="41-backup-restore-ha">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 6 — Data at work <span>&rsaquo;</span> Chapter 41</p>
+<h1>Backup, restore, PITR and replication</h1>
+<p class="lede">RPO and RTO in one sentence each, the backup nobody tested, and what replication does not protect you from.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Gestione di backup, restore e manutenzione dei database&rdquo;</em> &mdash; and in a small Italian
+  software house, the person who writes the SQL is usually also the person who finds out whether
+  the backups work.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="rpo">RPO and RTO, one sentence each</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Two different questions. <em>How much of yesterday are you willing to lose?</em> And
+    <em>how long may everything be broken while you fix it?</em> They are not the same question and
+    they usually have different answers.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th></th><th>Question</th><th>Bought by</th></tr></thead>
+<tbody>
+<tr><td><strong>RPO</strong><br>Recovery Point Objective</td><td>How much <em>data</em> may we lose?</td><td>Backup frequency. A 15-minute RPO means log backups every 15 minutes</td></tr>
+<tr><td><strong>RTO</strong><br>Recovery Time Objective</td><td>How long may we be <em>down</em>?</td><td>Restore speed, standby servers, automatic failover</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The first question to ask, and almost nobody does</div>
+  <p style="margin-bottom:0">
+    <strong>“What are our RPO and RTO?”</strong> — because if nobody has decided them, then nobody
+    has decided the backup schedule either, and whatever is currently running was chosen by
+    default. Asking it in an interview, about their systems, is a very strong signal.
+  </p>
+</div>
+
+<h2 id="types">The three backup types, and how they combine</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Type</th><th>Contains</th><th>To restore you need</th></tr></thead>
+<tbody>
+<tr><td><strong>Full</strong></td><td>Everything</td><td>Just itself</td></tr>
+<tr><td><strong>Differential</strong></td><td>Changes since the last <em>full</em></td><td>The full + the latest differential</td></tr>
+<tr><td><strong>Transaction log</strong></td><td>Every change since the last log backup</td><td>The full + differential + <strong>every log backup in sequence</strong></td></tr>
+</tbody>
+</table>
+</div>
+
+<pre><code>-- A typical schedule and what it costs you
+Sunday 02:00   FULL
+Daily  02:00   DIFFERENTIAL
+Every  15 min  LOG                 -> RPO = 15 minutes
+
+-- Restoring to Wednesday 14:23 needs:
+--   Sunday's full  +  Wednesday's differential  +  every log from 02:00 to 14:23
+-- One missing log in that chain and you stop at the gap. Which is why the chain
+-- matters more than any individual file.</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the log backup that breaks the chain</div>
+  <p style="margin-bottom:0">
+    Somebody takes an ad-hoc full backup with a tool that <em>truncates the log</em>, or switches
+    the database to <code>SIMPLE</code> recovery “to stop the log growing”, or takes a
+    <code>COPY_ONLY</code> backup believing it is part of the chain. Point-in-time recovery is now
+    impossible between that moment and the next full backup, and <strong>nothing reports an
+    error</strong> until the day you need it. Anything that touches the backup chain deserves a
+    change request.
+  </p>
+</div>
+
+<h2 id="pitr">Point-in-time recovery</h2>
+
+<pre><code>-- SQL Server: restore the chain, leaving the database recovering until the end.
+RESTORE DATABASE forge FROM DISK = 'full.bak'   WITH NORECOVERY;
+RESTORE DATABASE forge FROM DISK = 'diff.bak'   WITH NORECOVERY;
+RESTORE LOG      forge FROM DISK = 'log1.trn'   WITH NORECOVERY;
+RESTORE LOG      forge FROM DISK = 'log2.trn'
+       WITH STOPAT = '2026-09-03T14:23:00', RECOVERY;
+--          ^ the moment BEFORE somebody ran the DELETE without a WHERE clause
+
+-- PostgreSQL: a base backup plus archived WAL, with a recovery target.
+-- postgresql.conf:  restore_command = 'cp /archive/%f %p'
+--                   recovery_target_time = '2026-09-03 14:23:00'</code></pre>
+
+<div class="box note">
+  <div class="box-title">Restore to a copy, not over the original</div>
+  <p style="margin-bottom:0">
+    When somebody deletes a table at 14:23, the instinct is to restore the database. Far better:
+    restore to a <em>new</em> database name, extract the rows you lost, and insert them back into
+    the live system. The rest of the business keeps working, and you have not thrown away
+    everything that happened after 14:23 in order to recover something from before it.
+  </p>
+</div>
+
+<h2 id="untested">A backup nobody has restored is not a backup</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The four things a restore drill actually discovers</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Whether the files are readable.</strong> Silent corruption, a full destination, a
+      permission change six months ago.</li>
+    <li><strong>How long it takes.</strong> Which <em>is</em> your RTO, whatever the document says.
+      A 900&nbsp;GB restore over a network share is not a twenty-minute job.</li>
+    <li><strong>What else is needed.</strong> Logins and users are separate objects in SQL Server —
+      restore a database and every user is orphaned. Certificates, linked servers, jobs, encryption
+      keys: none of it is in the database backup.</li>
+    <li><strong>Whether anyone knows how.</strong> At 03:00, under pressure, from a runbook that
+      has never been followed.</li>
+  </ol>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The honest sentence</div>
+  <p style="margin-bottom:0">
+    <em>“We do not have backups; we have restores that we have tested. Anything else is a file we
+    hope about.”</em> If you say one thing about backups in an interview, say a version of that —
+    and if you have actually run a restore drill, say when.
+  </p>
+</div>
+
+<h2 id="ha">Replication and high availability</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Mechanism</th><th>Protects against</th><th>Does NOT protect against</th></tr></thead>
+<tbody>
+<tr><td><strong>Synchronous replica</strong></td><td>Node failure, with no data loss</td><td>A bad <code>DELETE</code> — it is replicated instantly</td></tr>
+<tr><td><strong>Asynchronous replica</strong></td><td>Node or site failure; scales reads</td><td>The same, plus you can lose the replication lag on failover</td></tr>
+<tr><td><strong>Backups</strong></td><td>Human error, corruption, ransomware, "oops"</td><td>Downtime — a restore takes as long as it takes</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Replication is not a backup, and this is not pedantry</div>
+  <p style="margin-bottom:0">
+    A replica faithfully reproduces every statement — including <code>DELETE FROM orders</code>
+    with no <code>WHERE</code>, in milliseconds, on every node. Replication answers
+    <em>availability</em>; backups answer <em>recoverability</em>. You need both, they cost
+    different money, and conflating them is one of the most expensive mistakes in the field. The
+    ransomware era has made it worse: an attacker who reaches the primary reaches the replicas too,
+    which is why offline or immutable backup copies now matter more than they used to.
+  </p>
+</div>
+
+<h2 id="reads">Read replicas, and the lag</h2>
+
+<p>
+  An asynchronous replica also solves a different problem: taking reporting load off the primary.
+  The catch is <strong>replication lag</strong>, and its symptom is specific and confusing —
+  a user saves a record, is redirected to a page that reads from the replica, and the record is not
+  there. The fixes are to route read-after-write to the primary, or to wait for the replica to
+  catch up to the write's log position before reading.
+</p>
+
+<div class="rules">
+  <ol>
+    <li>RPO is how much data you may lose; RTO is how long you may be down. Different questions, different costs.</li>
+    <li>Log backups define your RPO. Full and differential backups define how long the restore takes.</li>
+    <li>Point-in-time recovery needs an unbroken log chain. One missing file and you stop at the gap.</li>
+    <li>Anything that truncates the log or changes the recovery model breaks the chain silently.</li>
+    <li>Restore to a copy and extract what you lost, rather than rolling the whole system back.</li>
+    <li>An untested backup is a file you hope about. The drill is what tells you your real RTO.</li>
+    <li>Logins, jobs, certificates and linked servers are not in the database backup.</li>
+    <li>Replication is availability, not recoverability. It replicates your mistakes faithfully.</li>
+    <li>Ransomware makes offline or immutable copies necessary, not merely prudent.</li>
+    <li>Read replicas lag. Route read-after-write to the primary.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Describe a backup strategy.</p>
+  <p class="a">Start from RPO and RTO, because they decide everything else. Typically a weekly
+    full, daily differentials and log backups at the RPO interval — so a 15-minute RPO means log
+    backups every 15 minutes. Then off-site and, now, immutable copies; monitoring that the jobs
+    actually ran; and a scheduled restore drill, because the restore time is the real RTO and the
+    only way to know it is to do it.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Is a replica a backup?</p>
+  <p class="a">No. It replicates every statement including the mistaken ones — a <code>DELETE</code>
+    without a <code>WHERE</code> is on every node in milliseconds. Replication gives availability;
+    backups give recoverability from human error, corruption and ransomware. You need both.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Somebody deleted a table at 14:23. What do you do?</p>
+  <p class="a">Stop further writes if I can, then restore the full backup plus differential plus
+    logs to a <em>new</em> database with <code>STOPAT</code> just before 14:23, extract the missing
+    rows and insert them back into the live system. Restoring over the original would also discard
+    everything legitimate that happened after 14:23.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

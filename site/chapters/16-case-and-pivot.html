@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>16 &middot; CASE, COALESCE and conditional aggregation &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="16-case-and-pivot">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 16</p>
+<h1>CASE, COALESCE and conditional aggregation</h1>
+<p class="lede">How to pivot without PIVOT, and why conditional aggregation beats five self-joins every single time.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Reporting con SSRS e Power BI&rdquo;</em> &mdash; nine tenths of report work is
+  turning rows into columns and putting a label on a number. That is this chapter.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="case">CASE: the only conditional you need</h2>
+
+<pre><code>-- Searched CASE: any predicate, evaluated top to bottom, FIRST match wins.
+SELECT id,
+       CASE WHEN total_cents &gt;= 100000 THEN 'large'
+            WHEN total_cents &gt;=  20000 THEN 'medium'
+            ELSE 'small'                                   -- omit ELSE and you get NULL
+       END AS bucket
+FROM orders;
+
+-- Simple CASE: equality against one expression. Cannot test NULL (nothing equals NULL).
+CASE status WHEN 'draft' THEN 'Bozza' WHEN 'shipped' THEN 'Spedito' ELSE status END</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    Order matters and there is no warning. Put <code>WHEN total &gt;= 20000</code> before
+    <code>WHEN total &gt;= 100000</code> and every large order is labelled medium — the query runs,
+    returns rows, and the report is quietly wrong. Write the branches from the most specific
+    downwards, and always include an <code>ELSE</code> so an unhandled value is visible rather than
+    a null nobody looks at.
+  </p>
+</div>
+
+<h2 id="pivot">Pivot without PIVOT</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Your data is a long list: “January, Modena, 40”. The boss wants a grid with months down the
+    side and cities across the top. Turning the list into the grid is a pivot — and the trick is
+    just to make one column per city that only adds up the numbers belonging to that city.
+  </p>
+</div>
+
+<pre><code>-- Portable everywhere, readable, and the answer to give in an interview.
+SELECT
+  DATE_TRUNC('month', o.placed_at)                                    AS month,
+  SUM(CASE WHEN c.city = 'Modena'  THEN o.total_cents ELSE 0 END)/100 AS modena,
+  SUM(CASE WHEN c.city = 'Parma'   THEN o.total_cents ELSE 0 END)/100 AS parma,
+  SUM(CASE WHEN c.city = 'Bologna' THEN o.total_cents ELSE 0 END)/100 AS bologna,
+  SUM(o.total_cents)/100                                              AS total
+FROM orders o
+JOIN customers c ON c.id = o.customer_id
+GROUP BY DATE_TRUNC('month', o.placed_at)
+ORDER BY month;</code></pre>
+
+<div class="box pro">
+  <div class="box-title">🎓 Why not the <code>PIVOT</code> operator?</div>
+  <p style="margin-bottom:0">
+    SQL Server and Oracle have a <code>PIVOT</code> keyword. It is shorter for simple cases and it
+    is <strong>not portable</strong>, it only handles one aggregate, and it still needs the column
+    list written out — so it solves none of the real problem. Conditional aggregation works in
+    every engine, supports several different aggregates side by side, and is easier to read. Know
+    that <code>PIVOT</code> exists; reach for <code>CASE</code>.
+  </p>
+</div>
+
+<div class="box note">
+  <div class="box-title">The column list must be static</div>
+  <p style="margin-bottom:0">
+    SQL returns a fixed set of columns decided at parse time, so a pivot over “whatever cities
+    exist” requires <a href="34-dynamic-sql-and-injection.html">dynamic SQL</a> — building the
+    statement from the data and executing it. That is a real technique with a real injection risk,
+    and it is usually the wrong answer: <strong>let the reporting tool pivot</strong>. Power BI,
+    SSRS and Excel all pivot a long result natively, and returning long data keeps the query
+    static, cacheable and safe. Saying this is a better answer than writing the dynamic SQL.
+  </p>
+</div>
+
+<h2 id="unpivot">Unpivot: grid back into list</h2>
+
+<p>
+  You will meet this cleaning up a spreadsheet import, where somebody has columns
+  <code>jan, feb, mar…</code>:
+</p>
+
+<pre><code>-- Portable: one branch per source column, stapled with UNION ALL.
+SELECT product_id, 1 AS month, jan AS qty FROM sales_wide WHERE jan IS NOT NULL
+UNION ALL SELECT product_id, 2, feb FROM sales_wide WHERE feb IS NOT NULL
+UNION ALL SELECT product_id, 3, mar FROM sales_wide WHERE mar IS NOT NULL;
+
+-- PostgreSQL, more compact and one pass over the table:
+SELECT product_id, m.month, m.qty
+FROM sales_wide
+CROSS JOIN LATERAL (VALUES (1, jan), (2, feb), (3, mar)) AS m(month, qty)
+WHERE m.qty IS NOT NULL;</code></pre>
+
+<h2 id="coalesce">COALESCE and NULLIF in reports</h2>
+
+<pre><code>SELECT
+  COALESCE(c.company_name, c.first_name || ' ' || c.last_name, 'Unknown') AS display_name,
+  -- Division that cannot fail, and returns NULL rather than a fake zero:
+  ROUND(100.0 * o.delivered / NULLIF(o.total, 0), 1)                      AS delivery_pct,
+  -- Treat empty string as missing (the classic import artefact):
+  COALESCE(NULLIF(TRIM(c.vat_number), ''), '—')                           AS vat
+FROM customers c ...</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — COALESCE vs ISNULL in T-SQL</div>
+  <p style="margin-bottom:0">
+    <code>ISNULL(a, b)</code> returns the type of <code>a</code>, so
+    <code>ISNULL(short_col, 'a long default string')</code> silently
+    <strong>truncates the default</strong>. <code>COALESCE</code> uses type precedence across all
+    arguments and does not. <code>COALESCE</code> is also standard SQL. Use it.
+  </p>
+</div>
+
+<h2 id="reporting">The reporting shape you will be asked for</h2>
+
+<div class="tryit">
+  <pre><code>-- "Monthly order status breakdown with percentages" — the archetypal SSRS/Power BI
+-- backing query. Conditional aggregation, one scan, no subqueries.
+SELECT
+  strftime('%Y-%m', placed_at)                                 AS month,
+  COUNT(*)                                                     AS orders,
+  COUNT(CASE WHEN status = 'delivered' THEN 1 END)             AS delivered,
+  COUNT(CASE WHEN status = 'cancelled' THEN 1 END)             AS cancelled,
+  ROUND(100.0 * COUNT(CASE WHEN status = 'cancelled' THEN 1 END)
+        / NULLIF(COUNT(*), 0), 1)                              AS cancel_pct,
+  SUM(CASE WHEN status &lt;&gt; 'cancelled' THEN total_cents ELSE 0 END)/100.0 AS revenue_eur
+FROM orders
+GROUP BY month
+ORDER BY month;</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li><code>CASE</code> branches are evaluated in order and the first match wins. Order them most specific first.</li>
+    <li>Always write an <code>ELSE</code>. A missing one produces nulls that nobody investigates.</li>
+    <li>Simple <code>CASE</code> cannot match <code>NULL</code>, because nothing equals <code>NULL</code>.</li>
+    <li>Pivot with conditional aggregation: portable, multi-aggregate, readable. <code>PIVOT</code> is shorter and non-portable.</li>
+    <li>The column list of a pivot is fixed at parse time. A dynamic pivot needs dynamic SQL — usually let the reporting tool do it instead.</li>
+    <li>Unpivot with <code>UNION ALL</code>, or a lateral <code>VALUES</code> list for one pass.</li>
+    <li><code>NULLIF(x, 0)</code> is the division guard; <code>NULLIF(TRIM(x), '')</code> normalises empty strings to missing.</li>
+    <li>Prefer <code>COALESCE</code> to <code>ISNULL</code>: standard, n-ary, and it will not truncate your default.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Pivot monthly sales into one column per region.</p>
+  <p class="a">Conditional aggregation — one
+    <code>SUM(CASE WHEN region = 'x' THEN amount ELSE 0 END)</code> per region, grouped by month.
+    I would mention that the region list has to be static, and that if it is genuinely dynamic the
+    right answer is usually to return long data and let the reporting layer pivot it.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Difference between <code>COALESCE</code> and <code>ISNULL</code>?</p>
+  <p class="a"><code>COALESCE</code> is standard, takes any number of arguments, and determines the
+    result type from all of them. <code>ISNULL</code> is T-SQL, takes two, and returns the first
+    argument's type — so it can silently truncate the replacement value.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you avoid divide-by-zero in a percentage column?</p>
+  <p class="a"><code>NULLIF(denominator, 0)</code>. Dividing by null yields null, which is the
+    honest answer for “undefined”, and no error is raised. Wrapping it in <code>COALESCE(…, 0)</code>
+    is a separate decision about how to display it.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>10 &middot; Aggregation, GROUP BY and HAVING &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="10-aggregation">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 10</p>
+<h1>Aggregation, GROUP BY and HAVING</h1>
+<p class="lede">COUNT(*) vs COUNT(col), why HAVING is not a second WHERE, and the grouping error the engine will not catch.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; every reporting task you will
+  ever be given is an aggregation with a filter argument attached.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="grain">Grouping changes the grain</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    You have a pile of receipts. You sort them into envelopes — one envelope per shop — and then
+    you write one number on the outside of each envelope. Afterwards you no longer have receipts;
+    you have envelopes. You cannot ask “what time was this receipt?” any more, because there is no
+    “this receipt”, only a shop.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    <code>GROUP BY</code> changes the <strong>grain</strong> of the result: after it, one output
+    row represents a set of input rows. Every column in <code>SELECT</code> must therefore be
+    either a grouping column or inside an aggregate — because for anything else the question
+    “which of the twelve values do you mean?” has no answer. Standard SQL rejects this;
+    MySQL historically returned an arbitrary value, which is worse than an error because it looks
+    like it worked.
+  </p>
+</div>
+
+<pre><code>-- Error in every standards-compliant engine: which placed_at?
+SELECT customer_id, placed_at, SUM(total_cents)
+FROM orders GROUP BY customer_id;
+
+-- Say what you mean:
+SELECT customer_id, MAX(placed_at) AS last_order, SUM(total_cents) AS spend
+FROM orders GROUP BY customer_id;</code></pre>
+
+<div class="box note">
+  <div class="box-title">Functional dependency, the one legal exception</div>
+  <p style="margin-bottom:0">
+    PostgreSQL and MySQL (with <code>ONLY_FULL_GROUP_BY</code>) allow selecting a column that is
+    <em>functionally dependent</em> on the grouping key — grouping by
+    <code>customers.id</code> lets you select <code>customers.name</code>, because the primary key
+    determines it and there can only be one value. It is legal, it is convenient, and it is
+    non-portable. SQL Server requires every column in the <code>GROUP BY</code>.
+  </p>
+</div>
+
+<h2 id="counting">The counting functions, precisely</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Expression</th><th>Counts</th><th>Use for</th></tr></thead>
+<tbody>
+<tr><td><code>COUNT(*)</code></td><td>Rows</td><td>“How many orders?”</td></tr>
+<tr><td><code>COUNT(col)</code></td><td>Rows where col is not null</td><td>“How many orders have a ship date?”</td></tr>
+<tr><td><code>COUNT(DISTINCT col)</code></td><td>Distinct non-null values</td><td>“How many different customers?”</td></tr>
+<tr><td><code>COUNT(1)</code></td><td>Rows — identical to <code>COUNT(*)</code></td><td>Nothing. It is not faster; that is folklore</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap</div>
+  <p style="margin-bottom:0">
+    <code>COUNT(DISTINCT …)</code> is expensive: it requires a sort or hash of all the values and
+    it does not parallelise as well as a plain count. Several of them in one query multiply that
+    cost. If a dashboard is slow and has four <code>COUNT(DISTINCT)</code>s, that is your answer
+    before you look at anything else — and the fix is usually pre-aggregation
+    (<a href="32-materialisation-and-caching.html">chapter 32</a>), or an approximate count
+    (<code>APPROX_COUNT_DISTINCT</code>, HyperLogLog) if the number is a dashboard tile rather than
+    an invoice.
+  </p>
+</div>
+
+<h2 id="having">HAVING is not a second WHERE</h2>
+
+<pre><code>-- Customers who spent over €1000 in 2026, with at least 3 orders.
+SELECT customer_id, COUNT(*) AS n, SUM(total_cents) AS spend
+FROM orders
+WHERE placed_at &gt;= DATE '2026-01-01'    -- filters ROWS: indexable, cheap
+  AND status &lt;&gt; 'cancelled'
+GROUP BY customer_id
+HAVING COUNT(*) &gt;= 3                     -- filters GROUPS: only possible after grouping
+   AND SUM(total_cents) &gt; 100000;</code></pre>
+
+<p>
+  The rule: <strong>if the condition does not involve an aggregate, it belongs in
+  <code>WHERE</code></strong>. Putting <code>status &lt;&gt; 'cancelled'</code> in
+  <code>HAVING</code> gives the same answer and makes the engine group rows it is about to throw
+  away.
+</p>
+
+<h2 id="conditional">Conditional aggregation: the technique that replaces five queries</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 One pass, many answers</div>
+  <p style="margin-bottom:0">
+    Because aggregates ignore <code>NULL</code>, a <code>CASE</code> inside an aggregate acts as a
+    filter for that column alone. This turns “count the shipped ones, count the cancelled ones,
+    and total the confirmed ones” from three scans into one.
+  </p>
+</div>
+
+<pre><code>SELECT
+  customer_id,
+  COUNT(*)                                                     AS orders_total,
+  COUNT(CASE WHEN status = 'shipped'   THEN 1 END)             AS shipped,
+  COUNT(CASE WHEN status = 'cancelled' THEN 1 END)             AS cancelled,
+  SUM(CASE WHEN status = 'confirmed' THEN total_cents ELSE 0 END) AS open_value_cents
+FROM orders
+GROUP BY customer_id;
+
+-- Standard SQL, PostgreSQL and SQLite have a cleaner spelling:
+SELECT customer_id,
+       COUNT(*) FILTER (WHERE status = 'shipped') AS shipped
+FROM orders GROUP BY customer_id;</code></pre>
+
+<div class="box note">
+  <div class="box-title">Note the missing ELSE</div>
+  <p style="margin-bottom:0">
+    <code>CASE WHEN … THEN 1 END</code> with no <code>ELSE</code> yields <code>NULL</code> for
+    non-matches, and <code>COUNT</code> ignores nulls — which is exactly what you want. Writing
+    <code>ELSE 0</code> there would count everything. For <code>SUM</code> the reverse is true:
+    <code>ELSE 0</code> is harmless and makes the intent obvious.
+  </p>
+</div>
+
+<h2 id="rollup">GROUPING SETS, ROLLUP and CUBE</h2>
+
+<p>
+  Subtotals in one pass, rather than three queries glued together with <code>UNION ALL</code>:
+</p>
+
+<pre><code>-- Total per region, per region+city, and a grand total — one scan.
+SELECT region, city, SUM(total_cents) AS spend
+FROM v_orders_geo
+GROUP BY ROLLUP (region, city);
+
+-- region      city      spend
+-- Emilia-R.   Modena    412000
+-- Emilia-R.   Parma     318000
+-- Emilia-R.   NULL      730000   ← subtotal
+-- NULL        NULL     1240000   ← grand total</code></pre>
+
+<p>
+  Those <code>NULL</code>s are ambiguous — is it a subtotal, or a genuine null city? —
+  which is what <code>GROUPING()</code> is for: it returns 1 when the null was produced by the
+  rollup. <code>GROUPING SETS</code> gives you arbitrary combinations; <code>CUBE</code> gives you
+  all of them.
+</p>
+
+<div class="tryit">
+  <pre><code>-- The report shape you will be asked for in a screening test:
+-- monthly revenue, order count, and average order value, 2026, biggest month first.
+SELECT strftime('%Y-%m', placed_at)          AS month,
+       COUNT(*)                              AS orders,
+       SUM(total_cents) / 100.0              AS revenue_eur,
+       ROUND(AVG(total_cents) / 100.0, 2)    AS avg_order_eur
+FROM orders
+WHERE placed_at &gt;= '2026-01-01' AND placed_at &lt; '2027-01-01'
+  AND status &lt;&gt; 'cancelled'
+GROUP BY month
+ORDER BY revenue_eur DESC;</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li><code>GROUP BY</code> changes the grain: one output row now stands for many input rows.</li>
+    <li>Every selected column must be grouped or aggregated. MySQL's old behaviour of picking one arbitrarily is worse than an error.</li>
+    <li><code>COUNT(*)</code> counts rows; <code>COUNT(col)</code> counts non-nulls; <code>COUNT(1)</code> is identical to <code>COUNT(*)</code> and no faster.</li>
+    <li><code>COUNT(DISTINCT)</code> needs a sort or hash. Several in one query is a common cause of a slow dashboard.</li>
+    <li>A condition without an aggregate belongs in <code>WHERE</code>, not <code>HAVING</code>.</li>
+    <li>Conditional aggregation answers several questions in one scan, because aggregates ignore nulls.</li>
+    <li>In <code>COUNT(CASE …)</code> omit the <code>ELSE</code>; in <code>SUM(CASE …)</code> write <code>ELSE 0</code>.</li>
+    <li><code>ROLLUP</code> produces subtotals in one pass; <code>GROUPING()</code> tells you which nulls it created.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q"><code>WHERE</code> or <code>HAVING</code> — which and why?</p>
+  <p class="a"><code>WHERE</code> filters rows before grouping and can use an index;
+    <code>HAVING</code> filters groups after and is the only option for a condition on an
+    aggregate. Anything that does not mention an aggregate should be in <code>WHERE</code>, so the
+    grouping does less work.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Count shipped and cancelled orders per customer in one query.</p>
+  <p class="a">Conditional aggregation:
+    <code>COUNT(CASE WHEN status='shipped' THEN 1 END)</code> and the same for cancelled, grouped
+    by customer. One scan instead of two, and the null-ignoring behaviour of <code>COUNT</code> is
+    what makes it work.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Is <code>COUNT(1)</code> faster than <code>COUNT(*)</code>?</p>
+  <p class="a">No. Every mainstream optimiser treats them identically; the plans are the same. The
+    real distinction is <code>COUNT(column)</code>, which skips nulls and is a different question.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

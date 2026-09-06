@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Leaderboard — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="leaderboard">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Optional</p>
+<h1>Leaderboard</h1>
+<p class="lede">The fifty learners with the most XP who have not opted out.</p>
+
+<div id="out"></div>
+
+<h2 id="honest">What this is, exactly</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ It is a nudge, not an audit</div>
+  <p>
+    Your progress document lives in your browser and you can edit it. The server
+    <strong>re-derives</strong> the four figures shown here from that document rather than trusting
+    a summary the browser asserted — which raises the effort a little and proves nothing, because
+    the document itself is yours.
+  </p>
+  <p style="margin-bottom:0">
+    Building defences that do not hold would be worse than saying this. So: treat it as motivation
+    if it motivates you, and ignore it entirely if it does not. The number that means something is
+    on your <a href="dashboard.html">dashboard</a>, and even that is only a fact about your answers
+    to these questions.
+  </p>
+</div>
+
+<div class="box note">
+  <div class="box-title">Mastery is computed twice, on purpose — and checked</div>
+  <p style="margin-bottom:0">
+    The same formula runs in your browser (<code>mastery()</code> in <code>store.js</code>) and on
+    the server, because the leaderboard has to <em>order</em> by it. Two implementations of one
+    formula is exactly how two systems come to disagree, so: rounding is half-up in both, the
+    denominator has <strong>one</strong> source — the server counts the chapters it serves rather
+    than keeping its own configured number — and <code>tools/doctor.mjs</code> fails the build if
+    anything in <code>api/</code> hard-codes a chapter count. That drift is a documented failure in
+    the system this platform was modelled on; it is fixed here by removing the second source, not
+    by keeping them in step by hand.
+  </p>
+</div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+(function () {
+  if (!window.LF || !window.LFAccount) return;
+  var A = window.LFAccount;
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+  function render() {
+    var out = document.getElementById("out");
+    out.innerHTML = "";
+    var s = A.state();
+
+    if (!s.configured) {
+      var p = el("div", "panel");
+      p.appendChild(el("h3", "", "No server configured"));
+      p.appendChild(el("p", "muted", "The leaderboard needs the accounts service. This page was opened from a file, so there is no origin to guess."));
+      var a = el("a", "btn ghost", "Set the API address →");
+      a.href = "account.html";
+      p.appendChild(a);
+      out.appendChild(p);
+      return;
+    }
+    if (!s.signedIn) {
+      var q = el("div", "panel");
+      q.appendChild(el("h3", "", "Sign in to see it"));
+      q.appendChild(el("p", "muted", "The leaderboard is the one thing here that needs an account — because it is a list of accounts."));
+      var b = el("a", "btn ghost", "Account →");
+      b.href = "account.html";
+      q.appendChild(b);
+      out.appendChild(q);
+      return;
+    }
+
+    out.appendChild(el("p", "muted", "Loading…"));
+    A.leaderboard().then(function (rows) {
+      out.innerHTML = "";
+      if (!rows.length) {
+        out.appendChild(el("p", "muted", "Nobody is visible yet."));
+        return;
+      }
+      var wrap = el("div", "table-wrap");
+      var t = el("table", "lb");
+      var thead = el("thead");
+      var tr = el("tr");
+      ["", "Name", "XP", "Mastery", "Streak", "Passed"].forEach(function (h) { tr.appendChild(el("th", "", h)); });
+      thead.appendChild(tr);
+      t.appendChild(thead);
+      var tb = el("tbody");
+      rows.forEach(function (r, i) {
+        var row = el("tr", r.isYou ? "you" : "");
+        row.appendChild(el("td", "rk", String(i + 1)));
+        row.appendChild(el("td", "", r.displayName + (r.isYou ? "  ← you" : "")));
+        row.appendChild(el("td", "num", String(r.xp)));
+        row.appendChild(el("td", "num", (r.masteryPercent || 0).toFixed(1) + "%"));
+        row.appendChild(el("td", "num", String(r.streakDays || 0)));
+        row.appendChild(el("td", "num", String(r.chaptersPassed || 0)));
+        tb.appendChild(row);
+      });
+      t.appendChild(tb);
+      wrap.appendChild(t);
+      out.appendChild(wrap);
+    }).catch(function (e) {
+      out.innerHTML = "";
+      out.appendChild(el("div", "msg err", e.message));
+    });
+  }
+
+  window.LF.on("account", render);
+  render();
+})();
+</script>
+</body>
+</html>

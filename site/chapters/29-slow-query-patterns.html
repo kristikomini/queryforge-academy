@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>29 &middot; The queries that are always slow &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="29-slow-query-patterns">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 4 — Fast at scale <span>&rsaquo;</span> Chapter 29</p>
+<h1>The queries that are always slow</h1>
+<p class="lede">A checklist of ten shapes. If a query is slow, it is almost certainly one of them.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottimizzazione e tuning delle query&rdquo;</em> &mdash; this chapter is the checklist.
+  If a query is slow, it is almost certainly one of these ten shapes.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Most slow things are slow for boring reasons. Before you invent a clever explanation, check the
+    ten boring ones — the same way a mechanic checks the fuel before rebuilding the engine.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    The ten shapes below are not a miscellany — they fall into three families, and naming the family
+    is usually enough to find the fix. <strong>Predicates the optimiser cannot use</strong>
+    (1, 2, 7): the query <em>could</em> seek and does not. <strong>Row-at-a-time work</strong>
+    (4, 5, 6): a set-based engine being asked to behave like a loop, once per row.
+    <strong>Doing more than was asked</strong> (3, 8, 9, 10): reading columns, rows or groups that
+    the caller never uses. A slow query is nearly always one of those three sentences, and saying
+    which one — before touching the plan — is what makes the diagnosis quick.
+  </p>
+</div>
+
+<h2 id="one">1 · A function wrapping the filtered column</h2>
+<pre><code>WHERE YEAR(placed_at) = 2026                 -- scan
+WHERE placed_at &gt;= '2026-01-01' AND placed_at &lt; '2027-01-01'   -- seek</code></pre>
+<p class="small muted">The commonest single cause. See <a href="07-predicates-and-sargability.html">chapter 07</a>.</p>
+
+<h2 id="two">2 · Implicit conversion</h2>
+<pre><code>WHERE vat_number = 12345678901     -- column is VARCHAR: converts every row, loses the index
+WHERE vat_number = '12345678901'</code></pre>
+<p class="small muted">
+  Invisible: the query is correct and returns the right answer, merely a hundred times slower. Very
+  often introduced by an ORM binding <code>NVARCHAR</code> against a <code>VARCHAR</code> column.
+</p>
+
+<h2 id="three">3 · <code>SELECT *</code></h2>
+<p>
+  Three costs, ascending in importance: bytes nobody asked for; forced off-page LOB reads; and —
+  the real one — it <strong>prevents a covering index from covering</strong>, turning an index-only
+  scan into a seek plus a lookup per row. It also breaks silently when someone adds a column.
+</p>
+
+<h2 id="four">4 · N+1</h2>
+<pre><code>SELECT id FROM orders WHERE customer_id = 42;      -- 500 rows
+-- then, in a loop, 500 times:
+SELECT * FROM order_lines WHERE order_id = ?;</code></pre>
+<div class="box trap">
+  <div class="box-title">⚠ Why this one hides</div>
+  <p style="margin-bottom:0">
+    Every individual query is fast, so nothing appears in a slow-query log and nothing looks
+    expensive in a plan. It only surfaces when you sort the plan cache by <strong>total</strong>
+    duration, or count round trips. At 0.5&nbsp;ms of network per call, 500 calls is a quarter of a
+    second of doing nothing at all. See <a href="38-the-orm-boundary.html">chapter 38</a>.
+  </p>
+</div>
+
+<h2 id="five">5 · A cursor or a row-by-row loop</h2>
+<pre><code>-- Anything shaped like this in T-SQL or PL/SQL:
+DECLARE c CURSOR FOR SELECT id FROM orders WHERE status = 'confirmed';
+OPEN c; FETCH NEXT FROM c INTO @id;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+  UPDATE orders SET total_cents = (...) WHERE id = @id;   -- one statement per row
+  FETCH NEXT FROM c INTO @id;
+END</code></pre>
+<p>
+  Ten thousand statements, ten thousand plans looked up, ten thousand log records. The set-based
+  equivalent is one statement. The rare legitimate cursor: calling an external procedure per row,
+  or deliberately batching a huge update to avoid lock escalation — and in that case say so in a
+  comment, because the next reader will assume you did not know better.
+</p>
+
+<h2 id="six">6 · Scalar user-defined functions in the SELECT or WHERE</h2>
+<pre><code>SELECT id, dbo.fn_CalculateTax(total_cents) FROM orders;   -- ~1.8 million rows</code></pre>
+<p>
+  Before SQL Server 2019, that function was executed <strong>once per row</strong>, with no
+  costing, and it made the whole query serial. Inlining (2019+) helps, but only for functions
+  simple enough to inline. The portable fix is to express the logic as an inline table-valued
+  function used with <code>CROSS APPLY</code>, or as a plain expression.
+</p>
+
+<h2 id="seven">7 · <code>OR</code> across different columns</h2>
+<pre><code>WHERE email = ? OR phone = ?
+-- becomes:
+SELECT ... WHERE email = ? UNION SELECT ... WHERE phone = ?</code></pre>
+
+<h2 id="eight">8 · <code>OFFSET</code> deep in a result set</h2>
+<pre><code>ORDER BY placed_at DESC OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;
+-- reads 100 020 rows to return 20</code></pre>
+<p class="small muted">See <a href="30-pagination.html">chapter 30</a> for keyset pagination.</p>
+
+<h2 id="nine">9 · <code>COUNT(DISTINCT …)</code>, several times, on a dashboard</h2>
+<p>
+  Each one needs a sort or hash of all values and none of them parallelise well. Four in one query
+  is four times the cost. Pre-aggregate, or use an approximate count for a dashboard tile.
+</p>
+
+<h2 id="ten">10 · The optional-parameter <code>WHERE</code></h2>
+<pre><code>WHERE (@customer_id IS NULL OR customer_id = @customer_id)
+  AND (@status      IS NULL OR status      = @status)</code></pre>
+<p>
+  One cached plan for every combination of supplied parameters. Fix with
+  <code>OPTION (RECOMPILE)</code> or safe parameterised dynamic SQL.
+</p>
+
+<h2 id="method">The order to check them in</h2>
+
+<div class="box good">
+  <div class="box-title">✔ Two minutes, before opening a plan</div>
+  <ol style="margin-bottom:0">
+    <li>Is the filtered column wrapped in anything? (1, 2)</li>
+    <li>Is this one slow query, or many fast ones? (4) — sort by <em>total</em> duration.</li>
+    <li>Is there a loop, a cursor or a scalar function? (5, 6)</li>
+    <li>Does it return far more columns or rows than the caller uses? (3, 8)</li>
+    <li>Only then: open the actual plan and look for the estimate gap
+      (<a href="27-execution-plans.html">chapter 27</a>).</li>
+  </ol>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ The other four causes, which are not query shapes at all</div>
+  <p style="margin-bottom:0">
+    If none of the ten fit, the problem is probably not the query: <strong>blocking</strong>
+    (chapter 23), <strong>a bad cached plan</strong> (chapter 28), <strong>missing
+    statistics</strong> (chapter 28), or <strong>the server</strong> — memory pressure, a saturated
+    disk, another workload. Chapter 42 is how to tell which, and looking there before rewriting SQL
+    saves a lot of wasted rewriting.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- The classic "optimise this" exercise. Rewrite it, then compare the plans.
+SELECT DISTINCT c.name,
+       (SELECT COUNT(*)         FROM orders o WHERE o.customer_id = c.id) AS n,
+       (SELECT SUM(total_cents) FROM orders o WHERE o.customer_id = c.id) AS spend
+FROM customers c
+JOIN orders o2 ON o2.customer_id = c.id
+WHERE strftime('%Y', o2.placed_at) = '2026';
+
+-- Four problems: a non-sargable date filter, two correlated subqueries over the
+-- same table, a join that is only there to filter (so it fans out), and the
+-- DISTINCT hiding that fan-out. The answer is in course/SOLUTIONS.md.</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Ten shapes cover almost every slow query. Check them before theorising.</li>
+    <li>A function or a conversion on the filtered column is the single commonest cause.</li>
+    <li><code>SELECT *</code>'s real cost is that it stops an index covering the query.</li>
+    <li>N+1 is invisible in every per-query report. Sort by total duration to see it.</li>
+    <li>A cursor is ten thousand statements. If one is genuinely right, comment why.</li>
+    <li>A scalar UDF in a predicate is a black box: no estimate, no parallelism, once per row.</li>
+    <li>Deep <code>OFFSET</code> reads and discards everything before the page.</li>
+    <li>Several <code>COUNT(DISTINCT)</code>s in one query multiply an already-expensive operation.</li>
+    <li>If none of the ten fit, look at blocking, plans, statistics and the server before rewriting SQL.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">Give me some common causes of slow queries.</p>
+  <p class="a">Non-sargable predicates — a function or an implicit conversion on the filtered
+    column; N+1 from the application; <code>SELECT *</code> defeating a covering index; cursors and
+    scalar UDFs forcing row-at-a-time work; deep <code>OFFSET</code> pagination; and the
+    optional-parameter <code>WHERE</code> that caches one plan for every shape. If none fit, it is
+    usually blocking, a bad cached plan, or the server.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why avoid <code>SELECT *</code> in production code?</p>
+  <p class="a">It moves bytes nobody needs, can force off-page LOB reads, and — most importantly —
+    prevents a covering index from covering, so a cheap index-only scan becomes a seek plus a
+    lookup per row. It also silently changes behaviour when someone adds a column.</p>
+</div>
+
+<div class="qa">
+  <p class="q">When is a cursor acceptable?</p>
+  <p class="a">When each row genuinely requires a separate external action — calling a procedure,
+    sending something — or when you are deliberately batching a huge update to avoid lock
+    escalation. Both cases deserve a comment saying so, because the default assumption on reading a
+    cursor is that the author did not know the set-based form.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

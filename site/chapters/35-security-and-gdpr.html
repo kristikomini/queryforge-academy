@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>35 &middot; Users, roles, least privilege and GDPR &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="35-security-and-gdpr">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 5 — Building it properly <span>&rsaquo;</span> Chapter 35</p>
+<h1>Users, roles, least privilege and GDPR</h1>
+<p class="lede">GRANT and REVOKE, row-level security, encryption at rest vs in transit, and what GDPR asks of a schema.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Conoscenza dei principi di sicurezza dei dati e GDPR&rdquo;</em> &mdash; a table of Italian customers
+  is a legal object as well as a technical one, and the schema is where several of the obligations
+  actually land.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="privilege">Least privilege, concretely</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    The person who waters the plants gets a key to the front door, not to the safe. Not because you
+    distrust them — because if they lose the key, you have only lost the plants.
+  </p>
+</div>
+
+<pre><code>-- Grant to ROLES, assign roles to users. Never grant to a person: people leave,
+-- roles do not, and a role is a sentence about a job rather than about a name.
+CREATE ROLE app_readwrite;
+GRANT SELECT, INSERT, UPDATE ON orders, order_lines TO app_readwrite;
+GRANT SELECT                  ON products, customers  TO app_readwrite;
+-- Note what is absent: DELETE, DDL, and any access to the audit tables.
+
+CREATE ROLE reporting_readonly;
+GRANT SELECT ON v_orders_geo, v_order_totals TO reporting_readonly;
+-- Views only. The analyst never sees a column the view does not expose.
+
+GRANT app_readwrite TO svc_orders_api;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the application logs in as the owner</div>
+  <p style="margin-bottom:0">
+    The commonest real-world finding. The connection string uses <code>sa</code>,
+    <code>postgres</code>, or the schema owner, so an injection flaw anywhere becomes total
+    compromise, a bug can drop a table, and every audit trail says the same username. Separate
+    accounts for <strong>migrations</strong> (DDL), <strong>the application</strong> (DML on its own
+    tables) and <strong>reporting</strong> (SELECT on views) costs one afternoon and changes the
+    blast radius of every other mistake.
+  </p>
+</div>
+
+<h2 id="rls">Row-level security</h2>
+
+<p>
+  Multi-tenant systems usually filter by tenant in application code — which works until one query
+  forgets. RLS moves the rule into the database, where it cannot be forgotten:
+</p>
+
+<pre><code>-- PostgreSQL
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON orders
+  USING (tenant_id = current_setting('app.tenant_id')::int);
+-- Every query against orders now silently carries that predicate.
+-- The application sets: SET LOCAL app.tenant_id = '42';
+
+-- SQL Server: an inline table-valued function plus a security policy.
+CREATE SECURITY POLICY TenantFilter
+  ADD FILTER PREDICATE dbo.fn_tenant_predicate(tenant_id) ON dbo.orders;</code></pre>
+
+<div class="box note">
+  <div class="box-title">Two things to know about it</div>
+  <ol style="margin-bottom:0">
+    <li>The predicate is added to every query, so it must be <strong>indexable</strong> — a policy
+      calling a slow function turns every query into that function's cost.</li>
+    <li>It does not apply to the table owner or to superusers unless you say so
+      (<code>FORCE ROW LEVEL SECURITY</code>), which is exactly the case where people believe they
+      have tested it and have not.</li>
+  </ol>
+</div>
+
+<h2 id="encryption">Encryption: three different things</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Kind</th><th>Protects against</th><th>Does NOT protect against</th></tr></thead>
+<tbody>
+<tr><td><strong>In transit</strong> (TLS)</td><td>Network interception</td><td>Anything at either end</td></tr>
+<tr><td><strong>At rest</strong> (TDE, filesystem)</td><td>A stolen disk or backup file</td><td><strong>Any authenticated query.</strong> The engine decrypts transparently</td></tr>
+<tr><td><strong>Column-level / application-level</strong></td><td>A DBA or an attacker reading the table</td><td>Being searchable, sortable or joinable — you gave that up</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — "the database is encrypted" answers almost nothing</div>
+  <p style="margin-bottom:0">
+    Transparent Data Encryption protects the <em>files</em>. It does not protect against a
+    compromised application account, an injection flaw, or a curious DBA — because for anyone
+    holding a valid connection, the data is simply there. It is genuinely valuable for lost
+    backups and decommissioned disks, and it is not a defence against the threat most people are
+    imagining when they say it. Being precise about that separates a real answer from a compliance
+    checkbox.
+  </p>
+</div>
+
+<h2 id="gdpr">What GDPR actually asks of a schema</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The obligations that land on the database designer</div>
+  <ul style="margin-bottom:0">
+    <li><strong>Data minimisation (Art. 5).</strong> Do not store a personal data field you have no
+      purpose for. A column that exists because "we might want it" is a liability with storage
+      costs. This site's own <a href="../account.html">accounts service</a> stores no email address
+      for exactly this reason, and says so.</li>
+    <li><strong>Erasure (Art. 17).</strong> You must be able to delete a person's data on request.
+      That is a schema question: can you <em>find</em> everything about one person? Foreign keys
+      and a documented data map are what make the answer yes.</li>
+    <li><strong>Portability (Art. 20).</strong> Export it in a machine-readable form — which is a
+      query you should have written before somebody asks for it.</li>
+    <li><strong>Storage limitation (Art. 5).</strong> A retention policy, implemented as a
+      scheduled job, not as an intention.</li>
+    <li><strong>Records and access control (Art. 30, 32).</strong> Who accessed personal data, and
+      when. That is an audit trail — and see <a href="33-views-procs-functions-triggers.html">chapter
+      33</a> on why a trigger is the honest place for it.</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The tension worth naming out loud</div>
+  <p style="margin-bottom:0">
+    <strong>Erasure conflicts with immutable accounting records.</strong> You cannot delete an
+    invoice; Italian tax law requires it be kept for ten years, and Article 17 has an explicit
+    exemption for legal obligations. The usual resolution is
+    <strong>pseudonymisation</strong>: delete or hash the identifying columns, keep the transaction
+    with a non-identifying key. Knowing that the two requirements collide, and that the answer is
+    pseudonymisation rather than "delete everything" or "keep everything", is precisely the kind of
+    thing that distinguishes someone who has done this from someone who has read about it.
+  </p>
+</div>
+
+<pre><code>-- Pseudonymisation in practice: the person disappears, the accounting does not.
+UPDATE customers
+SET name        = 'ERASED',
+    email       = 'erased+' || id || '@invalid',   -- keeps the unique constraint valid
+    vat_number  = NULL,
+    erased_at   = now()
+WHERE id = :id;
+-- orders, order_lines and payments are untouched: they reference customer_id,
+-- which is now a meaningless surrogate. Which is what a surrogate key is for.</code></pre>
+
+<h2 id="masking">Masking, and what it is worth</h2>
+
+<pre><code>-- SQL Server dynamic data masking: non-privileged users see a masked value.
+ALTER TABLE customers ALTER COLUMN email
+  ADD MASKED WITH (FUNCTION = 'email()');
+-- 'mario.rossi@esempio.it'  ->  'mXXX@XXXX.com'</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Masking is a display feature, not a security boundary</div>
+  <p style="margin-bottom:0">
+    Microsoft's own documentation says so. A user who can <em>query</em> the column can infer it:
+    <code>WHERE email LIKE 'a%'</code> still filters on the real value, so a few dozen queries
+    recover it. It is useful for keeping production data off a support screen. It is not a
+    substitute for not granting access.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Grant to roles, not people. Roles outlive employees and describe a job.</li>
+    <li>Separate accounts for migrations, the application and reporting. It changes the blast radius of every other mistake.</li>
+    <li>An application connecting as the owner turns any injection flaw into total compromise.</li>
+    <li>Row-level security moves a tenant filter into the database, where it cannot be forgotten — and its predicate must be indexable.</li>
+    <li>Encryption at rest protects stolen disks and backups, not authenticated queries.</li>
+    <li>Column-level encryption costs you searching, sorting and joining on that column.</li>
+    <li>Data minimisation is a schema decision: a column with no purpose is a liability.</li>
+    <li>Erasure requires knowing where a person's data is. That is a data map plus foreign keys.</li>
+    <li>Erasure and accounting retention conflict; pseudonymisation is the standard resolution.</li>
+    <li>Dynamic data masking is a display feature and can be inferred around.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">How would you secure a database for an application?</p>
+  <p class="a">Separate accounts by purpose — migrations get DDL, the application gets DML on its
+    own tables and nothing else, reporting gets SELECT on views. Grants go to roles, not users. TLS
+    in transit and encryption at rest for the backups. Then verify what the application account can
+    actually do, because the finding is almost always that it is the owner.</p>
+</div>
+
+<div class="qa">
+  <p class="q">A customer asks to be forgotten, but their invoices must be kept ten years. What do you do?</p>
+  <p class="a">Pseudonymise rather than delete: clear or hash the identifying columns on the
+    customer record and keep the transactions, which reference a surrogate key that no longer
+    identifies anyone. GDPR Article 17 has an explicit exemption for legal obligations, so the two
+    requirements are reconcilable — but only if the schema separates identity from transaction.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Is encryption at rest enough?</p>
+  <p class="a">It protects a stolen disk or backup file. It does nothing against a compromised
+    application account or an injection flaw, because the engine decrypts transparently for anyone
+    with a valid connection. It is worth having and it answers a narrower question than people
+    usually mean.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

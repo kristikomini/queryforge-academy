@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Account — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="account">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Optional</p>
+<h1>Account</h1>
+<p class="lede">
+  An account exists for exactly one reason: to carry your progress between a laptop and a phone.
+  <strong>Nothing on this site is behind it.</strong>
+</p>
+
+<div class="box note">
+  <div class="box-title">There is no email address, anywhere</div>
+  <p>
+    The login is a username. There is no <code>email</code> column and no mail transport, and those
+    two facts are the same decision: an address this service could never send to could never be
+    verified, never be written to and never recover an account — so storing one would be personal
+    data collected for no purpose, which is precisely what GDPR's data-minimisation principle
+    exists to stop.
+  </p>
+  <p style="margin-bottom:0">
+    Which leaves the obvious question, and it has an honest answer rather than a comfortable one.
+    See the recovery-code box below.
+  </p>
+</div>
+
+<div id="state"></div>
+
+<div id="signed-out" hidden>
+  <div class="grid-2">
+    <div class="panel">
+      <h3 style="margin-top:0">Create an account</h3>
+      <label class="field"><span>Username</span><input id="r-user" autocomplete="username">
+        <div class="hint">Letters, digits, dot, dash, underscore. 3–32 characters.</div></label>
+      <label class="field"><span>Display name <span class="muted">(optional)</span></span><input id="r-name" autocomplete="nickname">
+        <div class="hint">Shown on the leaderboard if you choose to appear there.</div></label>
+      <label class="field"><span>Password</span><input id="r-pass" type="password" autocomplete="new-password">
+        <div class="hint">Minimum 10 characters. Hashed with Argon2id; the server never sees it again.</div></label>
+      <button class="btn" id="do-register">Create account</button>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin-top:0">Sign in</h3>
+      <label class="field"><span>Username</span><input id="l-user" autocomplete="username"></label>
+      <label class="field"><span>Password</span><input id="l-pass" type="password" autocomplete="current-password"></label>
+      <button class="btn" id="do-login">Sign in</button>
+      <p class="small muted" style="margin:12px 0 0">
+        Lost the password? <a href="#" id="show-forgot">Use your recovery code</a>.
+      </p>
+    </div>
+  </div>
+
+  <div class="panel" id="forgot" hidden style="margin-top:16px">
+    <h3 style="margin-top:0">Reset with a recovery code</h3>
+    <label class="field"><span>Username</span><input id="f-user"></label>
+    <label class="field"><span>Recovery code</span><input id="f-code" placeholder="A1B2C-D3E4F-G5H6J-K7L8M">
+      <div class="hint">Case-insensitive; dashes and spaces are ignored, and I/L are read as 1, O as 0.</div></label>
+    <button class="btn ghost" id="do-forgot">Check the code</button>
+    <div id="reset-part" hidden style="margin-top:14px">
+      <label class="field"><span>New password</span><input id="f-pass" type="password" autocomplete="new-password"></label>
+      <button class="btn" id="do-reset">Set the new password</button>
+    </div>
+  </div>
+</div>
+
+<div id="signed-in" hidden>
+  <div class="panel">
+    <h3 style="margin-top:0">Signed in</h3>
+    <div id="who"></div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="do-sync">Sync now</button>
+      <button class="btn quiet" id="do-logout">Sign out</button>
+      <a class="btn quiet" href="leaderboard.html">Leaderboard</a>
+    </div>
+    <p class="small muted" style="margin:14px 0 0">
+      Sync runs automatically four seconds after any change. Signing out never touches your local
+      progress — it only forgets the token.
+    </p>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h3 style="margin-top:0">Recovery code</h3>
+    <p class="small">
+      Replace it with a new one at any time. The old one stops working immediately, and the new one
+      is shown <strong>once</strong>.
+    </p>
+    <button class="btn ghost" id="do-newcode">Issue a new recovery code</button>
+    <div id="code-out"></div>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h3 style="margin-top:0">Leaderboard visibility</h3>
+    <label class="field" style="margin-bottom:0">
+      <input type="checkbox" id="vis"> Show me on the leaderboard
+      <div class="hint">Opt-<em>out</em>, not opt-in: you are visible by default, and one click removes you.</div>
+    </label>
+  </div>
+
+  <div class="panel" style="margin-top:16px">
+    <h3 style="margin-top:0">Delete this account</h3>
+    <p class="small">
+      Removes the account, its stored progress and every session, immediately and permanently. Your
+      <strong>local</strong> progress in this browser is untouched — export it from the
+      <a href="dashboard.html">dashboard</a> first if you want a copy.
+    </p>
+    <button class="btn quiet" id="do-delete" style="border-color:var(--bad);color:var(--bad)">Delete account</button>
+  </div>
+</div>
+
+<h2 id="server">Where is the server?</h2>
+<div class="panel">
+  <label class="field">
+    <span>API address</span>
+    <input id="base" placeholder="http://localhost:5057">
+    <div class="hint">
+      Served over http(s), the API is this same origin and there is nothing to configure. Opened
+      from <code>file://</code> there is no origin to guess, so it stays empty until you type one.
+      <strong>Changing it necessarily signs you out</strong> — the token in this browser was minted
+      by the old server — but it leaves local progress alone, which is what makes it safe to let
+      anyone do.
+    </div>
+  </label>
+  <button class="btn quiet" id="save-base">Use this address</button>
+</div>
+
+<h2 id="honest">The honest parts</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ A lost recovery code is a lost account</div>
+  <p>
+    Every account is issued a <strong>recovery code</strong> at registration: 20 characters of
+    Crockford base32 (about 100 bits), grouped in fives, shown exactly once, and stored only as a
+    SHA-256 hash. Presenting it mints the reset ticket that an emailed link would otherwise have
+    carried. It is spent on use and replaced.
+  </p>
+  <p style="margin-bottom:0">
+    What it honestly is <strong>not</strong> is proof that anyone can still reach you — an email
+    loop also confirms the mailbox works. If you lose the code, there is no way round it, and this
+    page will not pretend otherwise. Keep it somewhere a browser cannot clear. It is deliberately
+    never written to <code>localStorage</code> for exactly that reason.
+  </p>
+</div>
+
+<div class="box note">
+  <div class="box-title">What the server stores</div>
+  <ul style="margin-bottom:0">
+    <li>A username, a display name, a password hash, and a hash of the recovery code.</li>
+    <li>Your progress document — the same JSON you can export from the dashboard.</li>
+    <li>Four figures <em>re-derived</em> from that document for the leaderboard: XP, mastery,
+      streak and chapters passed. They are recomputed server-side rather than trusted from the
+      browser — which raises the effort slightly and proves nothing, because the document is yours
+      to edit. The leaderboard is a nudge, not an audit, and it says so.</li>
+  </ul>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ Two devices at once is the normal case, not the exception</div>
+  <p style="margin-bottom:0">
+    You answer questions on a laptop and review cards on a phone. Last-write-wins would silently
+    throw one of them away, so the sync <strong>merges field by field and never removes
+    anything</strong>: XP takes the maximum, badges keep the earlier timestamp, a card's schedule is
+    owned by whichever device reviewed it most recently while its repetition and lapse counts take
+    the maximum of both. Losing a month of study to a sync bug is unrecoverable; a stale note is
+    not.
+  </p>
+</div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+(function () {
+  if (!window.LF || !window.LFAccount) return;
+  var A = window.LFAccount;
+  function $(id) { return document.getElementById(id); }
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+  function msg(kind, text, host) {
+    var d = el("div", "msg " + kind, text);
+    (host || $("state")).appendChild(d);
+    return d;
+  }
+
+  function paint() {
+    var s = A.state();
+    $("state").innerHTML = "";
+    $("base").value = s.base || "";
+
+    if (!s.configured) {
+      msg("warn", "No API address configured. This page was opened from a file, so there is no origin to guess — type one below. Everything else on the site works without it.");
+    }
+    if (s.lastError) msg("err", "Last sync failed: " + s.lastError);
+    if (s.signedIn && s.syncedAt) msg("ok", "Last synced " + new Date(s.syncedAt).toLocaleTimeString() + (s.syncing ? " · syncing…" : ""));
+
+    $("signed-out").hidden = s.signedIn;
+    $("signed-in").hidden = !s.signedIn;
+
+    if (s.signedIn && s.user) {
+      $("who").innerHTML = "";
+      $("who").appendChild(el("p", "", (s.user.displayName || s.user.username) + "  ·  @" + s.user.username));
+      $("who").appendChild(el("p", "small muted", "Revision " + s.revision + " on the server."));
+    }
+  }
+
+  function showCode(code) {
+    var host = $("code-out");
+    host.innerHTML = "";
+    host.appendChild(el("div", "msg warn", "This is shown ONCE. Write it down somewhere a browser cannot clear — it is deliberately never saved to localStorage."));
+    host.appendChild(el("div", "code-out", code));
+  }
+
+  $("do-register").onclick = function () {
+    A.register($("r-user").value.trim(), $("r-name").value.trim(), $("r-pass").value)
+      .then(function (r) {
+        paint();
+        if (r.recoveryCode) showCode(r.recoveryCode);
+        return A.sync();
+      })
+      .then(paint)
+      .catch(function (e) { msg("err", e.message); });
+  };
+
+  $("do-login").onclick = function () {
+    A.login($("l-user").value.trim(), $("l-pass").value)
+      .then(function () { paint(); return A.sync(); })
+      .then(paint)
+      .catch(function (e) { msg("err", e.message); });
+  };
+
+  $("show-forgot").onclick = function (e) { e.preventDefault(); $("forgot").hidden = false; };
+
+  var resetToken = "";
+  $("do-forgot").onclick = function () {
+    A.forgot($("f-user").value.trim(), $("f-code").value.trim())
+      .then(function (r) {
+        resetToken = r.resetToken;
+        $("reset-part").hidden = false;
+        msg("ok", "Code accepted. Set a new password within " + Math.round(r.expiresInSeconds / 60) + " minutes.");
+      })
+      .catch(function (e) { msg("err", e.message); });
+  };
+  $("do-reset").onclick = function () {
+    A.resetPassword(resetToken, $("f-pass").value)
+      .then(function (r) {
+        paint();
+        if (r.recoveryCode) showCode(r.recoveryCode);
+        msg("ok", "Password changed, and a fresh recovery code has been issued — the old one no longer works.");
+      })
+      .catch(function (e) { msg("err", e.message); });
+  };
+
+  $("do-sync").onclick = function () { A.sync().then(paint); };
+  $("do-logout").onclick = function () { A.logout().then(paint); };
+  $("do-newcode").onclick = function () {
+    A.newRecoveryCode().then(function (r) { showCode(r.recoveryCode); })
+      .catch(function (e) { msg("err", e.message); });
+  };
+  $("vis").onchange = function () {
+    A.setVisible($("vis").checked).catch(function (e) { msg("err", e.message); });
+  };
+  $("do-delete").onclick = function () {
+    if (!confirm("Delete the account, its stored progress and all sessions? Local progress in this browser is not affected. This cannot be undone.")) return;
+    A.deleteAccount().then(paint).catch(function (e) { msg("err", e.message); });
+  };
+  $("save-base").onclick = function () {
+    A.setBase($("base").value);
+    paint();
+    msg("ok", "API address saved. You have been signed out of this browser, because the token here was minted by the previous server. Local progress is untouched.");
+  };
+
+  window.LF.on("account", paint);
+  paint();
+})();
+</script>
+</body>
+</html>

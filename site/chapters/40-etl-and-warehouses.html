@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>40 &middot; ETL, ELT, warehouses and dbt &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="40-etl-and-warehouses">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 6 — Data at work <span>&rsaquo;</span> Chapter 40</p>
+<h1>ETL, ELT, warehouses and dbt</h1>
+<p class="lede">SSIS in the Italian market, idempotent loads, watermarks, and why ELT won.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Esperienza nello sviluppo ETL con SSIS&rdquo;</em> &mdash; SSIS is still everywhere in
+  Italian SQL Server shops, and the problems it solves are the same ones dbt and Airflow solve
+  elsewhere.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="elt">ETL, ELT, and why the order changed</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Old way: wash and chop the vegetables on the doorstep, then carry them in. New way: carry
+    everything in first, then wash and chop in the kitchen — because the kitchen turned out to be
+    much better equipped than the doorstep, and because if you chopped something wrong you still
+    have the original.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    <strong>ETL</strong> transforms in a separate engine — an SSIS data-flow, a Python script —
+    before loading. <strong>ELT</strong> loads raw data first and transforms with SQL inside the
+    warehouse. ELT won for three reasons: warehouse compute became cheap and elastic, SQL is
+    reviewable and testable in a way a drag-and-drop data-flow is not, and
+    <strong>keeping the raw data means a transformation bug is re-runnable</strong> rather than a
+    request to the source system for last month's extract again. That third reason is the one that
+    actually changes your life.
+  </p>
+</div>
+
+<h2 id="stages">The three layers everybody converges on</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Layer</th><th>Contains</th><th>Rule</th></tr></thead>
+<tbody>
+<tr><td><strong>Raw / landing</strong></td><td>Exactly what arrived, plus when it arrived and from where</td><td><strong>Never modified.</strong> Append-only. It is your evidence</td></tr>
+<tr><td><strong>Staging / cleansed</strong></td><td>Typed, deduplicated, normalised keys, obvious rubbish rejected</td><td>Rebuildable from raw at any time</td></tr>
+<tr><td><strong>Marts</strong></td><td>Star schemas the business queries</td><td>Rebuildable from staging</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The property that makes this worth the extra tables</div>
+  <p style="margin-bottom:0">
+    Every layer is <strong>reproducible from the one before it</strong>. So a bug found in
+    September in a transformation written in March is fixed by changing the SQL and re-running —
+    not by asking a source system that no longer has the data. Being able to say that sentence is
+    the difference between having built a pipeline and having maintained one.
+  </p>
+</div>
+
+<h2 id="incremental">Incremental loading</h2>
+
+<pre><code>-- The watermark pattern, with the two details that matter.
+BEGIN;
+  INSERT INTO staging.orders (…)
+  SELECT … FROM raw.orders
+  WHERE ingested_at &gt;= (SELECT watermark FROM etl_state WHERE job = 'orders')
+  --                 ^ inclusive, and safe BECAUSE the load is idempotent
+  ON CONFLICT (order_id) DO UPDATE SET …;      -- ← the idempotency
+
+  UPDATE etl_state SET watermark = :new_high, run_at = now()
+  WHERE job = 'orders';
+  --  ^ same transaction: a crash between the two would lose or duplicate rows
+COMMIT;</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — late-arriving data</div>
+  <p style="margin-bottom:0">
+    Source rows do not always arrive in timestamp order: a system was offline, a transaction
+    committed after you read the maximum, clocks differ. A strictly-greater-than watermark
+    <strong>silently loses those rows forever</strong>, and nobody notices until an accountant does.
+    The standard defence is an overlapping window — reprocess the last few hours or days every run
+    — which is only affordable because the load is idempotent. Idempotency and late data are the
+    same conversation.
+  </p>
+</div>
+
+<h2 id="cdc">Change data capture</h2>
+
+<p>
+  A watermark needs a reliable <code>updated_at</code>, and many source systems do not have one —
+  and none of them record <em>deletes</em>. CDC reads the source's transaction log instead:
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Approach</th><th>Catches deletes?</th><th>Load on source</th></tr></thead>
+<tbody>
+<tr><td>Timestamp watermark</td><td><strong>No</strong></td><td>A query per run</td></tr>
+<tr><td>Full reload</td><td>Yes, implicitly</td><td>Very high; only viable when small</td></tr>
+<tr><td>Trigger-based capture</td><td>Yes</td><td>Every write on the source gets slower</td></tr>
+<tr><td><strong>Log-based CDC</strong> (Debezium, SQL Server CDC)</td><td>Yes</td><td>Minimal — it reads the log, not the tables</td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="small muted">
+  “How do you detect deletes in the source?” is a very good interview question and a surprisingly
+  common gap. A timestamp-based incremental load simply cannot; either you reconcile periodically
+  with a full key comparison, or you use CDC.
+</p>
+
+<h2 id="quality">Data quality: test the pipeline, not just the code</h2>
+
+<pre><code>-- The four checks that catch most incidents, run after every load.
+-- 1. Nothing arrived (the job "succeeded" against an empty extract)
+SELECT CASE WHEN COUNT(*) = 0 THEN RAISE_FAIL('no rows loaded') END FROM staging.orders …;
+-- 2. Volume anomaly: today is 3x or 0.3x the trailing average
+-- 3. Referential: every fact key exists in its dimension
+SELECT COUNT(*) FROM fact_sales f
+LEFT JOIN dim_customer d ON d.customer_key = f.customer_key
+WHERE d.customer_key IS NULL;                       -- must be 0
+-- 4. Reconciliation: the mart total equals the source total for the period</code></pre>
+
+<div class="box note">
+  <div class="box-title">dbt made this normal, and that is its real contribution</div>
+  <p style="margin-bottom:0">
+    dbt is SQL <code>SELECT</code> statements plus a dependency graph, materialisation strategies
+    (view / table / incremental), and <strong>tests declared beside the model</strong>
+    (<code>unique</code>, <code>not_null</code>, <code>relationships</code>, <code>accepted_values</code>).
+    Whether or not you use dbt, the idea to take from it is that a transformation without a test is
+    an assertion nobody checked — and the tests are cheap enough that there is no excuse.
+  </p>
+</div>
+
+<h2 id="ssis">SSIS, honestly</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 What to say when the advert names it</div>
+  <ul style="margin-bottom:0">
+    <li><strong>It is genuinely good at</strong> heterogeneous sources — a flat file, an Excel
+      sheet, an FTP drop, a SOAP service — and at the bulk-load fast path into SQL Server. That is
+      a real problem and it solves it.</li>
+    <li><strong>It is painful at</strong> version control (a <code>.dtsx</code> is XML with layout
+      coordinates, so diffs are unreadable and merges are hopeless), testing, and code reuse.</li>
+    <li><strong>The pragmatic pattern</strong>, and the one worth proposing: use SSIS as a
+      <em>mover</em> — extract and land raw data with minimal transformation — and do the
+      transformation in SQL in stored procedures or dbt, where it can be diffed, reviewed and
+      tested. That is ELT wearing an SSIS coat, and it is a change you can make incrementally
+      inside an existing estate rather than proposing a rewrite.</li>
+  </ul>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Do not walk into an interview disparaging their stack</div>
+  <p style="margin-bottom:0">
+    If the advert says SSIS, somebody there built it and probably still maintains it. “I would use
+    it for extraction and landing, and keep the transformations in SQL so they can be reviewed and
+    tested” is a proposal. “SSIS is legacy rubbish” is a personality.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>ELT won because warehouse compute is cheap, SQL is reviewable, and keeping raw data makes a transformation bug re-runnable.</li>
+    <li>Raw is append-only evidence; staging and marts are rebuildable from it.</li>
+    <li>Every layer must be reproducible from the one before it. That is the whole design.</li>
+    <li>Update the watermark inside the load transaction, and use an inclusive comparison.</li>
+    <li>Late-arriving data silently disappears with a strict watermark. Overlap the window; idempotency makes that affordable.</li>
+    <li>A timestamp-based load cannot detect deletes. Use CDC, or reconcile keys periodically.</li>
+    <li>Log-based CDC costs the source almost nothing; trigger-based capture makes every source write slower.</li>
+    <li>Check every load: non-zero rows, volume anomaly, referential integrity, reconciliation against the source.</li>
+    <li>A transformation without a test is an assertion nobody checked.</li>
+    <li>Use SSIS to move data, SQL to transform it. Propose that, do not disparage the stack.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">ETL or ELT?</p>
+  <p class="a">ELT where the warehouse can do the work: transformations become SQL that can be
+    reviewed, tested and re-run, and keeping the raw landing data means a bug found months later is
+    fixed by re-running rather than by asking the source system for data it no longer has. ETL still
+    makes sense when the source is awkward or the volume must be reduced before it moves.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you make a nightly load safe to re-run?</p>
+  <p class="a">Idempotent writes — upsert on a business key, or delete-and-reload the affected
+    slice — and a watermark advanced in the same transaction as the load. Then I can use an
+    overlapping window rather than a strict cutoff, which is what protects against late-arriving
+    rows.</p>
+</div>
+
+<div class="qa">
+  <p class="q">How do you detect that a row was deleted in the source system?</p>
+  <p class="a">A timestamp watermark cannot — deletes leave no updated row. Either log-based CDC,
+    which reads the source's transaction log and sees deletes as events, or a periodic full
+    reconciliation comparing the key sets. Which one depends on how much load the source can take.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

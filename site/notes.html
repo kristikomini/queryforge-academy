@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Notes — QueryForge Academy</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/learn.css">
+</head>
+<body data-page="notes">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Your work</p>
+<h1>Notes</h1>
+<p class="lede">Everything you pinned, in one place.</p>
+
+<div class="panel" style="margin-bottom:18px">
+  <label class="field" style="margin-bottom:0">
+    <span>Search your notes</span>
+    <input type="search" id="q" placeholder="Search the quote or your own words…" autocomplete="off">
+  </label>
+</div>
+
+<div id="out"></div>
+
+<div class="box note" id="how">
+  <div class="box-title">How to make a note</div>
+  <p style="margin-bottom:0">
+    On any chapter page, <strong>select a sentence</strong> and press <strong>📌 Note this</strong>.
+    The quote is captured and you write the paraphrase — because the paraphrase is what does the
+    work. Notes are positioned against the <em>document</em> rather than the viewport, so one pinned
+    beside a paragraph is still beside it tomorrow, at a different window size, on a different
+    machine.
+  </p>
+</div>
+
+</main>
+</div>
+
+<script src="assets/chapters.js"></script>
+<script src="assets/quizzes-1.js"></script>
+<script src="assets/quizzes-2.js"></script>
+<script src="assets/quizzes-3.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/site.js"></script>
+<script src="assets/quiz.js"></script>
+<script src="assets/learn.js"></script>
+<script src="assets/account.js"></script>
+<script>
+(function () {
+  if (!window.LF) return;
+  var LF = window.LF, CH = window.CHAPTERS || [];
+  function el(t, c, x) { var e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; }
+
+  function render() {
+    var q = document.getElementById("q").value.trim().toLowerCase();
+    var out = document.getElementById("out");
+    out.innerHTML = "";
+
+    var notes = LF.profile.notes.slice().sort(function (a, b) {
+      return (b.updatedAt || "") < (a.updatedAt || "") ? -1 : 1;
+    });
+    if (q) notes = notes.filter(function (n) {
+      return ((n.text || "") + " " + (n.quote || "") + " " + (n.chTitle || "")).toLowerCase().indexOf(q) >= 0;
+    });
+
+    if (!notes.length) {
+      var p = el("div", "panel");
+      p.appendChild(el("h3", "", LF.profile.notes.length ? "Nothing matches" : "No notes yet"));
+      p.appendChild(el("p", "muted", LF.profile.notes.length
+        ? "Try a different search."
+        : "Select a sentence on any chapter page and press 📌 Note this. Ten notes earns a badge, but that is not the reason to write them."));
+      out.appendChild(p);
+      return;
+    }
+
+    var byCh = {};
+    notes.forEach(function (n) { (byCh[n.ch] = byCh[n.ch] || []).push(n); });
+
+    var head = el("p", "small muted");
+    head.textContent = notes.length + " note" + (notes.length === 1 ? "" : "s") +
+      " across " + Object.keys(byCh).length + " chapter" + (Object.keys(byCh).length === 1 ? "" : "s") + ".";
+    out.appendChild(head);
+
+    CH.forEach(function (c) {
+      var list = byCh[c.id];
+      if (!list) return;
+      var h = el("h2");
+      var a = el("a", "", c.n + " · " + c.title);
+      a.href = "chapters/" + c.id + ".html";
+      h.appendChild(a);
+      out.appendChild(h);
+
+      var wrap = el("div", "note-list");
+      list.forEach(function (n) {
+        var item = el("div", "note-item");
+        var mt = el("div", "mt");
+        mt.appendChild(el("span", "", new Date(n.updatedAt || n.createdAt).toLocaleString()));
+        var del = el("button", "tb-btn", "Delete");
+        del.style.marginLeft = "auto";
+        del.onclick = function () {
+          if (!confirm("Delete this note?")) return;
+          LF.removeNote(n.id);
+          render();
+        };
+        mt.appendChild(del);
+        item.appendChild(mt);
+        if (n.quote) item.appendChild(el("p", "qt", "“" + n.quote + "”"));
+        var body = el("p", "bd", n.text || "");
+        if (!n.text) { body.textContent = "(no note written — the quote alone does not do the work)"; body.style.opacity = ".55"; }
+        item.appendChild(body);
+        wrap.appendChild(item);
+      });
+      out.appendChild(wrap);
+    });
+  }
+
+  document.getElementById("q").addEventListener("input", render);
+  LF.on("change", render);
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>25 &middot; How an index actually works &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="25-how-an-index-works">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 4 — Fast at scale <span>&rsaquo;</span> Chapter 25</p>
+<h1>How an index actually works</h1>
+<p class="lede">A B-tree drawn out, clustered vs non-clustered, the heap, and the lookup that costs more than a scan.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottimizzazione e tuning delle query&rdquo;</em> &mdash; and you cannot tune what you
+  cannot picture. This chapter is the picture.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="btree">A B-tree, drawn</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A phone book, but with a contents page at the front: “A–F on page 1, G–M on page 200, N–Z on
+    page 400”. To find Rossi you read one page, jump to page 400, read one more page, and jump
+    again. Three pages instead of eight hundred. Add ten times more people and you read four pages
+    instead of three — that is why an index still works when the table gets huge.
+  </p>
+</div>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 250" role="img" aria-labelledby="d25t d25d">
+    <title id="d25t">A three-level B-tree index</title>
+    <desc id="d25d">A root page points to intermediate pages by key range, which point to leaf pages holding the ordered keys and a pointer to the row. Leaf pages are also linked to each other so a range scan can walk sideways.</desc>
+
+    <rect class="d-box-a" x="330" y="20" width="180" height="40" rx="8"/>
+    <text class="d-t-m" x="420" y="45" text-anchor="middle">root:  A–F | G–M | N–Z</text>
+
+    <rect class="d-box" x="60" y="100" width="180" height="40" rx="8"/>
+    <text class="d-t-m" x="150" y="125" text-anchor="middle">A–C | D–F</text>
+    <rect class="d-box" x="330" y="100" width="180" height="40" rx="8"/>
+    <text class="d-t-m" x="420" y="125" text-anchor="middle">G–I | J–M</text>
+    <rect class="d-box-k" x="600" y="100" width="180" height="40" rx="8"/>
+    <text class="d-t-m" x="690" y="125" text-anchor="middle">N–R | S–Z</text>
+
+    <rect class="d-box" x="30" y="180" width="110" height="46" rx="8"/>
+    <text class="d-t-m" x="85" y="199" text-anchor="middle">Alberti</text>
+    <text class="d-t-c" x="85" y="216" text-anchor="middle">→ row</text>
+    <rect class="d-box" x="160" y="180" width="110" height="46" rx="8"/>
+    <text class="d-t-m" x="215" y="199" text-anchor="middle">Conti</text>
+    <text class="d-t-c" x="215" y="216" text-anchor="middle">→ row</text>
+    <rect class="d-box" x="300" y="180" width="110" height="46" rx="8"/>
+    <text class="d-t-m" x="355" y="199" text-anchor="middle">Galli</text>
+    <text class="d-t-c" x="355" y="216" text-anchor="middle">→ row</text>
+    <rect class="d-box" x="440" y="180" width="110" height="46" rx="8"/>
+    <text class="d-t-m" x="495" y="199" text-anchor="middle">Marchetti</text>
+    <text class="d-t-c" x="495" y="216" text-anchor="middle">→ row</text>
+    <rect class="d-box-g" x="580" y="180" width="110" height="46" rx="8"/>
+    <text class="d-t-m" x="635" y="199" text-anchor="middle">Rossi</text>
+    <text class="d-t-c" x="635" y="216" text-anchor="middle">→ row</text>
+    <rect class="d-box" x="710" y="180" width="110" height="46" rx="8"/>
+    <text class="d-t-m" x="765" y="199" text-anchor="middle">Verdi</text>
+    <text class="d-t-c" x="765" y="216" text-anchor="middle">→ row</text>
+
+    <path class="d-line" d="M400 60 L200 100"/><path class="d-line" d="M420 60 L420 100"/>
+    <path class="d-line-a" d="M460 60 L660 100"/>
+    <path class="d-line-a" d="M660 140 L635 180"/>
+    <path class="d-line" d="M690 140 L765 180"/>
+    <path class="d-line" d="M120 140 L85 180"/><path class="d-line" d="M180 140 L215 180"/>
+    <path class="d-line" d="M380 140 L355 180"/><path class="d-line" d="M460 140 L495 180"/>
+
+    <path class="d-line" d="M140 203 H160" stroke-dasharray="3 3"/>
+    <path class="d-line" d="M270 203 H300" stroke-dasharray="3 3"/>
+    <path class="d-line" d="M410 203 H440" stroke-dasharray="3 3"/>
+    <path class="d-line" d="M550 203 H580" stroke-dasharray="3 3"/>
+    <path class="d-line" d="M690 203 H710" stroke-dasharray="3 3"/>
+  </svg>
+  <figcaption>Three page reads to find one row. The dotted links between leaves are what make a range scan cheap.</figcaption>
+</figure>
+
+<div class="box pro">
+  <div class="box-title">🎓 Two properties, and everything follows from them</div>
+  <ol style="margin-bottom:0">
+    <li><strong>It is sorted.</strong> So it answers equality, ranges, prefix <code>LIKE</code>,
+      <code>MIN</code>/<code>MAX</code>, and can supply an <code>ORDER BY</code> without a sort. It
+      cannot answer anything about a value it does not store — which is the whole of
+      <a href="07-predicates-and-sargability.html">sargability</a>.</li>
+    <li><strong>It is shallow.</strong> With ~8&nbsp;KB pages and a narrow key, a level holds
+      hundreds of entries, so three or four levels covers hundreds of millions of rows. A seek is
+      three or four page reads whether the table has a thousand rows or a billion — which is why
+      "add an index" scales and "the table got bigger" usually does not explain a slowdown on
+      indexed access.</li>
+  </ol>
+</div>
+
+<h2 id="clustered">Clustered, non-clustered, heap</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Structure</th><th>What the leaf holds</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><strong>Clustered index</strong></td><td><strong>The whole row</strong></td><td>The table <em>is</em> the index. One per table. It decides physical order</td></tr>
+<tr><td><strong>Non-clustered index</strong></td><td>The key + a pointer to the row</td><td>Many per table. The pointer is the clustering key, or a RID on a heap</td></tr>
+<tr><td><strong>Heap</strong></td><td>—</td><td>No clustered index: rows in insertion order. Fine for a staging table, bad for almost anything else</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box note">
+  <div class="box-title">The engines disagree, and it matters</div>
+  <ul style="margin-bottom:0">
+    <li><strong>SQL Server</strong> and <strong>InnoDB</strong> cluster by the primary key by
+      default. So the primary key choice is a <em>physical storage</em> decision.</li>
+    <li><strong>PostgreSQL</strong> has no clustered index at all: the table is always a heap, and
+      every index is secondary, storing a tuple id. <code>CLUSTER</code> reorders a table once and
+      does not maintain it.</li>
+    <li><strong>Oracle</strong> heaps by default, with index-organised tables as an option.</li>
+  </ul>
+</div>
+
+<h2 id="lookup">The key lookup, and why a scan can beat a seek</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 The tipping point</div>
+  <p>
+    A non-clustered index seek finds the key, but the row is elsewhere. To fetch a column the index
+    does not contain, the engine follows the pointer — a <strong>key lookup</strong> (SQL Server) or
+    <strong>bookmark lookup</strong> — which is a random read <em>per row</em>.
+  </p>
+  <p style="margin-bottom:0">
+    Random reads are far more expensive than sequential ones, so past roughly
+    <strong>1–5% of the table</strong> the optimiser correctly decides that scanning everything
+    sequentially is cheaper than seeking and looking up each row. That is why "it has an index but
+    it's doing a scan" is very often the optimiser being <em>right</em> — and why the real fix is
+    usually to make the index <a href="26-index-design.html">cover</a> the query so there is no
+    lookup at all.
+  </p>
+</div>
+
+<pre><code>-- ix_orders_status is (status, placed_at). This needs customer_id too:
+SELECT customer_id FROM orders WHERE status = 'shipped';
+--  seek on the index, then one lookup per matching row
+
+-- Covered, so zero lookups:
+CREATE INDEX ix_orders_status_cov ON orders (status, placed_at) INCLUDE (customer_id);</code></pre>
+
+<h2 id="fragmentation">Fill factor and fragmentation</h2>
+
+<p>
+  Pages fill up. An insert or a widening update into a full page causes a <strong>page split</strong>:
+  the page becomes two half-empty pages, and the index now occupies more space and takes more reads
+  forever. <strong>Fill factor</strong> leaves free space in each page at rebuild time to absorb
+  that.
+</p>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — the nightly rebuild nobody questions</div>
+  <p style="margin-bottom:0">
+    Rebuilding every index every night was reasonable advice in 2005. Today: on SSDs, logical
+    fragmentation barely affects random reads; the rebuild generates enormous log and cache churn;
+    and — the part people miss — <strong>a rebuild is often only helping because it updates the
+    statistics as a side effect</strong>. Updating statistics directly is far cheaper. Rebuild for
+    a measured reason; do not rebuild because a maintenance plan wizard offered to.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- In the playground, watch a seek turn into a scan.
+EXPLAIN QUERY PLAN SELECT * FROM orders WHERE customer_id = 7;
+-- SEARCH orders USING INDEX ix_orders_cust_date (customer_id=?)
+
+EXPLAIN QUERY PLAN SELECT * FROM orders WHERE total_cents &gt; 500000;
+-- SCAN orders   ← no index on total_cents, and it would not help much anyway</code></pre>
+</div>
+
+<h2 id="others">Index types that are not B-trees</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Type</th><th>For</th><th>Where</th></tr></thead>
+<tbody>
+<tr><td><strong>Hash</strong></td><td>Equality only — no ranges, no ordering</td><td>PostgreSQL, memory-optimised tables in SQL Server</td></tr>
+<tr><td><strong>GIN / inverted</strong></td><td>Arrays, JSONB containment, full text</td><td>PostgreSQL</td></tr>
+<tr><td><strong>GiST / SP-GiST</strong></td><td>Geometry, ranges, nearest-neighbour</td><td>PostgreSQL, PostGIS</td></tr>
+<tr><td><strong>BRIN</strong></td><td>Huge tables physically ordered by the column — stores min/max per block range, tiny</td><td>PostgreSQL</td></tr>
+<tr><td><strong>Columnstore</strong></td><td>Analytical scans and aggregates over hundreds of millions of rows</td><td>SQL Server, and the model behind every column-oriented warehouse</td></tr>
+<tr><td><strong>Full-text</strong></td><td>Word and phrase search, ranked</td><td>All of them, differently</td></tr>
+</tbody>
+</table>
+</div>
+
+<p class="small muted">
+  BRIN is the one worth remembering for an interview: an index on a billion-row append-only log,
+  a few hundred kilobytes in size, that works only because the physical order matches the column
+  order. It is a lovely illustration that "index" does not mean one thing.
+</p>
+
+<div class="rules">
+  <ol>
+    <li>An index is sorted and shallow. Sorted is why it answers ranges; shallow is why it scales.</li>
+    <li>A seek costs three or four page reads whether the table has a thousand rows or a billion.</li>
+    <li>A clustered index leaf holds the whole row: the table <em>is</em> that index, and there is one per table.</li>
+    <li>Every non-clustered index carries the clustering key, so a wide primary key inflates all of them.</li>
+    <li>PostgreSQL has no clustered index; every index is secondary and the table is a heap.</li>
+    <li>A key lookup is a random read per row. Past ~1–5% of the table, a scan is genuinely cheaper.</li>
+    <li>“It has an index and still scans” is usually the optimiser being right. Make the index cover the query.</li>
+    <li>Page splits fragment an index. Fill factor buys headroom; nightly rebuilds are mostly cargo cult on SSDs.</li>
+    <li>Hash, GIN, GiST, BRIN, columnstore and full-text exist. Reaching for the right one is a real skill.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">How does an index make a query faster?</p>
+  <p class="a">It is a sorted structure with a shallow tree over it, so finding a key is three or
+    four page reads instead of scanning the table. Being sorted also lets it answer ranges, prefix
+    matches and <code>ORDER BY</code> without a sort. The cost is that every write has to maintain
+    it.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Clustered versus non-clustered?</p>
+  <p class="a">A clustered index's leaf level <em>is</em> the table, so it defines physical order
+    and there is one per table. A non-clustered index stores the key plus a pointer, so reading
+    other columns costs a lookup per row. In PostgreSQL the distinction does not exist — every
+    index is secondary.</p>
+</div>
+
+<div class="qa">
+  <p class="q">There is an index on the column and the plan still shows a scan. Why?</p>
+  <p class="a">Either the predicate is not sargable, or the optimiser has decided the seek plus a
+    lookup per row is more expensive than a sequential scan — which is usually correct once the
+    query returns more than a few percent of the table. If the query genuinely needs to be fast,
+    make the index cover it so there is no lookup.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

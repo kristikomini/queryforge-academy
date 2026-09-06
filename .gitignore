@@ -1,0 +1,16 @@
+# Runtime data. The dev JWT signing key lives here — never commit it, because
+# anyone holding it can mint a token for any user.
+api/App_Data/
+
+# Built from reference/schema/*.sql in two commands. See reference/README.md.
+reference/forge.db
+*.db-wal
+*.db-shm
+
+# Editor and agent configuration, not part of the project.
+.claude/
+.vscode/
+.idea/
+
+node_modules/
+.DS_Store

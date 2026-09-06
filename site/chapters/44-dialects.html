@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>44 &middot; The dialects: SQL Server, Oracle, PostgreSQL, MySQL &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="44-dialects">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 7 — What the market actually runs <span>&rsaquo;</span> Chapter 44</p>
+<h1>The dialects: SQL Server, Oracle, PostgreSQL, MySQL</h1>
+<p class="lede">The same query in four dialects, the differences that matter, and how to answer “which do you know?”.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio MS T-SQL&rdquo;</em> &mdash; and the honest reassurance
+  that T-SQL is the standard you already know plus a lookup table you can absorb in a week.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="same">Most of it is the same</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Italian, Spanish and Portuguese. If you speak one properly you can read the others on day one
+    and speak one badly by the end of the week. The grammar is shared; what changes is a few
+    hundred words and a handful of habits.
+  </p>
+</div>
+
+<p>
+  <code>SELECT</code>, joins, <code>GROUP BY</code>, subqueries, CTEs and window functions are
+  standard and behave the same everywhere. What differs is <strong>the top-N syntax, the date
+  functions, string concatenation, identity generation and the procedural language</strong> —
+  and that is genuinely most of the list.
+</p>
+
+<h2 id="table">The lookup table</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th></th><th>SQL Server</th><th>Oracle</th><th>PostgreSQL</th><th>MySQL</th></tr></thead>
+<tbody>
+<tr><td>Limit rows</td><td><code>TOP (10)</code></td><td><code>FETCH FIRST 10 ROWS ONLY</code></td><td><code>LIMIT 10</code></td><td><code>LIMIT 10</code></td></tr>
+<tr><td>Null default</td><td><code>ISNULL(a,b)</code></td><td><code>NVL(a,b)</code></td><td><code>COALESCE</code></td><td><code>IFNULL</code></td></tr>
+<tr><td>Concatenate</td><td><code>a + b</code></td><td><code>a || b</code></td><td><code>a || b</code></td><td><code>CONCAT(a,b)</code></td></tr>
+<tr><td>Current time</td><td><code>SYSDATETIME()</code></td><td><code>SYSTIMESTAMP</code></td><td><code>now()</code></td><td><code>NOW()</code></td></tr>
+<tr><td>Add days</td><td><code>DATEADD(day,7,d)</code></td><td><code>d + 7</code></td><td><code>d + INTERVAL '7 day'</code></td><td><code>DATE_ADD(d,INTERVAL 7 DAY)</code></td></tr>
+<tr><td>Auto key</td><td><code>IDENTITY</code></td><td><code>SEQUENCE</code> / identity</td><td><code>GENERATED … AS IDENTITY</code></td><td><code>AUTO_INCREMENT</code></td></tr>
+<tr><td>Quote identifier</td><td><code>[name]</code></td><td><code>"NAME"</code></td><td><code>"name"</code></td><td><code>`name`</code></td></tr>
+<tr><td>Temp table</td><td><code>#tmp</code></td><td>Global temp table</td><td><code>CREATE TEMP TABLE</code></td><td><code>CREATE TEMPORARY TABLE</code></td></tr>
+<tr><td>Upsert</td><td><code>MERGE</code></td><td><code>MERGE</code></td><td><code>ON CONFLICT</code></td><td><code>ON DUPLICATE KEY</code></td></tr>
+<tr><td>String position</td><td><code>CHARINDEX</code></td><td><code>INSTR</code></td><td><code>POSITION</code>/<code>strpos</code></td><td><code>INSTR</code>/<code>LOCATE</code></td></tr>
+<tr><td>Cast</td><td><code>CAST</code>/<code>CONVERT</code></td><td><code>CAST</code>/<code>TO_CHAR</code></td><td><code>CAST</code>/<code>::</code></td><td><code>CAST</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="deep">The differences that are not syntax</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 Six that change how you design, not just how you type</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Clustering.</strong> SQL Server and InnoDB cluster by the primary key, so that
+      choice is a physical storage decision and every secondary index inherits its width.
+      PostgreSQL has no clustered index at all.</li>
+    <li><strong>Concurrency model.</strong> PostgreSQL, Oracle and InnoDB are MVCC by default; SQL
+      Server locks until you enable <code>READ_COMMITTED_SNAPSHOT</code>. That single setting
+      changes how much of the legacy T-SQL you will read makes sense.</li>
+    <li><strong>Transactional DDL.</strong> PostgreSQL and SQL Server yes; MySQL and Oracle no.
+      This decides how migrations must be written
+      (<a href="36-migrations.html">chapter 36</a>).</li>
+    <li><strong>The empty string.</strong> Oracle treats <code>''</code> as <code>NULL</code>. Every
+      other engine treats it as a zero-length string. This causes genuine bugs when porting and it
+      is the single most surprising Oracle behaviour.</li>
+    <li><strong>Nulls in a unique index.</strong> SQL Server allows one; PostgreSQL, Oracle and
+      MySQL allow many.</li>
+    <li><strong>Case sensitivity.</strong> PostgreSQL folds unquoted identifiers to
+      <em>lower</em>case, Oracle to <em>upper</em>case. So a quoted <code>"MyTable"</code> in one is
+      not the same object as <code>MyTable</code> — the classic cause of "the table exists but the
+      query says it does not".</li>
+  </ol>
+</div>
+
+<h2 id="rownum">The Oracle trap worth knowing</h2>
+
+<pre><code>-- WRONG. ROWNUM is assigned BEFORE the ORDER BY, so this returns an arbitrary
+-- 10 rows and then sorts those. It is the classic Oracle mistake.
+SELECT * FROM orders WHERE ROWNUM &lt;= 10 ORDER BY total_cents DESC;
+
+-- Right, the old way:
+SELECT * FROM (SELECT * FROM orders ORDER BY total_cents DESC) WHERE ROWNUM &lt;= 10;
+
+-- Right, and standard, from Oracle 12c:
+SELECT * FROM orders ORDER BY total_cents DESC FETCH FIRST 10 ROWS ONLY;</code></pre>
+
+<h2 id="portable">Writing portable SQL — and when not to</h2>
+
+<div class="box good">
+  <div class="box-title">✔ Cheap portability, worth doing by default</div>
+  <ul style="margin-bottom:0">
+    <li><code>COALESCE</code> rather than <code>ISNULL</code>/<code>NVL</code> — standard, n-ary,
+      and it will not truncate your default.</li>
+    <li><code>CASE</code> rather than <code>IIF</code>/<code>DECODE</code>.</li>
+    <li>Explicit <code>JOIN</code> syntax, never comma joins with conditions in
+      <code>WHERE</code>.</li>
+    <li>Standard <code>FETCH FIRST … ROWS ONLY</code> where the engine supports it.</li>
+    <li>Half-open date ranges rather than <code>BETWEEN</code>.</li>
+  </ul>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Expensive portability, usually not worth it</div>
+  <p style="margin-bottom:0">
+    Avoiding window functions because an ancient version lacked them; refusing
+    <code>ON CONFLICT</code> and hand-rolling an upsert; building an abstraction layer so the SQL
+    could target four engines. That last one is the classic: almost nobody ever changes engine, and
+    the abstraction costs you the specific features that made the engine worth choosing. Portability
+    is a habit worth having and a project worth refusing.
+  </p>
+</div>
+
+<h2 id="which">Answering “which databases do you know?”</h2>
+
+<div class="box good">
+  <div class="box-title">✔ Depth in one, honest levels for the rest</div>
+  <p style="margin-bottom:0">
+    <em>“SQL Server is where I am deepest — I have written the reporting views and done the query
+    tuning, and I am comfortable in T-SQL including error handling and execution plans. I read
+    PL/SQL comfortably and have written simple procedures, but I have not shipped a package. I use
+    PostgreSQL for personal projects and prefer it, and I know the main differences from SQL Server:
+    no clustered index, MVCC by default, transactional DDL.”</em>
+  </p>
+  <p style="margin-bottom:0">
+    Three named levels, one concrete claim each, and one sentence that proves the comparison is
+    real. It beats a list of nine products every time — and it is unbluffable, which is the point.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- One query, four dialects. Write it in each without looking, then check.
+-- "Top 5 customers by 2026 revenue, excluding cancelled orders."
+
+-- SQL Server
+SELECT TOP (5) c.name, SUM(o.total_cents)/100.0 AS eur
+FROM orders o JOIN customers c ON c.id = o.customer_id
+WHERE o.placed_at &gt;= '2026-01-01' AND o.placed_at &lt; '2027-01-01'
+  AND o.status &lt;&gt; 'cancelled'
+GROUP BY c.name ORDER BY eur DESC;
+
+-- PostgreSQL / MySQL / SQLite: same, with LIMIT 5 at the end instead of TOP.
+-- Oracle 12c+: same, with FETCH FIRST 5 ROWS ONLY at the end.</code></pre>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>The standard is most of it. The differences are top-N, dates, concatenation, identity and the procedural language.</li>
+    <li>SQL Server and InnoDB cluster by the primary key; PostgreSQL has no clustered index.</li>
+    <li>SQL Server blocks readers on writers until <code>READ_COMMITTED_SNAPSHOT</code> is enabled.</li>
+    <li>DDL is transactional in PostgreSQL and SQL Server, not in MySQL or Oracle.</li>
+    <li>Oracle treats the empty string as <code>NULL</code>. Nothing else does.</li>
+    <li>SQL Server permits one null in a unique index; the others permit many.</li>
+    <li>PostgreSQL folds unquoted identifiers to lower case, Oracle to upper case.</li>
+    <li><code>ROWNUM</code> is applied before <code>ORDER BY</code>. Use <code>FETCH FIRST</code>.</li>
+    <li>Cheap portability is a habit; a database abstraction layer is a project that rarely pays.</li>
+    <li>Claim depth in one engine with a concrete example, and give honest levels for the rest.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">You only know PostgreSQL and we use SQL Server. Is that a problem?</p>
+  <p class="a">The language is largely the same — joins, grouping, CTEs, window functions are
+    standard. What I would need to absorb is the T-SQL spellings and the procedural dialect, which
+    is a week, and the behavioural differences that matter: clustered indexes, the locking model
+    unless read-committed snapshot is on, and identity versus sequences. I would rather name those
+    specifically than claim it is nothing.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Name a difference between SQL Server and PostgreSQL that affects design.</p>
+  <p class="a">Clustered indexes. In SQL Server the primary key normally determines physical row
+    order and every non-clustered index carries it as the row locator, so the key's width and
+    sequentiality matter enormously. PostgreSQL has no clustered index — the table is a heap and
+    every index is secondary — so that whole consideration disappears.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Should SQL be written to be portable across engines?</p>
+  <p class="a">The cheap parts, yes — <code>COALESCE</code>, explicit joins, standard
+    <code>FETCH FIRST</code>, half-open date ranges. Building an abstraction layer so the same code
+    runs on four engines, no: almost nobody changes engine, and it costs exactly the features that
+    made the engine worth choosing.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

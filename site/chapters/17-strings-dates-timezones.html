@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>17 &middot; Strings, dates, times and time zones &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="17-strings-dates-timezones">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 2 — Querying <span>&rsaquo;</span> Chapter 17</p>
+<h1>Strings, dates, times and time zones</h1>
+<p class="lede">Date arithmetic that survives DST, why storing local time is a bug, and collation as a correctness problem.</p>
+
+<div class="box note">
+  <div class="box-title">From the advert</div>
+  <p style="margin-bottom:0"><em>&ldquo;Ottima conoscenza del linguaggio SQL&rdquo;</em> &mdash; and specifically the parts of
+  it that are not standard at all. Dates are where dialects diverge most and where bugs hide
+  longest.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="truncate">Never wrap the column</h2>
+
+<p>
+  This is <a href="07-predicates-and-sargability.html">chapter 07</a> again, and it is worth
+  repeating because date filtering is where it happens most:
+</p>
+
+<pre><code>WHERE YEAR(placed_at) = 2026                              -- scan
+WHERE CAST(placed_at AS DATE) = '2026-03-14'              -- scan
+WHERE DATE_TRUNC('day', placed_at) = '2026-03-14'         -- scan
+
+WHERE placed_at &gt;= DATE '2026-03-14'
+  AND placed_at &lt;  DATE '2026-03-15'                      -- seek</code></pre>
+
+<div class="box good">
+  <div class="box-title">✔ The half-open habit</div>
+  <p style="margin-bottom:0">
+    <code>&gt;= start AND &lt; next_start</code> is correct for a date, a
+    <code>DATETIME</code>, a <code>DATETIME2(7)</code> and whatever precision somebody changes the
+    column to in 2029. <code>BETWEEN</code> is correct only for pure dates and loses the last day
+    for everything else. Adopt half-open once and you never think about it again.
+  </p>
+</div>
+
+<h2 id="timezones">Time zones: the three-layer rule</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    “Half past two on the last Sunday in October” happens <em>twice</em> in Italy — the clocks go
+    back and that hour is repeated. So if you only wrote down “02:30”, you cannot tell which of
+    the two it was, and you never will be able to. Writing down the real moment instead — the one
+    everyone in the world agrees on — costs nothing and can never be ambiguous.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <ol style="margin-bottom:0">
+    <li><strong>Store instants in UTC</strong>, or in a zone-aware type
+      (<code>timestamptz</code>, <code>DATETIMEOFFSET</code>). Every event, log line, audit row.</li>
+    <li><strong>Store the zone separately when the local zone is part of the meaning</strong> —
+      a meeting at 09:00 Europe/Rome, which stays 09:00 across a DST change. Store the local time
+      <em>and</em> the IANA zone name, not the offset: offsets change, zones do not.</li>
+    <li><strong>Convert at the edge</strong>, when displaying. Never in the middle of a query you
+      also want to be indexable.</li>
+  </ol>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — “+02:00” is not a time zone</div>
+  <p style="margin-bottom:0">
+    An <em>offset</em> is a snapshot; a <em>zone</em> is a rule with history. Rome is +01:00 in
+    winter and +02:00 in summer, and the rules have changed before and will again — Italy has
+    debated abolishing DST twice. Storing the offset makes future dates wrong the moment the rule
+    changes. Store <code>Europe/Rome</code>.
+  </p>
+</div>
+
+<pre><code>-- PostgreSQL: the conversion is a first-class operation.
+SELECT placed_at AT TIME ZONE 'Europe/Rome' AS local_time FROM orders;
+
+-- SQL Server 2016+:
+SELECT placed_at AT TIME ZONE 'UTC' AT TIME ZONE 'W. Europe Standard Time' FROM orders;
+--     ^ tell it what the stored value IS, then what you want.
+--     Note the Windows zone names differ from the IANA ones. Of course they do.</code></pre>
+
+<h2 id="dialects">The date functions, four ways</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Task</th><th>PostgreSQL</th><th>SQL Server</th><th>MySQL</th><th>Oracle</th></tr></thead>
+<tbody>
+<tr><td>Now</td><td><code>now()</code></td><td><code>SYSDATETIME()</code></td><td><code>NOW()</code></td><td><code>SYSTIMESTAMP</code></td></tr>
+<tr><td>Add 7 days</td><td><code>d + INTERVAL '7 day'</code></td><td><code>DATEADD(day,7,d)</code></td><td><code>DATE_ADD(d,INTERVAL 7 DAY)</code></td><td><code>d + 7</code></td></tr>
+<tr><td>Difference</td><td><code>a - b</code> (interval)</td><td><code>DATEDIFF(day,b,a)</code></td><td><code>DATEDIFF(a,b)</code></td><td><code>a - b</code> (days)</td></tr>
+<tr><td>Start of month</td><td><code>date_trunc('month',d)</code></td><td><code>DATEFROMPARTS(YEAR(d),MONTH(d),1)</code></td><td><code>DATE_FORMAT(d,'%Y-%m-01')</code></td><td><code>TRUNC(d,'MM')</code></td></tr>
+<tr><td>Format</td><td><code>to_char(d,'YYYY-MM')</code></td><td><code>FORMAT(d,'yyyy-MM')</code></td><td><code>DATE_FORMAT(d,'%Y-%m')</code></td><td><code>TO_CHAR(d,'YYYY-MM')</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap — <code>DATEDIFF</code> counts boundaries, not elapsed time</div>
+  <p style="margin-bottom:0">
+    <code>DATEDIFF(day, '2026-03-14 23:59', '2026-03-15 00:01')</code> is <strong>1</strong>, even
+    though two minutes passed. It counts how many day boundaries were crossed. That makes “orders
+    older than 30 days” subtly wrong at the edges. If you mean elapsed time, subtract and compare
+    to an interval.
+  </p>
+</div>
+
+<h2 id="strings">Strings: the functions and the two real traps</h2>
+
+<pre><code>-- Portable-ish
+UPPER(s) LOWER(s) LENGTH(s) TRIM(s) REPLACE(s, a, b)
+SUBSTRING(s FROM 2 FOR 5)          -- standard; SUBSTR / SUBSTRING(s, 2, 5) elsewhere
+s || t                             -- standard concat; SQL Server uses +, MySQL CONCAT()
+POSITION('x' IN s)                 -- CHARINDEX in T-SQL, INSTR in Oracle/MySQL</code></pre>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap 1 — <code>LEN</code> vs <code>DATALENGTH</code></div>
+  <p style="margin-bottom:0">
+    T-SQL's <code>LEN()</code> <strong>ignores trailing spaces</strong>;
+    <code>DATALENGTH()</code> returns bytes (so double for <code>NVARCHAR</code>). Validating an
+    IBAN or a VAT number with <code>LEN()</code> silently accepts trailing whitespace. Standard
+    <code>CHAR_LENGTH()</code> does not have this behaviour.
+  </p>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ Trap 2 — collation decides equality</div>
+  <p style="margin-bottom:0">
+    Under a case-insensitive collation <code>'Rossi' = 'rossi'</code> is <em>true</em>, so a
+    <code>UNIQUE</code> constraint rejects the second one and a <code>GROUP BY</code> merges them.
+    Under a case-sensitive one, both are separate. This is not a display setting — it changes which
+    rows come back. And joining columns with different collations forces an implicit conversion
+    that kills the index (<a href="07-predicates-and-sargability.html">chapter 07</a>). Decide once,
+    at database creation.
+  </p>
+</div>
+
+<div class="tryit">
+  <pre><code>-- Normalising a messy imported column, the pattern you will use constantly:
+SELECT
+  NULLIF(TRIM(LOWER(email)), '')                      AS email_norm,
+  REPLACE(REPLACE(TRIM(vat_number), ' ', ''), '.', '') AS vat_norm
+FROM staging_customers;
+-- Then dedupe on email_norm, not on email. See chapter 15.</code></pre>
+</div>
+
+<h2 id="calendar">The calendar table</h2>
+
+<div class="box pro">
+  <div class="box-title">🎓 A table nobody teaches and every reporting system needs</div>
+  <p style="margin-bottom:0">
+    A <code>dim_date</code> table with one row per day and columns for month, quarter, ISO week,
+    day name, <strong>whether it is a working day</strong> and <strong>whether it is an Italian
+    public holiday</strong>. It turns “sales per working day” and “fill in the days with no
+    orders” from awkward date arithmetic into an ordinary join, it is trivially indexable, and it
+    is the only sane place to encode the fact that Ferragosto exists. Every mature warehouse has
+    one; suggesting it in an interview signals reporting experience.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Never wrap a date column in a function to filter it. Half-open ranges instead.</li>
+    <li><code>BETWEEN</code> on a timestamp loses the last day.</li>
+    <li>Store instants in UTC or a zone-aware type; convert at the edge.</li>
+    <li>Store a zone name (<code>Europe/Rome</code>), never an offset. Offsets are snapshots of a rule that changes.</li>
+    <li>Local time is ambiguous for one hour every autumn, permanently and unrecoverably.</li>
+    <li><code>DATEDIFF</code> counts boundaries crossed, not elapsed time.</li>
+    <li>T-SQL <code>LEN()</code> ignores trailing spaces; use <code>DATALENGTH</code> or <code>CHAR_LENGTH</code> when it matters.</li>
+    <li>Collation decides equality, grouping and uniqueness — not just sort order.</li>
+    <li>Build a calendar table. Working days and holidays are data, not arithmetic.</li>
+  </ol>
+</div>
+
+<h2 id="questions">Interview questions this chapter answers</h2>
+
+<div class="qa">
+  <p class="q">How would you store a timestamp for a multi-country application?</p>
+  <p class="a">Instants in UTC or a zone-aware column, and if the local wall-clock time is part of
+    the meaning — a scheduled appointment — the local time plus the IANA zone name, not the
+    offset. Conversion happens on display. Local-only storage is ambiguous for one hour each
+    autumn and cannot be repaired later.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Get all orders from March 2026.</p>
+  <p class="a"><code>WHERE placed_at &gt;= '2026-03-01' AND placed_at &lt; '2026-04-01'</code>.
+    Half-open, so it is correct at any precision and can seek an index — unlike
+    <code>MONTH(placed_at) = 3</code>, which scans.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Two queries compare the same strings and give different results. Why?</p>
+  <p class="a">Different collations — on the columns, the database, or introduced by a cast. A
+    case- or accent-insensitive collation makes <code>'Perù' = 'Peru'</code> true. It also affects
+    <code>GROUP BY</code>, <code>UNIQUE</code> and index seekability across a join.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>
