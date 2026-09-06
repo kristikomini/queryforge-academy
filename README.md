@@ -4,6 +4,10 @@
 adverts, with a learning engine that measures whether you can recall the material
 rather than whether you scrolled past it.**
 
+**Live: [kristi2002.github.io/queryforge-academy](https://kristi2002.github.io/queryforge-academy/)**
+— everything except the accounts service, which needs a server. The site detects
+that and says so rather than failing quietly.
+
 ```bash
 node tools/serve.mjs          # the site alone           → http://localhost:4321
 node api/server.mjs           # the site + accounts API  → http://127.0.0.1:5057
@@ -137,11 +141,12 @@ both fix documented bugs in it:
   Plausible, and not real.
 - **SQLite cannot demonstrate everything.** Chapters 22 and 23 need a server
   engine for isolation and locking, and say so, with the Docker one-liner.
-- **Offline was verified indirectly.** The precache list is checked entry by entry
-  against the running server and the cache name is content-derived, but an actual
-  service-worker install was not exercised — the browser available during
-  development disables service workers, including a one-line one, so it is the
-  sandbox rather than the code. Verify it once in a normal browser.
+- **Offline is verified** on the live deployment: the worker registers, precaches
+  the whole site — every chapter, plus the 660 KB WebAssembly engine, 88 entries
+  in all — serves a page it never navigated to straight from the cache, and
+  caches nothing under `/api/`. It could not be tested during development, since
+  the browser available there disables service workers including a one-line one,
+  so this was confirmed against GitHub Pages instead.
 - **The adverts date fast.** If you are using this to get a job, collect current
   postings and check them against the coverage table. Where they disagree, the
   postings are right.

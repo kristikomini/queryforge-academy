@@ -291,10 +291,12 @@ repository.
    pretending otherwise turns the limiter into decoration. Running this behind a
    real proxy is a configuration decision to make explicitly.
 
-4. **Offline behaviour is verified indirectly.** The precache list is checked
-   entry by entry against the running server, and the cache name is derived from
-   a content hash so it cannot go stale. An actual service-worker install was not
-   exercised in this environment, because the browser available here disables
-   service workers — including a one-line worker, so it is the sandbox and not
-   the code. Verify it once in a normal browser: open the site over http, then
-   DevTools → Application → Service Workers.
+4. **Offline behaviour is verified on the deployed site**, not here. The
+   precache list is checked entry by entry against the running server and the
+   cache name is derived from a content hash, but a service worker needs a real
+   browser on a secure origin — and the one available during development
+   disables them, including a one-line worker. Confirmed against GitHub Pages:
+   the worker registers, precaches the whole site, serves a page from cache, and
+   caches nothing under `/api/`, which is the part that matters here — a cached
+   200 for "here is your profile" would be a lie with somebody's progress
+   attached.
