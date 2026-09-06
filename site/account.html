@@ -50,7 +50,7 @@
       <label class="field"><span>Display name <span class="muted">(optional)</span></span><input id="r-name" autocomplete="nickname">
         <div class="hint">Shown on the leaderboard if you choose to appear there.</div></label>
       <label class="field"><span>Password</span><input id="r-pass" type="password" autocomplete="new-password">
-        <div class="hint">Minimum 10 characters. Hashed with Argon2id; the server never sees it again.</div></label>
+        <div class="hint">Minimum 10 characters. Hashed with scrypt, salted, cost parameters stored inside the hash; the server never sees the password again.</div></label>
       <button class="btn" id="do-register">Create account</button>
     </div>
 
@@ -128,8 +128,9 @@
     <span>API address</span>
     <input id="base" placeholder="http://localhost:5057">
     <div class="hint">
-      Served over http(s), the API is this same origin and there is nothing to configure. Opened
-      from <code>file://</code> there is no origin to guess, so it stays empty until you type one.
+      Served over http(s) the site guesses this same origin and then checks it, because the site is
+      deliberately hostable as plain static files with no service behind it. Opened from
+      <code>file://</code> there is no origin to guess, so it stays empty until you type one.
       <strong>Changing it necessarily signs you out</strong> — the token in this browser was minted
       by the old server — but it leaves local progress alone, which is what makes it safe to let
       anyone do.
@@ -211,7 +212,9 @@
     $("base").value = s.base || "";
 
     if (!s.configured) {
-      msg("warn", "No API address configured. This page was opened from a file, so there is no origin to guess — type one below. Everything else on the site works without it.");
+      msg("warn", location.protocol === "file:"
+        ? "No API address configured. This page was opened from a file, so there is no origin to guess — type one below. Everything else on the site works without it."
+        : "This copy of the site is hosted as static files with no accounts service behind it, so there is nothing to sign in to. Everything else — chapters, tests, review, viva, the simulator and the playground — works entirely in your browser. If you are running the service yourself, type its address below.");
     }
     if (s.lastError) msg("err", "Last sync failed: " + s.lastError);
     if (s.signedIn && s.syncedAt) msg("ok", "Last synced " + new Date(s.syncedAt).toLocaleTimeString() + (s.syncing ? " · syncing…" : ""));

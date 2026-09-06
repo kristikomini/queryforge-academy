@@ -1,0 +1,74 @@
+# =============================================================================
+#  Publish site/ to GitHub Pages.
+#
+#  Pages can only serve a BRANCH from "/" or "/docs", and the site lives in
+#  site/ — so this uploads that directory as an artifact instead. The
+#  alternative was moving the site to /docs, which would rename every path in
+#  the repository to satisfy a hosting constraint. Not worth it.
+#
+#  WHAT IS AND IS NOT DEPLOYED: everything except the accounts service. Pages
+#  serves static files, so there is no /api/ there — the site detects that
+#  (account.js probes /api/health once per session) and says so on the account
+#  page rather than producing failed syncs. Chapters, tests, review, the viva,
+#  the simulator, notes, the glossary, the CV linter and the SQL playground all
+#  run entirely in the browser and are unaffected.
+#
+#  It deploys only if the integrity gate passes. Publishing a site whose
+#  cross-references have rotted is worse than not publishing it.
+# =============================================================================
+
+name: Pages
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time. Do not cancel a running one — a half-finished deploy is
+# worse than a slightly stale site.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: The gate must pass before anything is published
+        run: node tools/doctor.mjs
+
+      - name: Generated files must be current
+        run: |
+          node tools/build-playground-db.mjs --check
+          node tools/stamp-sw.mjs --check
+
+      - name: Every precached URL must exist on disk
+        run: |
+          # stamp-sw.mjs already fails on a missing file, but assert it here too
+          # so a broken precache list cannot ship silently to a real host.
+          node tools/stamp-sw.mjs --check
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

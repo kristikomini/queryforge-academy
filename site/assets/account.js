@@ -30,16 +30,44 @@
   function set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} }
 
   /* --------------------------------------------------------- API base ----
-     Served over http(s): the API is the same origin, so nothing to configure.
-     Opened from file://: there is no origin to guess, so it stays empty until
-     somebody types one into account.html. Changing it necessarily signs you
-     out — the token in this browser was minted by the old server — but leaves
-     local progress alone, which is what makes it safe to let anyone do.     */
+     Served over http(s): GUESS the same origin, then CHECK. Opened from
+     file://: there is no origin to guess, so it stays empty until somebody
+     types one into account.html. Changing it necessarily signs you out — the
+     token in this browser was minted by the old server — but leaves local
+     progress alone, which is what makes it safe to let anyone do.
+
+     THE GUESS HAS TO BE CHECKED, because the site is deliberately hostable as
+     plain static files — GitHub Pages, an S3 bucket, a USB stick — where there
+     is no API at all. Assuming same-origin means one exists produces a stream
+     of failed syncs and an error banner on a site that is working perfectly.
+     So: probe /api/health once per session and remember the answer.          */
+  var PROBE_KEY = "queryforge.api.absent";
+
+  function sameOriginRuledOut() {
+    try { return sessionStorage.getItem(PROBE_KEY) === "1"; } catch (e) { return false; }
+  }
+  function ruleOutSameOrigin() {
+    try { sessionStorage.setItem(PROBE_KEY, "1"); } catch (e) {}
+  }
+
   function base() {
     var b = get(K.base);
     if (b) return b.replace(/\/+$/, "");
-    if (location.protocol === "http:" || location.protocol === "https:") return location.origin;
-    return "";
+    if (location.protocol !== "http:" && location.protocol !== "https:") return "";
+    if (sameOriginRuledOut()) return "";
+    return location.origin;
+  }
+
+  /*  One request, no retry, and it never touches the database on the server
+      side — /api/health is deliberately outside the rate limiter and does not
+      query anything. A 404 or a network error both mean "not served here". */
+  function probeSameOrigin() {
+    if (get(K.base) || sameOriginRuledOut()) return Promise.resolve();
+    if (location.protocol !== "http:" && location.protocol !== "https:") return Promise.resolve();
+    return fetch(location.origin + "/api/health", { method: "GET", credentials: "omit" })
+      .then(function (r) { if (!r.ok) ruleOutSameOrigin(); })
+      .catch(function () { ruleOutSameOrigin(); })
+      .then(function () { LF.emit("account", state()); });
   }
   function setBase(b) {
     b = (b || "").trim().replace(/\/+$/, "");
@@ -362,7 +390,13 @@
     me: me, deleteAccount: deleteAccount,
     leaderboard: leaderboard, setVisible: setVisible,
     sync: sync, pull: pull, push: push, merge: mergeProfiles,
+    probe: probeSameOrigin,
   };
 
-  if (signedIn()) setTimeout(sync, 800);
+  /*  Probe first, then sync. Doing it the other way round means the first sync
+      on a static host fails visibly before we have established that there was
+      never an API to sync with. */
+  probeSameOrigin().then(function () {
+    if (signedIn() && base()) setTimeout(sync, 800);
+  });
 })();
