@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0B &middot; Getting a database in front of you &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00b-run-your-first-query">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0B</p>
+<h1>Getting a database in front of you</h1>
+<p class="lede">Four ways to have a working SQL engine in under a minute, and your first statement run in each.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">Nobody is hired for installing a database. But a course you cannot run is a book, and
+  the single most common reason beginners stop is that nothing ever actually ran. Ten minutes here removes that
+  failure mode permanently.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="two-programs">Two programs, and people confuse them constantly</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    There are two pieces. One is the <em>filing cabinet with the assistant in front of it</em> &mdash; it holds
+    everything and does the work. The other is the <em>notepad you write your requests on</em>. Installing a very
+    nice notepad does not give you a filing cabinet, which is why &ldquo;I installed the SQL program but there is no
+    database&rdquo; is such a common first afternoon.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    The <strong>engine</strong> is a server process that owns the data files and executes statements: SQL Server,
+    PostgreSQL, MySQL, Oracle. The <strong>client</strong> connects to it over a socket, sends statements and renders
+    results: SSMS, DBeaver, Azure Data Studio, <code>psql</code>. They are separate choices, they are versioned
+    separately, and a connection failure is almost always one of three things &mdash; host, port, credentials &mdash;
+    in that order. SQLite is the exception that clarifies the rule: it is a <em>library</em> the client links against,
+    so there is no server and no connection at all.
+  </p>
+</div>
+
+<h2 id="zero">Option 1 &mdash; the playground, which is already open</h2>
+
+<p>
+  This site ships a <strong>real SQL engine</strong>: SQLite, compiled to WebAssembly, 700&nbsp;KB, served from this
+  folder. It runs in the browser tab, needs no installation and no network, and it comes with the course's reference
+  database already loaded &mdash; eleven tables of a plausible order-fulfilment system.
+</p>
+
+<div class="box good">
+  <div class="box-title">✔ Do this now</div>
+  <p style="margin-bottom:0">
+    Open the <a href="../playground.html">playground</a>, and press <strong>Run</strong>. Something will appear.
+    That is the whole of this option, and for the first three parts of the course it is enough.
+  </p>
+</div>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The smallest possible query. Run it, change the table name, run it again.</figcaption>
+<pre><code>SELECT * FROM customers;   -- every column (*) of every row of the customers table
+</code></pre>
+<div class="cx-conv">
+  <b>Three things this teaches immediately</b>
+  <ul>
+    <li>A statement ends with a semicolon. The playground tolerates its absence for a single statement; a script
+      with two statements does not.</li>
+    <li><code>*</code> means &ldquo;every column&rdquo;. It is perfect while exploring and a defect in production
+      code, for reasons <a href="00d-select-and-from.html">chapter 0D</a> explains.</li>
+    <li>The result is a grid with a header row. That grid is called a <strong>result set</strong>, and it is a
+      table too &mdash; which is the idea the whole language is built on.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="sqlite">Option 2 &mdash; SQLite on your own machine</h2>
+
+<p>
+  The playground's engine, as a single executable with no server, no configuration and no account. This is the
+  right choice for working through the course on a laptop, and for keeping your own scratch database.
+</p>
+
+<figure class="codex" data-lang="bash">
+<figcaption>Installing SQLite and opening a database file, on each platform.</figcaption>
+<pre><code># macOS — already installed. On Windows: winget install SQLite.SQLite
+# Debian/Ubuntu: sudo apt install sqlite3      # Fedora: sudo dnf install sqlite
+
+sqlite3 forge.db                 # opens (and CREATES, if absent) a database file
+# You are now at the sqlite> prompt. Everything after it is SQL, ending with ;
+</code></pre>
+<div class="cx-conv">
+  <b>What just happened</b>
+  <ul>
+    <li>A SQLite database is <strong>one file</strong>. <code>forge.db</code> is the whole thing: copy it, email it,
+      delete it. There is no server process and nothing running in the background.</li>
+    <li>Opening a file that does not exist creates it, empty. That is convenient and occasionally surprising: a
+      typo in the filename gives you a new, empty database rather than an error.</li>
+    <li>The <code>sqlite&gt;</code> prompt expects SQL. Commands starting with a dot &mdash;
+      <code>.tables</code>, <code>.schema</code>, <code>.quit</code> &mdash; are the tool's own, not SQL.</li>
+  </ul>
+</div>
+</figure>
+
+<figure class="codex" data-lang="sql">
+<figcaption>Building this course's reference database from the repository, in one command each.</figcaption>
+<pre><code>-- From the repository root, in a shell rather than at the sqlite> prompt:
+--   sqlite3 forge.db &lt; reference/schema/01-schema.sql   -- the eleven tables and their constraints
+--   sqlite3 forge.db &lt; reference/schema/02-seed.sql     -- deterministic, plausible, synthetic data
+
+.tables                     -- a dot-command: list the tables. Not SQL, so no semicolon.
+.schema orders              -- show the CREATE TABLE statement for one table
+SELECT COUNT(*) FROM orders;   -- and now some actual SQL: how many rows are there?
+</code></pre>
+<div class="cx-conv">
+  <b>Why the schema and the data are separate files</b>
+  <ul>
+    <li>The schema is the design; the seed is example data. Keeping them apart means you can rebuild an empty
+      database with the same structure whenever you have made a mess &mdash; which, while learning, is often.</li>
+    <li>The seed is <strong>deterministic</strong>: it generates the same rows every time, so an answer you work
+      out today is still the right answer tomorrow. That is deliberate, and it is why the numbers in this course's
+      examples can be quoted.</li>
+    <li><code>&lt;</code> is the shell's input redirection, not SQL. It feeds the file to the program as though you
+      had typed it.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="server">Option 3 &mdash; a real server engine, in one Docker command</h2>
+
+<p>
+  From <a href="21-transactions.html">chapter 21</a> onwards, some things simply cannot be shown in SQLite: it has
+  one writer, so there is no locking, no blocking and no isolation levels to observe. When a chapter needs a server
+  engine it says so, and this is the command.
+</p>
+
+<figure class="codex" data-lang="bash">
+<figcaption>A throwaway PostgreSQL, and a throwaway SQL Server. Both gone when you stop the container.</figcaption>
+<pre><code># PostgreSQL: starts in about two seconds, listens on the standard port.
+docker run --rm -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:17   # one line, one engine
+# --rm deletes the container on exit, so a mistake costs nothing
+psql -h localhost -U postgres              # connect; the password is 'dev'
+
+# SQL Server, if that is what the job advert names. One line: a backslash
+# continuation cannot carry a trailing comment, so the notes go above it.
+#   --rm          destroy the container on exit
+#   ACCEPT_EULA=Y required, and it is the licence you are accepting
+#   2022-latest   pin the major version to the one production runs
+docker run --rm -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=Str0ng!Passw0rd -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest   # the whole command, on one line
+# then connect with sqlcmd, Azure Data Studio, or SSMS on Windows
+</code></pre>
+<div class="cx-conv">
+  <b>What to know before running these</b>
+  <ul>
+    <li><code>--rm</code> means the container and everything in it is destroyed on exit. That is exactly what you
+      want for learning, and exactly what you do not want for anything you care about.</li>
+    <li><code>-p 5432:5432</code> publishes the container's port on your machine, which is what lets a client
+      connect to <code>localhost</code>.</li>
+    <li>The password is on the command line, in your shell history. Fine for a throwaway container on your own
+      laptop; never do it on a shared machine, and never with a real password.</li>
+    <li>Pin the version to the one your target employer runs. Testing on 17 and deploying to 13 is testing the
+      wrong engine.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="clients">Option 4 &mdash; a client you will actually enjoy</h2>
+
+<p>
+  The engine stores the data; a <strong>client</strong> is the program you type into. They are separate choices, and
+  a good client makes learning noticeably faster because it shows you the schema while you work.
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Client</th><th>Runs on</th><th>Use it when</th></tr></thead>
+<tbody>
+<tr><td><strong>SSMS</strong> (SQL Server Management Studio)</td><td>Windows</td>
+    <td>The job says SQL Server. It is what the team will be using, and its execution-plan viewer is the best of any free tool.</td></tr>
+<tr><td><strong>Azure Data Studio</strong> / <strong>VS Code + mssql</strong></td><td>Any</td>
+    <td>SQL Server from macOS or Linux, or you already live in VS Code.</td></tr>
+<tr><td><strong>DBeaver</strong></td><td>Any</td>
+    <td>You need one tool for several engines. Free, Java, connects to everything.</td></tr>
+<tr><td><strong>psql</strong> / <strong>sqlite3</strong> / <strong>sqlcmd</strong></td><td>Any</td>
+    <td>The engine's own terminal client. Always available, scriptable, and worth being able to use when the GUI is not installed on the server you have been given access to.</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ The one setting to change on day one</div>
+  <p style="margin-bottom:0">
+    Most clients run in <strong>autocommit</strong>: every statement is committed the instant it finishes. That
+    means a <code>DELETE</code> with a mistaken <code>WHERE</code> clause is permanent before you have finished
+    reading it. Learn where your client's &ldquo;begin transaction&rdquo; button or setting is, and read
+    <a href="00h-create-insert-update-delete.html">chapter 0H</a> before running your first <code>DELETE</code>
+    against anything you would miss.
+  </p>
+</div>
+
+<h2 id="stuck">If nothing works</h2>
+
+<ul>
+  <li><strong>The playground says the engine will not start.</strong> WebAssembly may be blocked by a policy or an
+    extension, or the page was opened from <code>file://</code> in a browser that refuses local
+    <code>.wasm</code>. Run <code>node tools/serve.mjs</code> and open <code>http://localhost:4321</code>.</li>
+  <li><strong>&ldquo;command not found: sqlite3&rdquo;.</strong> The install did not put it on your
+    <code>PATH</code>. Reopen the terminal first; that fixes it more often than anything else.</li>
+  <li><strong>Docker says the port is already in use.</strong> Something else is on 5432 &mdash; often a previous
+    container. Publish a different one: <code>-p 5433:5432</code>, and connect to 5433.</li>
+  <li><strong>You cannot connect to a server that is definitely running.</strong> Nine times in ten it is the host
+    (<code>localhost</code> versus <code>127.0.0.1</code>), the port, or the password &mdash; in that order. Read
+    the error message aloud; database error messages are unusually literal.</li>
+</ul>
+
+<div class="rules">
+  <ol>
+    <li>The engine and the client are separate choices: one stores the data, the other is what you type into.</li>
+    <li>SQLite is one file, no server, no configuration — the right tool for learning and for a scratch database.</li>
+    <li>A server engine in Docker with <code>--rm</code> costs nothing and is destroyed on exit; use it for anything about locking, isolation or real execution plans.</li>
+    <li>Most clients are in <strong>autocommit</strong>, so a mistaken <code>DELETE</code> is permanent before you have read it. Know where your client's transaction control is on day one.</li>
+    <li>Pin the engine version to the one your target employer runs, or you have tested a different product.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">What is the difference between a database engine and a client?</p>
+  <p class="a">The engine is the server process that owns the data files and executes statements. The client is the
+  program you type into, which sends statements over a connection and renders the results. SSMS is a client; SQL
+  Server is the engine. Confusing the two is why &ldquo;I installed SSMS but there is no database&rdquo; is such a
+  common first question.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why does this course use SQLite when the adverts ask for SQL Server?</p>
+  <p class="a">Because it removes the installation step entirely, and because Parts 1 to 3 run identically on both.
+  Where SQLite genuinely cannot demonstrate something &mdash; isolation levels, locking, real cost-based plans
+  &mdash; the chapter says so and gives the Docker command for an engine that can.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

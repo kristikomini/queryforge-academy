@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0H &middot; Your own table: CREATE, INSERT, UPDATE, DELETE &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00h-create-insert-update-delete">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0H</p>
+<h1>Your own table: CREATE, INSERT, UPDATE, DELETE</h1>
+<p class="lede">Making a table, putting rows in it, changing them, removing them — and the two habits that prevent the worst day.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">Reading data is half the job; this is the other half, at the smallest possible scale.
+  Chapters 19 to 24 do it properly, with concurrency and idempotency. Here you only need to be able to make a table
+  and put rows in it &mdash; safely.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="ddl-dml">Two kinds of statement</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    There are statements that change the <em>boxes printed on the cards</em> &mdash; making a new kind of card,
+    adding a box to it, throwing the whole pile away. And there are statements that change <em>what is written in
+    the boxes</em> &mdash; adding a card, correcting one, removing one. They are different kinds of thing, and the
+    first kind is much harder to undo.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    <strong>DDL</strong> &mdash; data definition language: <code>CREATE</code>, <code>ALTER</code>,
+    <code>DROP</code>. It changes the schema. <strong>DML</strong> &mdash; data manipulation language:
+    <code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>. It changes the rows. The distinction is
+    operational, not academic: DDL takes heavier locks, and in some engines &mdash; Oracle, MySQL &mdash; it
+    <em>commits the current transaction</em> whether you wanted it to or not, so a DDL statement in the middle of
+    your careful transaction has already made everything before it permanent.
+  </p>
+</div>
+
+<h2 id="create">CREATE TABLE: describing what a row is</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>A small, complete, correct table &mdash; every line of it a decision.</figcaption>
+<pre><code>CREATE TABLE notes (                              -- DDL: define a new kind of row
+  id         INTEGER PRIMARY KEY,                 -- identity: unique and NOT NULL, implied
+  title      TEXT    NOT NULL,                    -- a note without a title is not a note
+  body       TEXT,                                -- deliberately nullable: it may be empty
+  priority   INTEGER NOT NULL DEFAULT 3           -- a value when the INSERT does not say…
+             CHECK (priority BETWEEN 1 AND 5),    -- …and a rule the engine will enforce
+  created_at TEXT    NOT NULL                     -- when the row was made…
+             DEFAULT CURRENT_TIMESTAMP            -- …filled in per INSERT, not per table
+);                                                -- end of the definition
+</code></pre>
+<div class="cx-conv">
+  <b>Reading a table definition as a list of decisions</b>
+  <ul>
+    <li><strong>Every <code>NOT NULL</code> is a promise</strong> to every future query: this column always has a
+      value, so no three-valued logic is needed for it. Every nullable column is a question somebody will have to
+      answer later, so make each one deliberate.</li>
+    <li><strong><code>DEFAULT</code> is evaluated at insert time.</strong> <code>CURRENT_TIMESTAMP</code> is the
+      row's own moment, not the table's creation moment.</li>
+    <li><strong><code>CHECK</code> is enforced on every insert and update.</strong> It cannot be bypassed by an
+      application bug, a script, or somebody in a console at 2 a.m. That is what makes it worth more than a
+      validation rule in code.</li>
+    <li>A <code>CHECK</code> passes when it is <em>unknown</em>: a NULL operand makes it neither true nor false, and
+      only a definite FALSE rejects the row. Here <code>priority</code> is <code>NOT NULL</code>, so the question
+      does not arise &mdash; which is the point of pairing them.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="insert">INSERT: putting rows in</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Three shapes of insert: one row, several rows, and rows from a query.</figcaption>
+<pre><code>-- One row. ALWAYS name the columns.
+INSERT INTO notes (title, body, priority)          -- which columns you are supplying…
+VALUES ('Read chapter 0H', 'and run every example', 1);   -- …and the values, in that order
+
+-- Several rows in one statement: one round trip instead of three.
+INSERT INTO notes (title, priority) VALUES         -- id and created_at take their defaults
+  ('Write a CREATE TABLE from memory', 2),         -- row 1
+  ('Break a CHECK constraint on purpose', 2),      -- row 2
+  ('Delete something inside a transaction', 1);    -- row 3
+
+-- From a query: the rows come from somewhere else rather than from literals.
+INSERT INTO notes (title, priority)                -- the same target columns…
+SELECT 'Review ' || status, 3                      -- …fed by a SELECT instead of VALUES
+FROM (SELECT DISTINCT status FROM orders) s;       -- one note per distinct order status
+</code></pre>
+<div class="cx-conv">
+  <b>Why the column list is not optional in practice</b>
+  <ul>
+    <li>Without it, the insert is <strong>positional</strong>: it depends on the table's current column order. Add
+      a column next year and every such statement either fails or, worse, puts values in the wrong columns.</li>
+    <li>Columns you do not name get their <code>DEFAULT</code>, or <code>NULL</code> where there is no default
+      &mdash; and fail outright if the column is <code>NOT NULL</code> without one. That is the mechanism behind
+      &ldquo;<code>id</code> and <code>created_at</code> filled themselves in&rdquo;.</li>
+    <li>Multi-row <code>VALUES</code> is one statement, one transaction and one round trip. A loop of single-row
+      inserts from application code is the N+1 problem in write form
+      (<a href="38-the-orm-boundary.html">chapter 38</a>).</li>
+    <li><code>INSERT … SELECT</code> is how real data loading is done: set-based, one statement, any number of
+      rows.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="update">UPDATE: changing rows that already exist</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ An <code>UPDATE</code> with no <code>WHERE</code> updates every row</div>
+  <p style="margin-bottom:0">
+    There is no confirmation prompt. There is no undo. The statement is valid SQL, the engine does exactly what it
+    was told, and the row count tells you afterwards. This is the single most expensive mistake a beginner makes,
+    and the habit below removes it entirely.
+  </p>
+</div>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The habit: write the <code>SELECT</code> first, then change one word.</figcaption>
+<pre><code>-- 1. Look at exactly the rows you are about to change.
+SELECT id, title, priority FROM notes              -- SELECT, not UPDATE, first…
+WHERE priority = 3;                                -- …with the predicate you intend to use
+
+-- 2. Same predicate, copied not retyped, now as the update.
+UPDATE notes                                       -- the table…
+SET priority = 2                                   -- …what changes…
+WHERE priority = 3;                                -- …and to WHICH rows. Never omit this line.
+
+-- 3. Check the row count. Was it the number the SELECT showed?
+SELECT changes() AS rows_changed;                  -- SQLite; @@ROWCOUNT in T-SQL
+</code></pre>
+<div class="cx-conv">
+  <b>Why copying the predicate matters</b>
+  <ul>
+    <li>Two nearly-identical <code>WHERE</code> clauses is exactly how the check stops checking the thing you are
+      about to run. Copy it; do not retype it.</li>
+    <li><code>SET priority = priority + 1</code> is evaluated against the row's <em>old</em> values, so
+      <code>SET a = b, b = a</code> swaps them rather than making both equal. That surprises people who expect
+      statement-by-statement assignment.</li>
+    <li>The row count is a check on your predicate, not a formality. 412 where you expected 4 means the
+      <code>WHERE</code> clause means something other than you thought &mdash; and you can still find that out for
+      free if you are inside a transaction.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="delete">DELETE, and the transaction that makes it reversible</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The complete safe-delete ritual: count, open, delete, check, decide.</figcaption>
+<pre><code>SELECT COUNT(*) FROM notes WHERE priority = 5;   -- 1. how many? Expect a number you recognise.
+
+BEGIN;                                           -- 2. open a transaction: nothing is permanent yet
+  DELETE FROM notes WHERE priority = 5;          -- 3. the deletion itself
+  SELECT changes() AS rows_deleted;              -- 4. the count. Does it match step 1?
+ROLLBACK;                                        -- 5a. no  → undo it, as though nothing happened
+-- COMMIT;                                       -- 5b. yes → make it permanent
+</code></pre>
+<div class="cx-conv">
+  <b>The two habits, and one thing rollback does not undo</b>
+  <ul>
+    <li><strong>Habit one: <code>SELECT</code> before <code>DELETE</code>.</strong> Fifteen seconds against a
+      restore.</li>
+    <li><strong>Habit two: wrap it in a transaction.</strong> Until <code>COMMIT</code>, nothing is visible to
+      anyone else and everything is reversible. Note the cost: other sessions may block on those rows while you
+      decide, so read the number and choose promptly (<a href="23-locks-and-deadlocks.html">chapter 23</a>).</li>
+    <li>Most clients run in <strong>autocommit</strong>, so without the explicit <code>BEGIN</code> the delete is
+      already permanent by the time you read the count.</li>
+    <li><code>ROLLBACK</code> restores the rows, but an auto-generated id consumed inside the transaction is
+      <em>not</em> given back. Gaps in an <code>INTEGER PRIMARY KEY</code> sequence are normal and are not
+      corruption.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="delete-vs">DELETE, TRUNCATE and DROP are three different things</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Statement</th><th>Removes</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>DELETE FROM t WHERE …</code></td><td>Matching rows</td>
+    <td>DML. Row by row, fully logged, can be rolled back, fires triggers. Slow at volume, and the only one that can be filtered.</td></tr>
+<tr><td><code>DELETE FROM t</code></td><td>Every row</td>
+    <td>Still row by row. The table, its columns and its indexes remain.</td></tr>
+<tr><td><code>TRUNCATE TABLE t</code></td><td>Every row</td>
+    <td>DDL in most engines: deallocates pages, minimally logged, very fast. Cannot be filtered, usually refuses while a foreign key points at the table, and resets identity counters.</td></tr>
+<tr><td><code>DROP TABLE t</code></td><td>The table itself</td>
+    <td>The rows, the columns, the indexes, the constraints and the permissions. There is nothing left to select from.</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ The sentence that answers this at interview</div>
+  <p style="margin-bottom:0">
+    &ldquo;<code>DELETE</code> is DML and removes rows; <code>TRUNCATE</code> is DDL and removes all of them by
+    deallocating pages; <code>DROP</code> removes the object. In some engines DDL commits the open transaction,
+    which is why a <code>TRUNCATE</code> in the middle of one is not the same as a <code>DELETE</code>.&rdquo;
+    That one answer covers five follow-up questions at once.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>DDL changes the schema, DML changes the rows — and in some engines DDL <strong>commits the open transaction</strong>.</li>
+    <li>Always name the columns in an <code>INSERT</code>: positional inserts break silently when the table gains a column.</li>
+    <li>An <code>UPDATE</code> or <code>DELETE</code> with no <code>WHERE</code> affects every row, with no prompt and no undo.</li>
+    <li>Write the <code>SELECT</code> first, copy the predicate into the write, and check the row count against it.</li>
+    <li>Wrap a destructive statement in <code>BEGIN</code> … <code>ROLLBACK</code>/<code>COMMIT</code> — and know that most clients are in autocommit until you do.</li>
+    <li><code>ROLLBACK</code> restores rows but does not give back consumed identity values; gaps are normal.</li>
+    <li><code>DELETE</code> removes rows, <code>TRUNCATE</code> removes all of them by deallocating pages, <code>DROP</code> removes the table.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">What is the difference between <code>DELETE</code> and <code>TRUNCATE</code>?</p>
+  <p class="a"><code>DELETE</code> is DML: row by row, fully logged, filterable, rollback-able, and it fires
+  triggers. <code>TRUNCATE</code> is DDL in most engines: it deallocates the table's pages, is minimally logged and
+  very fast, cannot be filtered, resets identity counters, and is usually refused while a foreign key references the
+  table. On a large table the performance difference is enormous, which is why the question is asked.</p>
+</div>
+
+<div class="qa">
+  <p class="q">You have just run an <code>UPDATE</code> and it reports 40 000 rows changed instead of 4. What now?</p>
+  <p class="a">If you are inside a transaction: <code>ROLLBACK</code>, immediately, before anything else. If you
+  are not, stop touching the database and tell someone &mdash; the recovery is a point-in-time restore
+  (<a href="41-backup-restore-ha.html">chapter 41</a>) and every further statement makes it harder. Then adopt the
+  habit that prevents it: <code>SELECT</code> first, transaction always.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

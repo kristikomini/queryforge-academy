@@ -168,6 +168,109 @@ window.PHRASES = [
    -------------------------------------------------------------------------- */
 
 window.IT_CHAPTERS = {
+
+  /* ---- Part 0. The vocabulary a beginner needs before anything else, and
+     the handful of sentences that come up in a first interview when the
+     candidate is honest about being early in the subject. ---------------- */
+
+  "00a-what-is-a-database": {
+    say: [
+      { it: "Un database serve quando più persone scrivono insieme e una modifica non può restare a metà.",
+        en: "A database is what you need when several people write at once and a change cannot be left half-applied.",
+        note: "The honest answer to “why not Excel”, and it is the one that sounds like experience." },
+      { it: "SQL è dichiarativo: descrivi il risultato che vuoi, non i passaggi per ottenerlo.",
+        en: "SQL is declarative: you describe the result you want, not the steps to get it." },
+    ],
+    keep: ["database", "engine", "query", "SQL", "client"],
+  },
+  "00b-run-your-first-query": {
+    say: [
+      { it: "In locale uso SQLite o un container Docker: così provo tutto senza toccare niente di condiviso.",
+        en: "Locally I use SQLite or a Docker container, so I can try things without touching anything shared.",
+        note: "Says “I experiment” and “I am careful” in one sentence." },
+      { it: "Il client è quello dove scrivo, il motore è quello che esegue: sono due cose diverse.",
+        en: "The client is where I type; the engine is what executes. They are two different things." },
+    ],
+    keep: ["client", "engine", "container", "Docker", "SSMS"],
+  },
+  "00c-tables-rows-columns": {
+    say: [
+      { it: "Ogni tabella ha una chiave primaria, altrimenti due righe identiche non si distinguono.",
+        en: "Every table has a primary key, otherwise two identical rows cannot be told apart." },
+      { it: "La chiave surrogata identifica, la chiave naturale descrive: metto un vincolo UNIQUE sulla seconda.",
+        en: "A surrogate key identifies, a natural key describes: I put a UNIQUE constraint on the second.",
+        note: "This is the answer to the most common modelling question asked of a junior." },
+    ],
+    keep: ["primary key", "foreign key", "UNIQUE", "NULL", "record"],
+  },
+  "00d-select-and-from": {
+    say: [
+      { it: "Evito SELECT * nel codice che resta: se domani aggiungono una colonna, la query cambia da sola.",
+        en: "I avoid SELECT * in code that stays: if a column is added tomorrow, the query changes by itself." },
+      { it: "Gli apici singoli sono per il testo, i doppi per i nomi di colonna.",
+        en: "Single quotes are for text, double quotes for column names." },
+    ],
+    keep: ["SELECT", "FROM", "alias", "SELECT *"],
+  },
+  "00e-where-filtering": {
+    say: [
+      { it: "Per cercare un giorno uso un intervallo mezzo aperto, non BETWEEN: così è giusto a qualsiasi precisione.",
+        en: "To filter a day I use a half-open range rather than BETWEEN: it is correct at any precision." },
+      { it: "Con NULL non si usa l'uguale: si usa IS NULL, altrimenti non torna niente e nessuno se ne accorge.",
+        en: "You cannot use equals with NULL: you use IS NULL, otherwise nothing comes back and nobody notices.",
+        note: "“Nessuno se ne accorge” — nobody notices — is the part that makes it sound like experience." },
+    ],
+    keep: ["WHERE", "NULL", "IS NULL", "LIKE", "sargable"],
+  },
+  "00f-order-by-and-limit": {
+    say: [
+      { it: "Senza ORDER BY l'ordine non è garantito, nemmeno se sembra stabile.",
+        en: "Without ORDER BY the order is not guaranteed, even when it looks stable." },
+      { it: "Quando pagino aggiungo sempre la chiave primaria all'ORDER BY, per rompere i pareggi.",
+        en: "When I paginate I always add the primary key to the ORDER BY, to break ties.",
+        note: "Saying this unprompted is one of the strongest small signals there is." },
+    ],
+    keep: ["ORDER BY", "LIMIT", "TOP", "OFFSET", "tie-breaker"],
+  },
+  "00g-expressions-and-types": {
+    say: [
+      { it: "Attenzione alla divisione fra interi: totale_centesimi / 100 tronca, servono i decimali.",
+        en: "Watch out for integer division: total_cents / 100 truncates, you need decimals." },
+      { it: "I soldi non si mettono mai in un float: DECIMAL, oppure interi in centesimi.",
+        en: "Money never goes in a float: DECIMAL, or integers in cents." },
+    ],
+    keep: ["CAST", "DECIMAL", "float", "literal", "COALESCE"],
+  },
+  "00h-create-insert-update-delete": {
+    say: [
+      { it: "Prima di una DELETE faccio la SELECT con lo stesso WHERE, e la lancio dentro una transazione.",
+        en: "Before a DELETE I run the SELECT with the same WHERE, and I run it inside a transaction.",
+        note: "The habit an interviewer is listening for. Two clauses, and it answers the whole question." },
+      { it: "Elenco sempre le colonne nella INSERT: senza, basta una colonna nuova e si rompe tutto.",
+        en: "I always list the columns in an INSERT: without them, one new column breaks everything." },
+    ],
+    keep: ["INSERT", "UPDATE", "DELETE", "TRUNCATE", "rollback"],
+  },
+  "00i-your-first-join": {
+    say: [
+      { it: "Se la condizione fa parte dell'abbinamento va nell'ON; se filtra il risultato va nel WHERE.",
+        en: "If the condition is part of the match it goes in ON; if it filters the result it goes in WHERE.",
+        note: "The one-sentence answer to the most common LEFT JOIN bug." },
+      { it: "Con la LEFT JOIN le colonne di destra diventano NULL dove non c'è corrispondenza.",
+        en: "With a LEFT JOIN the right-hand columns become NULL where there is no match." },
+    ],
+    keep: ["JOIN", "LEFT JOIN", "ON", "foreign key"],
+  },
+  "00j-your-first-group-by": {
+    say: [
+      { it: "WHERE filtra le righe prima del raggruppamento, HAVING filtra i gruppi dopo.",
+        en: "WHERE filters rows before grouping, HAVING filters groups afterwards." },
+      { it: "COUNT(*) conta le righe, COUNT(colonna) conta i valori non nulli: con una LEFT JOIN fa la differenza.",
+        en: "COUNT(*) counts rows, COUNT(column) counts non-null values: across a LEFT JOIN that is the difference." },
+    ],
+    keep: ["GROUP BY", "HAVING", "COUNT", "aggregate"],
+  },
+
   "01-engines-and-storage": {
     say: [
       { it: "Il commit aspetta che il log arrivi su disco, non le pagine dati: per questo è veloce.",

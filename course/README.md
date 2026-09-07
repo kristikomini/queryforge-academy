@@ -16,7 +16,7 @@ half is read the way you read a book, with the repository open beside it.
 
 | File | What it is |
 | --- | --- |
-| **[GOLDEN-RULES.md](GOLDEN-RULES.md)** | All 456 rules from every chapter's card, in chapter order, with two priority tiers at the top. **Generated** — do not edit it. |
+| **[GOLDEN-RULES.md](GOLDEN-RULES.md)** | All 518 rules from every chapter's card, in chapter order, with two priority tiers at the top. **Generated** — do not edit it. |
 | **[TIERS.md](TIERS.md)** | The only hand-curated input: which twelve rules decide interviews and which six separate a senior candidate. |
 | **[LAWS-OF-SQL.md](LAWS-OF-SQL.md)** | The same knowledge reorganised **by concept** into twelve books, so that when something surprises you it is findable by *what kind of thing it was*. |
 | **[SOLUTIONS.md](SOLUTIONS.md)** | Worked answers to the labs, with the reasoning. |
@@ -43,7 +43,7 @@ argument:
 
 ## Honesty about this half
 
-The site is finished: 52 chapters, 529 questions, every cross-reference checked
+The site is finished: 62 chapters, 639 questions, every cross-reference checked
 by [`tools/doctor.mjs`](../tools/doctor.mjs). **The module set is not.** Four
 modules are written, against a plan of roughly twenty.
 
@@ -51,7 +51,7 @@ That is stated here rather than implied by an empty directory, because a course
 that quietly promises twenty modules and delivers four is exactly the kind of
 thing this repository is supposed to refuse to do. The
 [golden rules](GOLDEN-RULES.md) and [LAWS-OF-SQL.md](LAWS-OF-SQL.md) are complete
-and cover all 52 chapters; the modules are the part still being written, and the
+and cover all 62 chapters; the modules are the part still being written, and the
 four that exist are the four whose labs already ship in
 [`reference/labs/`](../reference/labs/).
 

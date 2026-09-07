@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0A &middot; What a database actually is &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00a-what-is-a-database">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0A</p>
+<h1>What a database actually is</h1>
+<p class="lede">Why not a spreadsheet, what the engine does for you, and the words everyone else will assume you know.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">Every advert assumes it. This chapter and the nine after it exist because the rest of
+  the course was written for somebody who already knew what a <code>SELECT</code> was &mdash; and a course that
+  begins there is a course for people who do not need it. If you can already say what a database gives you that a
+  spreadsheet does not, skip to <a href="00d-select-and-from.html">chapter 0D</a>.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="what">A database is a program that answers questions about data</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Imagine a very large filing cabinet with a very fast, very literal assistant standing in front of it. You never
+    open the drawers yourself. You write your request on a slip of paper &mdash; <em>&ldquo;every order from
+    Modena in March, sorted by value&rdquo;</em> &mdash; and the assistant comes back with exactly those pages,
+    in that order, usually before you have finished putting your pen down. The cabinet is the data. The assistant
+    is the <strong>database engine</strong>. The language on the slip of paper is <strong>SQL</strong>.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    A relational database management system is a server process that owns a set of files on disk and mediates every
+    access to them. It accepts declarative statements &mdash; you describe the result you want, not the steps to
+    produce it &mdash; compiles each one into an execution plan, and runs that plan while guaranteeing four
+    properties concurrent readers and writers could not otherwise have: atomicity, consistency, isolation and
+    durability. The declarative gap is the entire point: you say <em>what</em>, and the engine decides <em>how</em>,
+    which is why the same statement can get faster next year without being rewritten.
+  </p>
+</div>
+
+<h2 id="not-a-spreadsheet">Why not a spreadsheet</h2>
+
+<p>
+  This is the honest comparison, because a spreadsheet is what most people have actually used. A spreadsheet is
+  excellent, and it fails at exactly five things &mdash; each of which is a whole feature of a database.
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>The problem</th><th>In a spreadsheet</th><th>In a database</th></tr></thead>
+<tbody>
+<tr>
+  <td><strong>Two people at once</strong></td>
+  <td>One person's save overwrites the other's. Or the file is locked and the second person waits.</td>
+  <td>Thousands of concurrent readers and writers, with rules about who sees what and when (<a href="22-isolation-levels.html">chapter 22</a>).</td>
+</tr>
+<tr>
+  <td><strong>Half-finished work</strong></td>
+  <td>The laptop dies between two edits. The file now says the money left one account and never arrived at the other.</td>
+  <td>A <em>transaction</em>: both changes happen or neither does, even if the power fails mid-write (<a href="21-transactions.html">chapter 21</a>).</td>
+</tr>
+<tr>
+  <td><strong>Rules that cannot be broken</strong></td>
+  <td>A validation rule you can paste over, and a colleague who types &ldquo;n/a&rdquo; into a date column.</td>
+  <td><em>Constraints</em>: the engine refuses the write. Not warns &mdash; refuses (<a href="04-ddl-and-constraints.html">chapter 04</a>).</td>
+</tr>
+<tr>
+  <td><strong>Size</strong></td>
+  <td>A million rows and it is unusable. Ten million and it will not open.</td>
+  <td>Hundreds of millions of rows, answering in milliseconds, because of indexes (<a href="25-how-an-index-works.html">chapter 25</a>).</td>
+</tr>
+<tr>
+  <td><strong>Being asked a new question</strong></td>
+  <td>Somebody rebuilds the pivot table by hand, and gets a slightly different number than last month.</td>
+  <td>One query, written once, that gives the same answer every time and can be read and checked by anyone.</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="box trap">
+  <div class="box-title">⚠ The point is not that spreadsheets are bad</div>
+  <p style="margin-bottom:0">
+    They are the right tool for a one-off analysis by one person. The moment two people need the same numbers, or
+    the numbers must still be correct after a crash, or a rule must hold for every row forever &mdash; those are
+    the moments a database earns its complexity. Knowing which situation you are in is a real skill, and
+    <em>&ldquo;this could stay a spreadsheet&rdquo;</em> is sometimes the senior answer.
+  </p>
+</div>
+
+<h2 id="pieces">The five words the rest of the course assumes</h2>
+
+<p>
+  You will meet these on every page from here on. They are worth getting exactly right once.
+</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Word</th><th>What it means</th><th>In this course</th></tr></thead>
+<tbody>
+<tr><td><strong>Engine</strong> (or DBMS)</td>
+    <td>The program that stores the data and answers queries. SQL Server, PostgreSQL, MySQL, Oracle, SQLite.</td>
+    <td>The playground runs a real one — SQLite — inside your browser.</td></tr>
+<tr><td><strong>Database</strong></td>
+    <td>One named collection of tables, owned by an engine. An engine can hold many.</td>
+    <td>The reference database is called <code>forge</code>: an order-fulfilment system.</td></tr>
+<tr><td><strong>Table</strong></td>
+    <td>One kind of thing, stored as rows and columns. <code>customers</code>, <code>orders</code>.</td>
+    <td><a href="00c-tables-rows-columns.html">Chapter 0C</a>, in full.</td></tr>
+<tr><td><strong>SQL</strong></td>
+    <td>The language you ask questions in. Pronounced &ldquo;ess-cue-ell&rdquo; or &ldquo;sequel&rdquo;; nobody minds.</td>
+    <td>Standardised, and every engine deviates. <a href="44-dialects.html">Chapter 44</a> is the differences.</td></tr>
+<tr><td><strong>Query</strong></td>
+    <td>One statement you send to the engine. Strictly, a question; loosely, any statement.</td>
+    <td><a href="00d-select-and-from.html">Chapter 0D</a> writes your first one.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="first-look">What a query looks like, before you can write one</h2>
+
+<p>
+  You are not expected to understand this yet. Read it the way you would read a sentence in a language you are
+  starting to learn: notice the shape, notice that it is almost English, and notice that every single line has a
+  comment explaining it. Every code example in this course is annotated that way, and each one has a
+  <strong>syntax anatomy</strong> underneath it that explains every keyword it uses.
+</p>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>A complete, working query. Four lines, and it answers a real business question.</figcaption>
+<pre><code>SELECT status,                          -- which columns we want back: the order's status…
+       COUNT(*) AS n                    -- …and a count of the rows in each group
+FROM orders                             -- the table the rows come from
+GROUP BY status                         -- "for each distinct status", instead of one big list
+ORDER BY n DESC;                        -- biggest group first. The ; ends the statement.
+</code></pre>
+<div class="cx-conv">
+  <b>What to notice, and nothing more</b>
+  <ul>
+    <li>It says <em>what</em> you want, not <em>how</em> to get it. There is no loop, no &ldquo;open the file&rdquo;,
+      no &ldquo;for each row&rdquo;. That is what <em>declarative</em> means, and it is the biggest single
+      difference from every programming language you may already know.</li>
+    <li>The words are in a fixed order &mdash; <code>SELECT</code>, <code>FROM</code>, <code>GROUP BY</code>,
+      <code>ORDER BY</code> &mdash; but the engine does not run them in that order. That gap explains most beginner
+      errors, and <a href="06-how-select-is-evaluated.html">chapter 06</a> is entirely about it.</li>
+    <li>Press <strong>Run this in the playground</strong> under the block. It runs against a real SQL engine, in
+      this browser, offline. Nothing is sent anywhere.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="engines">Which engine should you learn?</h2>
+
+<p>
+  The one your target employer runs. In the Italian market that is most often <strong>SQL Server</strong>, then
+  <strong>Oracle</strong> in larger and older estates, with <strong>PostgreSQL</strong> and
+  <strong>MySQL</strong> common in newer product teams. The good news is that the differences are perhaps 15% of
+  what you write, and the 85% underneath is the same everywhere.
+</p>
+
+<div class="box good">
+  <div class="box-title">✔ What this course does about that</div>
+  <p style="margin-bottom:0">
+    It writes standard SQL by default, flags dialect-specific spellings inline where they matter, and uses
+    <strong>SQLite</strong> in the playground because it needs no installation and runs in a browser tab. Where
+    SQLite cannot demonstrate something &mdash; locking, isolation levels, real execution plans &mdash; the chapter
+    says so and gives you the one-line Docker command for an engine that can.
+  </p>
+</div>
+
+<h2 id="who">Who does what, in a real team</h2>
+
+<p>
+  The titles overlap and every company draws the lines differently, but the distinction worth knowing at interview
+  is this one:
+</p>
+
+<ul>
+  <li><strong>Database developer</strong> &mdash; designs schemas, writes queries and stored procedures, tunes the
+    slow ones. Lives inside the data. This is the job this course is built backwards from.</li>
+  <li><strong>DBA</strong> (database administrator) &mdash; installs, patches, backs up, restores, monitors,
+    manages security and capacity. Lives around the data.</li>
+  <li><strong>Data engineer</strong> &mdash; moves data between systems, builds pipelines and warehouses.
+    <a href="40-etl-and-warehouses.html">Chapter 40</a>.</li>
+  <li><strong>Analyst</strong> &mdash; asks the questions and turns answers into decisions. Often writes more SQL
+    per day than anybody else in the building.</li>
+</ul>
+
+<p>
+  In a small Italian software house one person may be all four before lunch. Saying which of them you want to be,
+  and why, is a better interview answer than claiming to be all of them.
+</p>
+
+<div class="rules">
+  <ol>
+    <li>A database engine is a program that owns the data files and mediates every access to them; you never read the files yourself.</li>
+    <li>SQL is <strong>declarative</strong>: you describe the result you want and the engine decides how to produce it.</li>
+    <li>A database earns its complexity when there are concurrent users, work that must not be half-applied, rules that must always hold, or more data than fits in memory.</li>
+    <li>The vocabulary is engine, database, table, SQL, query — and everything later in the course is written in those words.</li>
+    <li>Dialects differ in perhaps 15% of what you write; the relational core underneath is the same everywhere.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">What is a database, in one sentence?</p>
+  <p class="a">A server program that owns a set of data files and answers declarative questions about them, while
+  guaranteeing that concurrent readers and writers cannot corrupt each other's work.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why not just use Excel?</p>
+  <p class="a">Because of four things Excel cannot do: many people writing at once, work that must be all-or-nothing,
+  rules the file cannot be edited around, and datasets that will not fit in memory. For a one-off analysis by one
+  person, Excel is often the correct answer &mdash; and saying that is a stronger response than reciting a list of
+  database features.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What does &ldquo;declarative&rdquo; mean, and why does it matter?</p>
+  <p class="a">You state the result you want rather than the algorithm to compute it. It matters because the engine
+  is then free to choose a different, faster plan when the data grows or an index is added &mdash; without anybody
+  rewriting the query.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

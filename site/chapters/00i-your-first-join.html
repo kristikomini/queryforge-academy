@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0I &middot; Your first join: two tables, one question &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00i-your-first-join">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0I</p>
+<h1>Your first join: two tables, one question</h1>
+<p class="lede">Why the data is split up in the first place, and how to put it back together for one answer.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0"><a href="08-joins.html">Chapter 08</a> covers joins properly &mdash; semi-joins,
+  anti-joins, fan-out, the physical algorithms &mdash; and assumes you have written one. This is the one you write
+  first.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="why">Why the data is in pieces</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    The order cards do not have the customer's name written on them. They have the customer's <em>number</em>. That
+    way, if the customer changes their name, you correct one customer card instead of hunting through a thousand
+    order cards &mdash; and you cannot end up with two different spellings. A join is the moment you put an order
+    card next to its customer card so you can read both at once.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    Storing the customer's name on every order would store one fact many times, which creates an
+    <em>update anomaly</em>: correcting it means finding every copy, and missing one leaves the database holding two
+    answers to the same question. So the order stores a foreign key &mdash; a pointer &mdash; and a join
+    reassembles the two at read time. That trade is the substance of
+    <a href="05-normalisation.html">chapter 05</a>, and the reason joins are the most-used operation in SQL.
+  </p>
+</div>
+
+<h2 id="first">The join, written out</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>One order, with the name of the customer who placed it.</figcaption>
+<pre><code>SELECT o.id,                     -- from orders: which order
+       o.placed_at,              -- from orders: when
+       c.name                    -- from CUSTOMERS: the name the order does not store
+FROM orders AS o                 -- the first table, given the short alias o
+JOIN customers AS c              -- the second table, aliased c
+  ON c.id = o.customer_id        -- the MATCH RULE: pair a row with its own customer
+ORDER BY o.placed_at DESC        -- newest first…
+LIMIT 10;                        -- …ten of them
+</code></pre>
+<div class="cx-conv">
+  <b>Every part of the new syntax</b>
+  <ul>
+    <li><code>JOIN</code> names the second table. A bare <code>JOIN</code> is an <code>INNER JOIN</code>, and both
+      spellings mean the same thing.</li>
+    <li><code>ON</code> is the <strong>match rule</strong>: which row of <code>customers</code> belongs with which
+      row of <code>orders</code>. It is almost always &ldquo;the foreign key equals the primary key&rdquo;.</li>
+    <li><code>AS o</code> and <code>AS c</code> are <strong>table aliases</strong>. With two tables in play,
+      qualifying every column &mdash; <code>o.id</code>, <code>c.name</code> &mdash; is what makes the query
+      readable, and it is <em>required</em> when both tables have a column of the same name. Both tables here have
+      an <code>id</code>.</li>
+    <li>The result has columns from both sides. That is the entire point: one row of the answer, assembled from two
+      rows of storage.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="inner">What an inner join throws away</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The same question asked twice, and the customers who vanish between the two.</figcaption>
+<pre><code>-- INNER: only customers who HAVE orders appear. No orders → the customer disappears.
+SELECT c.name, o.id                 -- one row per (customer, order) PAIR
+FROM customers AS c                 -- the left table…
+JOIN orders AS o                    -- …paired with the right one…
+  ON o.customer_id = c.id;          -- …wherever the match rule holds
+
+-- LEFT: every customer appears, matched or not. Unmatched ones get NULLs.
+SELECT c.name, o.id                 -- the same two columns…
+FROM customers AS c                 -- …the same left table…
+LEFT JOIN orders AS o               -- …but now the left side is PRESERVED
+  ON o.customer_id = c.id;          -- and o.id is NULL where there was no match
+</code></pre>
+<div class="cx-conv">
+  <b>The one distinction to hold on to</b>
+  <ul>
+    <li><strong><code>INNER JOIN</code> keeps only matched pairs.</strong> A customer with no orders is not in the
+      result at all &mdash; not as a row of NULLs, not at all.</li>
+    <li><strong><code>LEFT JOIN</code> keeps every row of the left table</strong> and pads the right-hand columns
+      with <code>NULL</code> where nothing matched. Those NULLs are where outer-join NULLs come from, and every
+      right-hand column becomes nullable in the result whatever its declared type.</li>
+    <li>Choose by the question. &ldquo;Orders with their customer&rdquo; is inner: an order without a customer would
+      be broken data. &ldquo;Customers and their orders, if any&rdquo; is left: the &ldquo;if any&rdquo; is the
+      giveaway.</li>
+    <li><code>RIGHT JOIN</code> exists and is the same idea mirrored. Write it as a <code>LEFT JOIN</code> with the
+      tables swapped &mdash; it reads better and reviews better.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="on-where">The mistake everybody makes once</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Moving one line from <code>ON</code> to <code>WHERE</code> quietly turns an outer join into an inner one.</figcaption>
+<pre><code>-- Every customer, and their 2026 orders. Customers with none still appear.
+SELECT c.name, o.id                          -- the customer, and an order id or NULL
+FROM customers AS c                 -- the left table…
+LEFT JOIN orders AS o                    -- …paired with the right one…
+  ON o.customer_id = c.id                    -- the match rule…
+ AND o.placed_at &gt;= '2026-01-01';            -- …AND a condition that is PART OF THE MATCH
+
+-- The same line moved to WHERE. Now the customers with no 2026 orders VANISH.
+SELECT c.name, o.id                 -- the same two columns…
+FROM customers AS c                 -- …the same left table…
+LEFT JOIN orders AS o               -- …but the left side is PRESERVED
+  ON o.customer_id = c.id                    -- the match rule alone…
+WHERE o.placed_at &gt;= '2026-01-01';           -- …and a filter APPLIED AFTER the padding
+</code></pre>
+<div class="cx-conv">
+  <b>Why the second version silently changes the question</b>
+  <ul>
+    <li><code>ON</code> is evaluated <em>while</em> the join runs, before the NULL padding is added.
+      <code>WHERE</code> is evaluated on the finished join, when the padded rows already exist and are full of
+      NULLs.</li>
+    <li>A padded row has <code>o.placed_at = NULL</code>, and <code>NULL &gt;= '2026-01-01'</code> is
+      <code>UNKNOWN</code>, so <code>WHERE</code> discards it. Every customer without a matching order disappears,
+      and the <code>LEFT JOIN</code> has become an <code>INNER JOIN</code> with no error message.</li>
+    <li>The rule: <strong>if it is part of what counts as a match, it belongs in <code>ON</code>. If it is a filter
+      on the result, it belongs in <code>WHERE</code>.</strong></li>
+    <li>The exception that is not one: <code>WHERE o.id IS NULL</code> after a <code>LEFT JOIN</code> is
+      deliberate &mdash; it keeps <em>only</em> the padded rows, which is how you ask &ldquo;which customers have no
+      orders?&rdquo; (<a href="08-joins.html">chapter 08</a>).</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="three">More than two tables</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Walking out from the facts to the geography, one join at a time.</figcaption>
+<pre><code>SELECT o.id,                          -- the order…
+       c.name  AS customer,           -- …its customer…
+       ci.name AS city,               -- …their city…
+       r.name  AS region              -- …and the region the city is in
+FROM orders   AS o                    -- start at the facts
+JOIN customers AS c ON c.id  = o.customer_id   -- order → customer
+JOIN cities    AS ci ON ci.id = c.city_id      -- customer → city
+JOIN regions   AS r  ON r.id  = ci.region_id   -- city → region
+WHERE o.status &lt;&gt; 'cancelled'                  -- a filter on the assembled result
+ORDER BY o.id                                  -- deterministic output…
+LIMIT 20;                                      -- …and a small one
+</code></pre>
+<div class="cx-conv">
+  <b>How to read and write a chain of joins</b>
+  <ul>
+    <li>Read it as a <strong>path</strong>: order → customer → city → region. Each <code>JOIN</code> adds one step,
+      and each <code>ON</code> is the pointer being followed.</li>
+    <li>Write them in that order. A query whose joins jump around is harder to check, and the optimiser does not
+      care &mdash; join order in the text is a hint at most.</li>
+    <li>Alias every table and qualify every column. With four tables, an unqualified <code>name</code> is either
+      ambiguous (an error) or accidentally correct (worse).</li>
+    <li>Each of these is many-to-one &mdash; many orders per customer, many customers per city &mdash; so the row
+      count cannot grow. Joining two <em>one-to-many</em> children of the same parent is what multiplies rows, and
+      that trap is <a href="08-joins.html">chapter 08</a>'s fan-out.</li>
+  </ul>
+</div>
+</figure>
+
+<div class="box trap">
+  <div class="box-title">⚠ Forgetting the <code>ON</code> clause</div>
+  <p style="margin-bottom:0">
+    A join with no match rule is a <strong>cross join</strong>: every row of A paired with every row of B. With
+    1800 orders and 300 customers that is 540 000 rows, and the query looks like it has hung. Some engines refuse a
+    bare <code>JOIN</code> without <code>ON</code>; others quietly obey. If a result is enormous and every value
+    looks repeated, count the <code>JOIN</code>s and count the <code>ON</code>s &mdash; they should match.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Data is split across tables so that each fact is stored once; a join reassembles it at read time.</li>
+    <li><code>JOIN … ON</code> pairs rows by a match rule, almost always foreign key = primary key.</li>
+    <li><code>INNER JOIN</code> keeps only matched pairs; <code>LEFT JOIN</code> keeps every left row and pads the right side with <code>NULL</code>.</li>
+    <li>A condition in <code>ON</code> is part of the match; the same condition in <code>WHERE</code> filters after the padding, and silently turns a <code>LEFT JOIN</code> into an inner one.</li>
+    <li>Alias every table and qualify every column: with two tables it is politeness, with four it is the difference between readable and not.</li>
+    <li>A <code>JOIN</code> with no <code>ON</code> is a cross product — count your joins against your match rules.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">What is the difference between <code>INNER JOIN</code> and <code>LEFT JOIN</code>?</p>
+  <p class="a">An inner join returns only rows that matched on both sides. A left join returns every row of the left
+  table, with the right-hand columns filled with <code>NULL</code> where nothing matched. Pick by the question:
+  &ldquo;customers <em>and their orders, if any</em>&rdquo; needs the left join; &ldquo;orders with their
+  customer&rdquo; is inner.</p>
+</div>
+
+<div class="qa">
+  <p class="q">A <code>LEFT JOIN</code> report stopped showing customers with no orders after somebody added a date
+  filter. Why?</p>
+  <p class="a">The filter was put in <code>WHERE</code> instead of <code>ON</code>. Padded rows carry
+  <code>NULL</code> in the right-hand columns, the comparison against <code>NULL</code> is
+  <code>UNKNOWN</code>, and <code>WHERE</code> discards them &mdash; so the outer join became an inner join with no
+  error. Move the condition into the <code>ON</code> clause.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

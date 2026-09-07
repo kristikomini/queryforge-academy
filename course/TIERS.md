@@ -2,7 +2,7 @@
 
 Two hand-curated lists. Everything else in `GOLDEN-RULES.md` is generated from
 the chapters; **this file is the only hand-written input to the viva deck**, and
-it exists because "which of these 456 rules actually decide an interview?" is a
+it exists because "which of these 518 rules actually decide an interview?" is a
 judgement, not something that can be derived.
 
 Each line below is a **distinctive substring** of a rule's claim. `tools/viva-deck.mjs`

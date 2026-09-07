@@ -9,7 +9,7 @@
 
    The reason it exists at all is that the <head>, the script order and the
    layout wrapper are a CONTRACT (see site/README.md) and copying a contract by
-   hand 52 times is how contracts drift.
+   hand 62 times is how contracts drift.
 
      node tools/new-chapter.mjs            # every missing chapter
      node tools/new-chapter.mjs 07 12 13   # only these numbers

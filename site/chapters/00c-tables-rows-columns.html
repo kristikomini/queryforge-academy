@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0C &middot; Tables, rows, columns and the shape of an answer &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00c-tables-rows-columns">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0C</p>
+<h1>Tables, rows, columns and the shape of an answer</h1>
+<p class="lede">The four words the rest of the course is written in — and what a result set is, exactly.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">Every later chapter uses these words in load-bearing sentences. Getting them precisely
+  right once costs ten minutes and saves fifty pages of quiet confusion.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="table">A table is one kind of thing</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A table is a list of cards, where every card has the same boxes printed on it. One table for customers, where
+    every card has a name box, an email box and a city box. A different table for orders, where every card has a
+    date box, a total box, and a box saying which customer it belongs to. One card is a <strong>row</strong>. One
+    printed box, considered across every card, is a <strong>column</strong>.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    A table is a <em>relation</em>: a set of tuples over a fixed set of typed attributes. Two consequences follow
+    from &ldquo;set&rdquo; and matter constantly. First, <strong>rows have no order</strong> — the engine may
+    return them in any order it likes unless you ask for one. Second, in the formal model a relation holds no
+    duplicates; real SQL tables allow them, which is exactly why a primary key is the first thing you declare.
+  </p>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Word</th><th>Precisely</th><th>Also called</th></tr></thead>
+<tbody>
+<tr><td><strong>Table</strong></td><td>A named collection of rows, all with the same columns.</td><td>Relation. In a spreadsheet: a sheet.</td></tr>
+<tr><td><strong>Row</strong></td><td>One instance of the thing the table is about: one customer, one order.</td><td>Record, tuple. In a spreadsheet: a line.</td></tr>
+<tr><td><strong>Column</strong></td><td>One named, typed property that every row has.</td><td>Field, attribute. In a spreadsheet: a lettered column.</td></tr>
+<tr><td><strong>Value</strong></td><td>What one row holds in one column. Possibly <code>NULL</code>, which means <em>unknown</em>.</td><td>Cell.</td></tr>
+<tr><td><strong>Schema</strong></td><td>The definition: which tables exist, which columns they have, what types, what rules.</td><td>Structure, DDL. Sometimes also a namespace, confusingly.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="typed">Every column has a type, and the type is a promise</h2>
+
+<p>
+  Unlike a spreadsheet cell, a column has a declared type and the engine enforces it. A column declared as a date
+  cannot hold &ldquo;n/a&rdquo;. That refusal is the feature: it means every query downstream can rely on the
+  column really being a date, forever, without checking.
+</p>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Asking the engine to describe a table, rather than guessing from its data.</figcaption>
+<pre><code>-- SQLite: a dot-command, so no semicolon. Shows the CREATE TABLE as written.
+.schema customers           -- prints the table's definition as it was written
+
+-- Portable-ish, and the one to remember: the catalogue is itself queryable.
+SELECT name, type FROM pragma_table_info('customers');   -- SQLite
+-- PostgreSQL / SQL Server / MySQL all expose the standard version:
+--   SELECT column_name, data_type FROM information_schema.columns
+--   WHERE table_name = 'customers';
+</code></pre>
+<div class="cx-conv">
+  <b>The idea worth taking from this</b>
+  <ul>
+    <li>The database describes itself, <em>in tables</em>. The list of tables is a table; the list of columns is a
+      table. That is not a trick — it is the relational model applied to itself, and it is why
+      <a href="37-testing-sql.html">chapter 37</a> can write tests that check the schema.</li>
+    <li><code>information_schema</code> is the standard catalogue and works on PostgreSQL, SQL Server and MySQL.
+      SQLite has its own <code>pragma_table_info()</code>, and SQL Server also has the richer
+      <code>sys.columns</code>.</li>
+    <li>Reading the schema before writing a query is the habit that separates ten minutes of work from an
+      afternoon of guessing at column names.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="key">The primary key: which row is which</h2>
+
+<p>
+  If two rows are identical in every column, no query can tell them apart, and no update can change one of them
+  without changing the other. So every table gets a <strong>primary key</strong>: one or more columns whose value
+  is unique and never <code>NULL</code>.
+</p>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The same table, with and without the one line that makes its rows addressable.</figcaption>
+<pre><code>-- Without a key. Perfectly legal, and quietly unusable.
+CREATE TABLE bad_customers (          -- no way to say "this row and not that one"
+  name  TEXT,                         -- two customers may share a name…
+  email TEXT                          -- …and nothing stops two identical rows
+);                                    -- no PRIMARY KEY line anywhere: that is the bug
+
+-- With one. The id is meaningless on purpose: it identifies, it does not describe.
+CREATE TABLE good_customers (         -- the same table, made addressable
+  id    INTEGER PRIMARY KEY,          -- unique and NOT NULL, both implied by PRIMARY KEY
+  name  TEXT NOT NULL,                -- a value is required…
+  email TEXT NOT NULL UNIQUE          -- …and no two customers may share an address
+);                                    -- three constraints, all enforced by the engine
+</code></pre>
+<div class="cx-conv">
+  <b>Why the key is usually a meaningless number</b>
+  <ul>
+    <li>A key made of real information &mdash; an email address, a VAT number &mdash; is a <em>natural</em> key.
+      It is meaningful, and it changes: people change email address, and companies are restructured. Every row
+      that referenced it must then be updated.</li>
+    <li>A meaningless integer is a <em>surrogate</em> key. It never changes because it never meant anything. That
+      is its entire job.</li>
+    <li>The right answer is usually <strong>both</strong>: a surrogate key for the plumbing, and a
+      <code>UNIQUE</code> constraint on the natural key so the business rule is still enforced.
+      <a href="02-relational-model.html">Chapter 02</a> argues this properly.</li>
+    <li><code>PRIMARY KEY</code> implies <code>NOT NULL</code> and <code>UNIQUE</code>, so writing all three is
+      redundant &mdash; but writing <code>NOT NULL</code> on the other columns is not, and its absence is a
+      decision you should be able to defend.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="relationships">Tables point at each other</h2>
+
+<p>
+  The reason data is split across several tables at all is that repeating a customer's name on every one of their
+  orders means storing the same fact many times &mdash; and then having to change it in many places. Instead, an
+  order stores the customer's <em>id</em>, and the engine can be told to enforce that the customer exists.
+</p>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>A child table pointing at its parent, with the pointer enforced by the engine.</figcaption>
+<pre><code>CREATE TABLE orders (                             -- the child table
+  id           INTEGER PRIMARY KEY,               -- this order's own identity
+  customer_id  INTEGER NOT NULL                   -- WHICH customer: a pointer, not a copy…
+               REFERENCES customers(id),          -- …and the engine checks it exists
+  placed_at    TEXT NOT NULL,                     -- when
+  total_cents  INTEGER NOT NULL                   -- how much, as whole cents
+);                                                -- one row per order
+</code></pre>
+<div class="cx-conv">
+  <b>What <code>REFERENCES</code> buys, and what it costs</b>
+  <ul>
+    <li>It is a <strong>foreign key</strong>. The engine now refuses to insert an order for a customer that does
+      not exist, and refuses to delete a customer who still has orders. Those two refusals eliminate an entire
+      category of bug.</li>
+    <li>The customer's name is stored <em>once</em>. Correcting a typo is one update, and there is nowhere for a
+      second spelling to survive.</li>
+    <li>The cost is that answering &ldquo;which customer placed this order&rdquo; now needs a
+      <strong>join</strong> &mdash; which is <a href="00i-your-first-join.html">chapter 0I</a>, and the reason
+      joins matter so much.</li>
+    <li>In SQLite, foreign keys are <strong>off by default</strong> per connection:
+      <code>PRAGMA foreign_keys = ON;</code>. A schema whose constraints are never enforced looks exactly like
+      one that has none.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="result">A result set is a table too</h2>
+
+<p>
+  When you run a query, what comes back is rows and columns with a header. That is a table &mdash; an unnamed,
+  temporary one. This is the single most useful idea in SQL, because it means the output of one query can be the
+  input of another, forever.
+</p>
+
+<figure class="codex" data-lang="text">
+<figcaption>What a result set looks like, and the three things to read off it before anything else.</figcaption>
+<pre><code>id | name        | city    | orders
+---+-------------+---------+-------
+ 1 | Rossi SpA   | Modena  |     12
+ 2 | Bianchi Srl | Parma   |      3
+ 7 | Verdi SpA   | Bologna |   NULL     ← not zero: unknown, or "no matching row"
+(3 rows)
+</code></pre>
+<div class="cx-conv">
+  <b>How to read one</b>
+  <ul>
+    <li><strong>The header names the columns.</strong> If a column has no name in the header, the query did not
+      give the expression one &mdash; add an alias with <code>AS</code>, because unnamed columns are how a report
+      ends up labelled <code>?column?</code>.</li>
+    <li><strong>The row count is data.</strong> &ldquo;3 rows&rdquo; where you expected 3000 is the answer to a
+      question you had not thought to ask yet. Check it before reading the values.</li>
+    <li><strong><code>NULL</code> is not zero and not an empty string.</strong> It means &ldquo;no value
+      here&rdquo;. Arithmetic on it produces <code>NULL</code>, and comparing to it is never true.
+      <a href="09-null-and-three-valued-logic.html">Chapter 09</a> is entirely about the consequences.</li>
+    <li><strong>The order of the rows means nothing</strong> unless the query said <code>ORDER BY</code>. The ids
+      here happen to ascend; that is not a promise (<a href="00f-order-by-and-limit.html">chapter 0F</a>).</li>
+  </ul>
+</div>
+</figure>
+
+<div class="box good">
+  <div class="box-title">✔ Why &ldquo;a result is a table&rdquo; matters so much</div>
+  <p style="margin-bottom:0">
+    Because it composes. A query can select from another query, a view is a saved query used as a table, and a CTE
+    is a named query used as a table. You never learn a new mechanism for &ldquo;a thing that produces rows&rdquo;
+    &mdash; there is only one, and it is the table.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>A table is a set of rows over a fixed set of typed columns; a row is one instance, a column is one property.</li>
+    <li>Rows have <strong>no inherent order</strong>. Insertion order is not a promise and relying on it fails silently.</li>
+    <li>Every table needs a <strong>primary key</strong>, or its rows cannot be told apart, addressed or corrected.</li>
+    <li>A <strong>surrogate</strong> key identifies and never changes; a <strong>natural</strong> key describes and eventually does. Use a surrogate as the key and a <code>UNIQUE</code> constraint for the natural one.</li>
+    <li>A <strong>foreign key</strong> stores a pointer rather than a copy, and the engine enforces that the target exists.</li>
+    <li>A <strong>result set is a table</strong>: unnamed and temporary, but composable, which is why queries can be nested at all.</li>
+    <li><code>NULL</code> is not zero and not an empty string; it means the value is absent or unknown.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">What is the difference between a primary key and a unique constraint?</p>
+  <p class="a">A primary key is the row's identity: exactly one per table, never <code>NULL</code>, and what other
+  tables point at. A unique constraint says &ldquo;no two rows share this value&rdquo; and you can have several,
+  and in most engines it permits <code>NULL</code>s. Practically: <code>id</code> is the primary key,
+  <code>email</code> gets a unique constraint.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why split data across several tables instead of keeping it in one?</p>
+  <p class="a">So that each fact is stored once. Repeating the customer's city on every order means the same fact
+  in a thousand places, and a change that has to find all of them &mdash; an <em>update anomaly</em>. The cost of
+  splitting is that answering a question needs a join, and that is a trade worth making almost every time.
+  <a href="05-normalisation.html">Chapter 05</a> is the formal version.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

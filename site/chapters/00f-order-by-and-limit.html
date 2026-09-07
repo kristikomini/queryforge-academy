@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0F &middot; ORDER BY and LIMIT: reading a result you can trust &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00f-order-by-and-limit">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0F</p>
+<h1>ORDER BY and LIMIT: reading a result you can trust</h1>
+<p class="lede">Rows have no order until you ask for one — and every dialect spells “just the first ten” differently.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">The most common belief beginners hold about SQL &mdash; that rows come back in the
+  order they were inserted &mdash; is false, and nothing reports an error when you rely on it. It works in testing
+  and stops working in production, which is the worst possible combination.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="no-order">A table is a set, so there is no order</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    The cards are in a box, not in a line. When you ask for them, someone hands you a pile &mdash; and nobody ever
+    promised which way up. If you want them in a particular order you have to say so, every time. If you do not say
+    so, the order you get is the order that was convenient, and convenient changes.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    A relation is a <em>set</em>, and sets are unordered. Without <code>ORDER BY</code>, the row order of a result
+    is undefined: it reflects whichever access path the optimiser chose, and that changes when an index is added,
+    when statistics shift, when the query goes parallel, or when the same query runs on a replica. The order you
+    observe today is an accident that is stable enough to be believed and not stable enough to be relied on.
+  </p>
+</div>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Ascending, descending, several keys, and where <code>NULL</code>s land.</figcaption>
+<pre><code>SELECT id, name FROM customers        -- the columns…
+ORDER BY name;                        -- ascending: ASC is the default and rarely written
+
+SELECT id, placed_at, total_cents FROM orders   -- a wider row…
+ORDER BY placed_at DESC,              -- newest first…
+         total_cents DESC;            -- …and within one instant, the largest first
+
+SELECT id, shipped_at FROM orders            -- the nullable column…
+ORDER BY shipped_at DESC NULLS LAST;  -- put the unshipped rows at the end, explicitly
+</code></pre>
+<div class="cx-conv">
+  <b>Sorting rules that differ from what you expect</b>
+  <ul>
+    <li><strong>Several keys means tie-breaking</strong>, not two separate sorts. The second column only decides
+      the order of rows that are equal on the first.</li>
+    <li><strong>Text sorts by collation, not by ASCII.</strong> Whether <code>'a'</code> comes before
+      <code>'B'</code>, and where <code>'à'</code> goes, is a property of the database. Do not assume.</li>
+    <li><strong>Numbers stored as text sort as text</strong>: <code>'10'</code> before <code>'9'</code>. If a
+      column of numbers sorts strangely, look at its type before anything else.</li>
+    <li><strong>NULLs sort together, at one end.</strong> Which end differs: PostgreSQL puts them last ascending,
+      SQL Server puts them first. <code>NULLS FIRST</code>/<code>NULLS LAST</code> is the standard spelling and
+      SQL Server does not support it &mdash; there, sort by
+      <code>CASE WHEN col IS NULL THEN 1 ELSE 0 END</code> first.</li>
+    <li><code>ORDER BY</code> runs <em>after</em> <code>SELECT</code>, which is why it is the one clause that can
+      use a column alias.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="limit">&ldquo;Just the first ten&rdquo;, in four dialects</h2>
+
+<figure class="codex" data-lang="sql">
+<figcaption>The same intention, four spellings. This is the most-encountered dialect difference in SQL.</figcaption>
+<pre><code>SELECT ... ORDER BY total_cents DESC LIMIT 10;                  -- PostgreSQL, MySQL, SQLite
+SELECT TOP (10) ... ORDER BY total_cents DESC;                  -- SQL Server: BEFORE the columns
+SELECT ... ORDER BY total_cents DESC FETCH FIRST 10 ROWS ONLY;  -- the standard; Oracle 12c+, DB2
+SELECT ... ORDER BY total_cents DESC OFFSET 0 ROWS              -- the standard, with an offset…
+       FETCH NEXT 10 ROWS ONLY;                                 -- …which SQL Server also accepts
+</code></pre>
+<div class="cx-conv">
+  <b>What they share, and the one thing to remember</b>
+  <ul>
+    <li>All four <strong>require an <code>ORDER BY</code> to be meaningful</strong>. &ldquo;The first ten&rdquo; of
+      an unordered set is &ldquo;any ten&rdquo;, and the engine will happily give you a different ten tomorrow.</li>
+    <li><code>TOP</code> goes before the column list; the others go at the end. That single difference is behind a
+      great many first-day-on-a-new-engine syntax errors.</li>
+    <li>A row limit does not necessarily mean less work: without a matching index the engine still sorts everything
+      to know which ten (<a href="27-execution-plans.html">chapter 27</a>).</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="ties">The tie-breaker, and why paging without one is broken</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Two queries that look equivalent. One of them can return the same row on two different pages.</figcaption>
+<pre><code>-- Non-deterministic: several orders share a date, and their relative order is
+-- whatever the engine felt like. Page 1 and page 2 can overlap, or miss a row.
+SELECT id, placed_at FROM orders        -- the columns to show…
+ORDER BY placed_at DESC                    -- ties are broken arbitrarily…
+LIMIT 20;                                  -- …so "the first 20" is not a fixed set
+
+-- Deterministic: the primary key breaks every tie, so the total order is fixed.
+SELECT id, placed_at FROM orders        -- the same two columns…
+ORDER BY placed_at DESC,                   -- the real sort key…
+         id DESC                           -- …plus a UNIQUE tie-breaker
+LIMIT 20;                                  -- now "the first 20" means one specific set
+</code></pre>
+<div class="cx-conv">
+  <b>Why this matters more than it looks</b>
+  <ul>
+    <li>A sort key with ties defines a <em>partial</em> order. The engine is free to choose among the orderings
+      that satisfy it, and it makes that choice for reasons that vary run to run.</li>
+    <li>With paging, the consequence is visible: a row appearing on page 1 <em>and</em> page 2 while another never
+      appears at all. Users report it as &ldquo;the list is wrong&rdquo;, and it is not reproducible.</li>
+    <li>The fix is one column: append a unique tie-breaker &mdash; almost always the primary key &mdash; to every
+      <code>ORDER BY</code> you paginate.</li>
+    <li>Mentioning the tie-breaker unprompted in an interview is one of the strongest small signals there is
+      (<a href="50-the-screening-test.html">chapter 50</a>).</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="offset">OFFSET, and why page 500 is slow</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Skipping rows works, and gets more expensive with every page.</figcaption>
+<pre><code>SELECT id, placed_at FROM orders   -- the same query as above…
+ORDER BY placed_at DESC, id DESC   -- a fixed total order, as established above
+LIMIT 20 OFFSET 40;                -- skip 40 rows, then return 20: "page 3"
+-- The engine produces 60 rows and discards 40. At page 500 it produces 10 020
+-- and discards 10 000. The cost grows with the page number, forever.
+</code></pre>
+<div class="cx-conv">
+  <b>What to do about it, at three levels of ambition</b>
+  <ul>
+    <li><strong>Nothing</strong>, if the list is short. Ten pages of twenty rows is fine, and premature optimisation
+      here is real.</li>
+    <li><strong>Cap it</strong>, if the list is long but nobody goes deep. Refusing offsets beyond a few thousand
+      rows and asking the user to filter instead is an honest product decision.</li>
+    <li><strong>Keyset pagination</strong>, if the list is genuinely large: remember the last row you showed and ask
+      for &ldquo;the rows after this one&rdquo;. Constant cost per page, at the price of losing &ldquo;jump to page
+      37&rdquo;. <a href="30-pagination.html">Chapter 30</a> is the full treatment.</li>
+    <li>The same argument explains why an infinite-scroll feed is easy and a numbered pager over ten million rows
+      is not.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="explore">Putting the four clauses together</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Everything from Part 0 so far, in one query you could put in a report.</figcaption>
+<pre><code>SELECT id,                                  -- SELECT — which columns, and their names
+       placed_at,                                  -- when it was placed
+       total_cents / 100.0 AS eur           -- a computed column, named with AS
+FROM orders                                 -- FROM   — which table
+WHERE status &lt;&gt; 'cancelled'                 -- WHERE  — which rows, one row at a time
+  AND placed_at &gt;= '2026-01-01'             -- …and a half-open date range…
+  AND placed_at &lt;  '2026-04-01'             -- …for the first quarter
+ORDER BY eur DESC, id DESC                  -- ORDER BY — the alias works here, and the tie-break
+LIMIT 10;                                   -- LIMIT  — the ten largest, deterministically
+</code></pre>
+<div class="cx-conv">
+  <b>Read it in the order the engine does</b>
+  <ul>
+    <li><code>FROM orders</code> &mdash; get the rows.</li>
+    <li><code>WHERE …</code> &mdash; throw most of them away, using the index on
+      <code>placed_at</code> if there is one.</li>
+    <li><code>SELECT …</code> &mdash; work out the columns, including the computed <code>eur</code>.</li>
+    <li><code>ORDER BY eur DESC, id DESC</code> &mdash; sort what is left. The alias <code>eur</code> is visible
+      because <code>SELECT</code> has already run; putting <code>eur</code> in the <code>WHERE</code> clause would
+      be an error.</li>
+    <li><code>LIMIT 10</code> &mdash; take the first ten of that fixed order.</li>
+    <li>That five-step order is the whole of <a href="06-how-select-is-evaluated.html">chapter 06</a>, and it
+      explains nearly every &ldquo;invalid column name&rdquo; a beginner meets.</li>
+  </ul>
+</div>
+</figure>
+
+<div class="rules">
+  <ol>
+    <li>Without <code>ORDER BY</code> the row order is <strong>undefined</strong> — not insertion order, and not stable across runs, indexes or servers.</li>
+    <li>Several sort columns means tie-breaking, and text sorts by the database's collation rather than by ASCII.</li>
+    <li>Every paginated <code>ORDER BY</code> needs a <strong>unique tie-breaker</strong>, or pages can repeat and skip rows.</li>
+    <li>&ldquo;The first ten&rdquo; is <code>LIMIT</code>, <code>TOP</code> or <code>FETCH FIRST</code> by dialect, and is meaningless without an <code>ORDER BY</code>.</li>
+    <li><code>OFFSET</code> produces and discards every skipped row, so deep pages get slower without limit.</li>
+    <li><code>ORDER BY</code> runs after <code>SELECT</code>, which is why it — alone among the clauses — can use a column alias.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">Why is a query without <code>ORDER BY</code> not guaranteed to return rows in the same order twice?</p>
+  <p class="a">Because a table is a set and the result order is whatever the chosen access path produced. Add an
+  index, change the statistics, run it in parallel or run it on a replica, and the order can change. It usually
+  looks stable, which is exactly why relying on it fails in production rather than in testing.</p>
+</div>
+
+<div class="qa">
+  <p class="q">A paginated list sometimes shows the same row on two pages. What is the most likely cause?</p>
+  <p class="a">The <code>ORDER BY</code> has ties and no unique tie-breaker, so the engine may order the tied rows
+  differently for each page's query. Append the primary key to the sort. If rows are also being inserted while the
+  user pages, offset-based paging shifts everything as well &mdash; keyset pagination fixes both.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0G &middot; Expressions, literals and the types you can see &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00g-expressions-and-types">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0G</p>
+<h1>Expressions, literals and the types you can see</h1>
+<p class="lede">Arithmetic in a SELECT, text and date literals, integer division, and CAST when the engine guesses wrong.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">Integer division silently returning <code>0</code> is the single most common wrong
+  number in a beginner's first report. It gets its own chapter for that reason, and because &ldquo;which type is
+  this expression?&rdquo; is a question you will be asking for the rest of your career.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="expressions">A SELECT list can compute, not just fetch</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    You do not only have to show what is written on the card. You can do sums with it on the way out: show the price
+    divided by a hundred, or the first name and the last name stuck together. The card is never changed &mdash; you
+    are just deciding what to write on the copy you hand over.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    Every item in a <code>SELECT</code> list is an <em>expression</em>: a column reference is simply the simplest
+    one. Each expression has a type, derived from its operands by the engine's type-precedence rules, and that
+    derived type is what the client receives. Two identical-looking expressions can have different types &mdash;
+    which is precisely why <code>total_cents / 100</code> and <code>total_cents / 100.0</code> return different
+    numbers.
+  </p>
+</div>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The trap, in two lines: the same division, one character apart.</figcaption>
+<pre><code>SELECT total_cents,                       -- 12550, an INTEGER (cents)
+       total_cents / 100   AS wrong_eur,  -- 125   ← INTEGER ÷ INTEGER truncates. Cents gone.
+       total_cents / 100.0 AS right_eur   -- 125.5 ← one REAL operand widens the whole expression
+FROM orders LIMIT 5;                      -- five rows is enough to see it
+</code></pre>
+<div class="cx-conv">
+  <b>The rule, and the two ways to write it</b>
+  <ul>
+    <li><strong>Integer ÷ integer is integer division</strong> in SQL Server, PostgreSQL, MySQL and Oracle: the
+      fractional part is <em>truncated</em>, not rounded. <code>7 / 2</code> is 3.</li>
+    <li>The fix is to make one operand non-integer. <code>/ 100.0</code> is the compact way;
+      <code>CAST(total_cents AS DECIMAL(12,2)) / 100</code> is the explicit way, and it says what type you wanted
+      rather than relying on inference.</li>
+    <li>For money, prefer <code>DECIMAL</code> over the REAL you get from <code>100.0</code>:
+      <code>100.0</code> is an approximate binary float in some engines, and money should be exact
+      (<a href="03-data-types.html">chapter 03</a>).</li>
+    <li>SQLite is the exception that proves the rule &mdash; it produces a REAL for <code>7/2</code> only if one
+      operand is REAL, exactly like the others. There is no engine where this is safe to ignore.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="literals">Literals: how you write a value in the query text</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Every kind of literal you will write in your first month, with its type.</figcaption>
+<pre><code>SELECT 42                AS an_integer,   -- INTEGER: digits, no quotes
+       42.5              AS a_decimal,    -- exact or approximate, by engine
+       'Rossi'           AS some_text,    -- TEXT: SINGLE quotes. Always single.
+       'L''Aquila'       AS with_a_quote, -- an apostrophe is escaped by DOUBLING it
+       DATE '2026-03-14' AS a_date,       -- a TYPED literal: unambiguous, and portable
+       '2026-03-14'      AS looks_like_a_date,  -- …this one is TEXT until something converts it
+       NULL              AS nothing,      -- the absence of a value, not a value
+       TRUE              AS a_boolean;    -- no BOOLEAN in SQL Server: it uses BIT, 0 and 1
+</code></pre>
+<div class="cx-conv">
+  <b>Four things to get right on day one</b>
+  <ul>
+    <li><strong>Single quotes for text, double quotes for identifiers.</strong> <code>'name'</code> is the word;
+      <code>"name"</code> is the column. SQL Server also uses <code>[brackets]</code>, MySQL
+      <code>`backticks`</code>.</li>
+    <li><strong>An apostrophe is escaped by doubling it</strong>: <code>'L''Aquila'</code>. In application code you
+      never do this by hand &mdash; you use a parameter, and the question stops arising
+      (<a href="34-dynamic-sql-and-injection.html">chapter 34</a>).</li>
+    <li><strong>A date in quotes is text</strong> until the engine converts it, and the conversion depends on the
+      session's date format. <code>DATE '2026-03-14'</code> is a typed literal and cannot be misread. ISO-8601
+      (<code>YYYY-MM-DD</code>) is the only format worth writing.</li>
+    <li><strong><code>NULL</code> is not a value</strong> and has no type of its own; it takes the type of whatever
+      it is used with, and any arithmetic involving it produces <code>NULL</code>.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="null-arithmetic">NULL propagates through everything</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>What happens when a value you did not have takes part in a calculation.</figcaption>
+<pre><code>SELECT 100 + NULL          AS arithmetic,   -- NULL. Unknown plus a hundred is unknown.
+       'Rossi' || NULL     AS concatenation, -- NULL: one unknown erases the whole string
+       COALESCE(NULL, 0)   AS with_a_default, -- 0: the first argument that is not NULL
+       CONCAT('Rossi', NULL) AS concat_fn;   -- 'Rossi': CONCAT() is DEFINED to ignore NULLs
+</code></pre>
+<div class="cx-conv">
+  <b>The classic symptom, and the two fixes</b>
+  <ul>
+    <li>An address label built as <code>street || ' ' || suite || ' ' || city</code> comes out
+      <strong>completely blank</strong> for everybody with no suite number. One NULL in the middle erases the whole
+      string, and it looks like a rendering bug.</li>
+    <li>Fix one: <code>CONCAT(...)</code>, which treats NULL as an empty string by definition. Fix two:
+      <code>COALESCE(suite, '')</code> around each nullable part. Prefer the first &mdash; it states the intention
+      once instead of patching each hole.</li>
+    <li>SQL Server uses <code>+</code> for concatenation, and it propagates NULL exactly like <code>||</code> does.
+      Oracle is the odd one out: it treats the empty string as NULL, so the rules differ subtly there.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="cast">CAST: saying the type out loud</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Converting deliberately, instead of hoping the engine guesses the same way you did.</figcaption>
+<pre><code>SELECT CAST('42' AS INTEGER)              AS text_to_number,   -- 42, and it ERRORS on 'forty-two'
+       CAST(total_cents AS REAL) / 100    AS euros,            -- convert first, then divide
+       CAST(placed_at AS DATE)            AS just_the_day,     -- drop the time part
+       CAST(42 AS TEXT) || ' orders'      AS built_message     -- number → text, to concatenate
+FROM orders LIMIT 5;                                            -- again, five rows is plenty
+</code></pre>
+<div class="cx-conv">
+  <b>Explicit versus implicit conversion</b>
+  <ul>
+    <li><code>CAST(x AS type)</code> is the standard, portable spelling. SQL Server also has
+      <code>CONVERT(type, x, style)</code>, whose third argument is the only sensible way to parse an unusual date
+      format there.</li>
+    <li><strong><code>CAST</code> raises an error</strong> on a value it cannot convert. That is a feature: silent
+      conversion failures are worse than loud ones. When you want NULL instead, SQL Server has
+      <code>TRY_CAST</code>.</li>
+    <li>Implicit conversion happens whenever two types meet without a cast, and the engine converts the type with
+      <em>lower precedence</em> &mdash; which is usually your indexed text column, once per row
+      (<a href="07-predicates-and-sargability.html">chapter 07</a>). That is why the same rule appears in the
+      performance chapters: a conversion in the <code>SELECT</code> list is free, and one in a
+      <code>WHERE</code> clause can cost you an index.</li>
+    <li>Cast in the <code>SELECT</code> list, never in the <code>WHERE</code> clause on the column being filtered.
+      That one sentence is most of what a junior needs to know about conversions.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="case">CASE: an if-statement that is an expression</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Turning a value into a label, without leaving SQL.</figcaption>
+<pre><code>SELECT id,                                              -- the order…
+       total_cents,                                     -- …and the amount, unmodified
+       CASE WHEN total_cents &gt;= 100000 THEN 'large'   -- tested first…
+            WHEN total_cents &gt;=  20000 THEN 'medium'  -- …so this only sees what is under €1000
+            ELSE 'small'                              -- omit ELSE and non-matches become NULL
+       END AS size_band                               -- END closes it; AS names the column
+FROM orders LIMIT 10;                                 -- ten rows, to see all three bands
+</code></pre>
+<div class="cx-conv">
+  <b>Three things about <code>CASE</code></b>
+  <ul>
+    <li>It is an <strong>expression</strong>, so it can appear anywhere a value can: in
+      <code>SELECT</code>, in <code>WHERE</code>, in <code>ORDER BY</code>, inside an aggregate. It is not a
+      statement.</li>
+    <li><strong>Order matters.</strong> Branches are tested top to bottom and the first TRUE one wins. Swap the two
+      <code>WHEN</code>s above and every large order is labelled &ldquo;medium&rdquo;, because 100000 is also
+      ≥ 20000.</li>
+    <li>Every branch must return a compatible type, and the result takes the widest. Mixing a number branch with a
+      text branch either converts silently or errors, depending on the engine &mdash; decide it yourself with a
+      <code>CAST</code>.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="functions">The dozen functions worth knowing this week</h2>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Function</th><th>Does</th><th>Watch out for</th></tr></thead>
+<tbody>
+<tr><td><code>UPPER(s)</code>, <code>LOWER(s)</code></td><td>Change case</td><td>In a <code>WHERE</code> clause it disables the index on that column</td></tr>
+<tr><td><code>TRIM(s)</code></td><td>Remove surrounding spaces</td><td>The classic import cleaner, with <code>NULLIF(TRIM(s), '')</code></td></tr>
+<tr><td><code>LENGTH(s)</code> / <code>LEN(s)</code></td><td>Count characters</td><td>SQL Server's <code>LEN</code> ignores trailing spaces; <code>LENGTH</code> does not</td></tr>
+<tr><td><code>SUBSTRING(s, 1, 5)</code></td><td>A slice</td><td>SQL is <strong>1-indexed</strong>, unlike your application language</td></tr>
+<tr><td><code>REPLACE(s, a, b)</code></td><td>Swap a substring</td><td>Nest them to strip several characters</td></tr>
+<tr><td><code>ROUND(x, 2)</code></td><td>Round to n places</td><td>Rounding a float cannot make it exact; round <code>DECIMAL</code>s</td></tr>
+<tr><td><code>ABS(x)</code></td><td>Absolute value</td><td>Useful for &ldquo;how far apart&rdquo; comparisons</td></tr>
+<tr><td><code>COALESCE(a, b, c)</code></td><td>First non-NULL</td><td>The standard default-value function; result takes the widest type</td></tr>
+<tr><td><code>NULLIF(a, b)</code></td><td>NULL when equal</td><td>The division guard: <code>x / NULLIF(y, 0)</code></td></tr>
+<tr><td><code>CURRENT_TIMESTAMP</code></td><td>Now</td><td>Store UTC; in SQL Server use <code>SYSUTCDATETIME()</code></td></tr>
+<tr><td><code>CAST(x AS t)</code></td><td>Convert</td><td>Errors on bad input, which is what you want</td></tr>
+<tr><td><code>COUNT(*)</code></td><td>Count rows</td><td>Never NULL, and never counts a column &mdash; that is <code>COUNT(col)</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box good">
+  <div class="box-title">✔ How to learn the rest</div>
+  <p style="margin-bottom:0">
+    Do not memorise a function list. Learn these twelve, and learn where your engine's documentation lists the
+    others &mdash; then look them up. Interviewers ask what <code>COALESCE</code> does; they do not ask you to
+    recite <code>DATEADD</code>'s argument order, and being able to say &ldquo;I would check the docs for the exact
+    spelling&rdquo; is a normal professional answer.
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li>Every item in a <code>SELECT</code> list is an expression with a type, derived from its operands.</li>
+    <li><strong>Integer ÷ integer truncates.</strong> <code>total_cents / 100</code> loses the cents; <code>/ 100.0</code> does not.</li>
+    <li>Single quotes make text, double quotes make identifiers, and an apostrophe inside text is doubled.</li>
+    <li>A quoted date is text until something converts it; <code>DATE '2026-03-14'</code> is a typed literal, and ISO-8601 is the only format worth writing.</li>
+    <li>Any arithmetic or concatenation involving <code>NULL</code> produces <code>NULL</code> — except functions defined otherwise, such as <code>CONCAT</code> and <code>COALESCE</code>.</li>
+    <li><code>CAST</code> in the <code>SELECT</code> list is free; a conversion on a filtered column costs you the index.</li>
+    <li><code>CASE</code> is an expression, its branches are tested in order, and omitting <code>ELSE</code> means non-matches are <code>NULL</code>.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">A report shows every order as costing €0. What is the first thing you check?</p>
+  <p class="a">Whether the query divides one integer by another &mdash; <code>total_cents / 100</code> where both are
+  integers truncates towards zero, so anything under a euro becomes 0 and everything else loses its cents. The fix
+  is <code>/ 100.0</code>, or an explicit <code>CAST</code> to a decimal type.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What is the difference between <code>CAST</code> and an implicit conversion?</p>
+  <p class="a"><code>CAST</code> is written by you, is visible in review, and raises an error when the value will not
+  convert. An implicit conversion is inserted by the engine when two types meet, follows precedence rules you did
+  not choose, and &mdash; when it lands on an indexed column in a <code>WHERE</code> clause &mdash; silently turns a
+  seek into a scan.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

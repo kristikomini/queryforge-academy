@@ -44,7 +44,7 @@ tools/           THE GATE.       doctor.mjs — the eleven checks + quiz-id lock
 
 | Thing | Target |
 | --- | --- |
-| Site chapters | 52 |
+| Site chapters | 62 |
 | Quiz questions | 8–14 per chapter |
 | Golden rules / viva cards | one card per module, ~10 claims each |
 | Course modules | 24 |
@@ -60,7 +60,7 @@ tools/           THE GATE.       doctor.mjs — the eleven checks + quiz-id lock
 2. **The shell.** `style.css`, `learn.css`, `site.js`, `index.html`. Sidebar, TOC, pager, search,
    theme, Simple/Pro switch — working from `file://`.
 3. **The engine.** `store.js`, `quiz.js`, `learn.js`, `notes.js` + `dashboard/review/exam/notes`.
-4. **Content in bulk.** 52 chapters and their question banks.
+4. **Content in bulk.** 62 chapters and their question banks.
 5. **The deep course.** Modules in the five-part shape + `GOLDEN-RULES.md`.
 6. **The viva.** Deck generator, `viva.html`, `simulate.html`.
 7. **The accounts service.** Contract §5.2, schema §5.3, decisions §5.4, tests §5.6.

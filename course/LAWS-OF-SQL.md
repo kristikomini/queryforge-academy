@@ -24,7 +24,7 @@ books, and the question each one answers:
 | [XI · Durability](#xi--durability) | What survives, and what only appears to? |
 | [XII · Trust](#xii--trust) | What is this number actually a fact about? |
 
-Every law below is one of the 456 rules from a chapter card, in a different
+Every law below is one of the 518 rules from a chapter card, in a different
 order. The chapter reference is where it is argued for.
 
 ---

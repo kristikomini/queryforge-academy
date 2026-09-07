@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0E &middot; WHERE: asking for less &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00e-where-filtering">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0E</p>
+<h1>WHERE: asking for less</h1>
+<p class="lede">Comparison operators, AND, OR, NOT, IN, BETWEEN, LIKE — and the first place NULL will surprise you.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">A query with no <code>WHERE</code> clause reads the whole table. Learning to say what
+  you actually want is the first performance lesson of the course, disguised as a syntax lesson.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="idea">One condition, evaluated once per row</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Go through the pile of cards one at a time. For each card, ask a yes-or-no question. Keep the yeses, throw away
+    the noes. <code>WHERE</code> is that question, and it is asked once per card.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    <code>WHERE</code> takes a boolean expression evaluated per row, and keeps the row only when the expression is
+    <strong>TRUE</strong>. Not &ldquo;not false&rdquo; &mdash; TRUE. SQL has three truth values, and the third one,
+    <code>UNKNOWN</code>, is produced by any comparison involving <code>NULL</code>; those rows are discarded
+    exactly as though they had been FALSE. Logically the filter runs per row; physically the engine will use an
+    index to avoid looking at most of them, which is what
+    <a href="07-predicates-and-sargability.html">chapter 07</a> is about.
+  </p>
+</div>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The six comparison operators, and what each one does to a row.</figcaption>
+<pre><code>SELECT id, status, total_cents FROM orders   -- the columns and the table…
+WHERE total_cents &gt; 50000;                   -- …and the question asked of every row
+
+--  =    equal            status = 'shipped'
+--  &lt;&gt;   not equal        status &lt;&gt; 'draft'      (!= works too; &lt;&gt; is the standard)
+--  &lt;    less than        total_cents &lt; 1000
+--  &lt;=   at most          total_cents &lt;= 1000
+--  &gt;    greater than     total_cents &gt; 50000
+--  &gt;=   at least         placed_at &gt;= '2026-01-01'
+</code></pre>
+<div class="cx-conv">
+  <b>Types and comparison</b>
+  <ul>
+    <li>Both sides must be comparable. Comparing a number column to a text literal makes the engine convert one of
+      them &mdash; usually the <em>column</em>, once per row, which quietly disables the index
+      (<a href="07-predicates-and-sargability.html">chapter 07</a>).</li>
+    <li>Text comparison follows the column's <strong>collation</strong>: whether <code>'ROSSI'</code> equals
+      <code>'rossi'</code> is a property of the database, not of the query. Check it rather than assuming.</li>
+    <li><code>&lt;&gt;</code> is the standard spelling of &ldquo;not equal&rdquo;. <code>!=</code> is accepted
+      everywhere and standard nowhere; pick one and be consistent.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="combining">AND, OR and the brackets that decide the meaning</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The same three conditions, with and without brackets &mdash; two completely different questions.</figcaption>
+<pre><code>-- WRONG, almost certainly: AND binds tighter than OR, so this reads as
+--   status = 'shipped'  OR  (status = 'delivered' AND total_cents > 50000)
+SELECT * FROM orders                                 -- every column, for illustration
+WHERE status = 'shipped' OR status = 'delivered' AND total_cents &gt; 50000;  -- ← misread
+
+-- RIGHT: brackets say what you meant.
+SELECT * FROM orders                                 -- the same table…
+WHERE (status = 'shipped' OR status = 'delivered')   -- either of these two statuses…
+  AND total_cents &gt; 50000;                           -- …AND over €500
+
+-- Better still: a list, when every branch tests the same column.
+SELECT * FROM orders                                 -- …and the same question again
+WHERE status IN ('shipped', 'delivered')             -- same meaning, one clause
+  AND total_cents &gt; 50000;                           -- and much harder to misread
+</code></pre>
+<div class="cx-conv">
+  <b>Precedence, and the habit that makes it irrelevant</b>
+  <ul>
+    <li><code>AND</code> binds tighter than <code>OR</code>, exactly as × binds tighter than +. So
+      <code>a OR b AND c</code> means <code>a OR (b AND c)</code>.</li>
+    <li>The habit: <strong>bracket every mixture of AND and OR</strong>, even when you are sure. It costs two
+      characters and removes a whole class of silent bug &mdash; and the reviewer no longer has to remember the
+      precedence table either.</li>
+    <li><code>IN (…)</code> is a chain of <code>OR</code>s over one column. It is clearer, and the optimiser
+      recognises it as a set of seeks.</li>
+    <li>Three-valued logic makes the boolean rules less obvious than they look:
+      <code>TRUE OR UNKNOWN</code> is TRUE, but <code>FALSE OR UNKNOWN</code> is UNKNOWN — which
+      <code>WHERE</code> discards.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="ranges">Ranges, lists and patterns</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Three shorthands you will use every day &mdash; and the one that is a trap on timestamps.</figcaption>
+<pre><code>-- A LIST: one column, several acceptable values.
+SELECT * FROM orders WHERE status IN ('shipped', 'delivered');   -- ORs, spelled compactly
+
+-- A RANGE: BETWEEN is INCLUSIVE at both ends.
+SELECT * FROM orders WHERE total_cents BETWEEN 10000 AND 50000;  -- €100.00 to €500.00, both included
+
+-- The SAME range written out. Identical meaning, and the form to prefer on dates.
+SELECT * FROM orders WHERE total_cents &gt;= 10000 AND total_cents &lt;= 50000;  -- both bounds, spelled out
+
+-- A PATTERN: % is any run of characters, _ is exactly one.
+SELECT * FROM customers WHERE name LIKE 'Rossi%';    -- starts with Rossi: fast, uses an index
+SELECT * FROM customers WHERE name LIKE '%rossi%';   -- contains rossi: reads every row
+</code></pre>
+<div class="cx-conv">
+  <b>The date trap, and the wildcard trap</b>
+  <ul>
+    <li><code>BETWEEN '2026-01-01' AND '2026-01-31'</code> on a <em>timestamp</em> column silently loses
+      everything after midnight on the 31st, because the upper bound is a moment, not a day. Use
+      <code>&gt;= '2026-01-01' AND &lt; '2026-02-01'</code> &mdash; a half-open range, correct at any
+      precision.</li>
+    <li>A <strong>leading</strong> <code>%</code> cannot use an index: an index is ordered by prefix, and you have
+      not given a prefix. That is fine on a small table and a real problem on a large one; the answer there is
+      full-text search, not a bigger index.</li>
+    <li><code>LIKE</code> case sensitivity depends on the collation, not on the pattern. PostgreSQL is
+      case-sensitive by default and has <code>ILIKE</code>; SQL Server usually is not.</li>
+    <li>To search for a literal <code>%</code> or <code>_</code>, escape it:
+      <code>LIKE '100\_%' ESCAPE '\'</code>.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="null">The first place NULL will surprise you</h2>
+
+<div class="box trap">
+  <div class="box-title">⚠ <code>= NULL</code> never matches anything</div>
+  <p style="margin-bottom:0">
+    <code>NULL</code> means <em>unknown</em>. Is an unknown value equal to another unknown value? The honest answer
+    is &ldquo;unknown&rdquo;, and that is exactly what SQL returns. <code>WHERE</code> keeps only TRUE, so the row
+    is discarded &mdash; with no error, no warning, and a plausible-looking empty result.
+  </p>
+</div>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The wrong way and the only way to ask &ldquo;is this empty?&rdquo;</figcaption>
+<pre><code>SELECT * FROM orders WHERE shipped_at = NULL;      -- ALWAYS zero rows. Not an error.
+SELECT * FROM orders WHERE shipped_at IS NULL;     -- correct: the unshipped orders
+SELECT * FROM orders WHERE shipped_at IS NOT NULL; -- correct: the shipped ones
+
+-- And the one that catches everybody, once:
+SELECT * FROM orders WHERE status &lt;&gt; 'cancelled';  -- rows where status IS NULL are NOT returned
+</code></pre>
+<div class="cx-conv">
+  <b>Why the last line is the important one</b>
+  <ul>
+    <li>&ldquo;Everything that is not cancelled&rdquo; sounds total. It is not: for a row whose
+      <code>status</code> is NULL, <code>NULL &lt;&gt; 'cancelled'</code> is UNKNOWN, so the row is dropped.
+      Two queries that look like opposites can therefore both miss the same rows.</li>
+    <li>The fix in a query is <code>WHERE status &lt;&gt; 'cancelled' OR status IS NULL</code>. The fix in the
+      <em>schema</em> is <code>NOT NULL</code> on the column, and it is much better: it removes the question
+      permanently.</li>
+    <li>This is the beginner-sized version of <a href="09-null-and-three-valued-logic.html">chapter 09</a>, which
+      shows the same mechanism silently emptying an entire report through <code>NOT IN</code>.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="performance">The habit that keeps a filter fast</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Two ways to ask for March. One can use an index; the other cannot.</figcaption>
+<pre><code>-- Not sargable: the column is wrapped in a function, so the index on it is useless.
+SELECT * FROM orders                                  -- the table…
+WHERE strftime('%Y-%m', placed_at) = '2026-03';       -- computed for EVERY row, then compared
+
+-- Sargable: a plain range over the values actually stored.
+SELECT * FROM orders                                  -- …and the same table again
+WHERE placed_at &gt;= '2026-03-01'                       -- inclusive lower bound…
+  AND placed_at &lt;  '2026-04-01';                      -- …exclusive upper bound
+</code></pre>
+<div class="cx-conv">
+  <b>One rule, and one word to take to an interview</b>
+  <ul>
+    <li><strong>Keep the column bare on one side of the comparison.</strong> Do the arithmetic, the formatting and
+      the conversion on the <em>literal</em>, never on the column.</li>
+    <li>The word is <strong>sargable</strong> &mdash; Search ARGument able &mdash; and using it correctly in an
+      interview is a genuine signal. <a href="07-predicates-and-sargability.html">Chapter 07</a> is the full
+      treatment.</li>
+    <li>Both queries return the same rows. Only one of them can start at the right place in the index instead of
+      reading the whole table, and on a large table that is the difference between milliseconds and seconds.</li>
+  </ul>
+</div>
+</figure>
+
+<div class="rules">
+  <ol>
+    <li><code>WHERE</code> keeps a row only when its condition is <strong>TRUE</strong>; <code>UNKNOWN</code> is discarded exactly like FALSE.</li>
+    <li><code>AND</code> binds tighter than <code>OR</code>. Bracket every mixture of the two, always.</li>
+    <li><code>BETWEEN</code> is inclusive at both ends, which makes it wrong for timestamps — use <code>&gt;=</code> and <code>&lt;</code>.</li>
+    <li>A leading <code>%</code> in a <code>LIKE</code> pattern means a full scan, because an index is ordered by prefix.</li>
+    <li><code>= NULL</code> matches nothing; only <code>IS NULL</code> and <code>IS NOT NULL</code> can test for absence.</li>
+    <li><code>col &lt;&gt; 'x'</code> silently excludes rows where <code>col</code> is <code>NULL</code>.</li>
+    <li>Keep the column bare on one side of the comparison, or the index cannot be used: that is <strong>sargability</strong>.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">Why does <code>WHERE shipped_at = NULL</code> return nothing?</p>
+  <p class="a">Because <code>NULL</code> means unknown, so the comparison evaluates to <code>UNKNOWN</code> rather
+  than TRUE, and <code>WHERE</code> keeps only TRUE. <code>IS NULL</code> is the only operator that can test for
+  absence. It is not an error, which is what makes it dangerous: you get a plausible empty result.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why prefer <code>&gt;= '2026-03-01' AND &lt; '2026-04-01'</code> over <code>BETWEEN</code>?</p>
+  <p class="a">Because <code>BETWEEN</code> includes both endpoints, and on a timestamp column the upper endpoint is
+  midnight &mdash; so everything later that day is silently excluded. The half-open range is correct whatever the
+  column's precision is now or becomes after a migration.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

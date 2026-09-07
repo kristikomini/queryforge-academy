@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0D &middot; Your first query: SELECT and FROM &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00d-select-and-from">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0D</p>
+<h1>Your first query: SELECT and FROM</h1>
+<p class="lede">Two keywords, one statement, and every token in it explained — including the semicolon.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">It is the first statement anybody writes. Written out here token by token so that
+  nothing in it is ever a mystery again &mdash; and so that the <em>anatomy</em> panel under every later example
+  reads as a reminder rather than as a foreign language.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="first">The smallest complete query</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    A query is one sentence with two halves. The second half says <em>which pile of cards to look in</em>. The first
+    half says <em>which boxes on the card you want to see</em>. That is genuinely all a basic query is: where to
+    look, and what to show.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    <code>SELECT</code> is a <em>projection</em>: it chooses columns and can compute new ones.
+    <code>FROM</code> names the row source. Written in that order, evaluated in the opposite one &mdash; the engine
+    resolves <code>FROM</code> first, because <code>SELECT</code> cannot mean anything until it knows which columns
+    exist. That inversion is the root of most beginner errors, and
+    <a href="06-how-select-is-evaluated.html">chapter 06</a> is devoted to it.
+  </p>
+</div>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Two lines, six tokens, one complete statement.</figcaption>
+<pre><code>SELECT name, email        -- WHAT to show: two named columns, in this order
+FROM customers;           -- WHERE to look: the table. The ; ends the statement.
+</code></pre>
+<div class="cx-conv">
+  <b>Every token, one at a time</b>
+  <ul>
+    <li><code>SELECT</code> &mdash; a <strong>keyword</strong>. Case does not matter to the engine
+      (<code>select</code> is identical), but this course writes keywords in capitals so the shape of a statement is
+      visible at a glance.</li>
+    <li><code>name</code>, <code>email</code> &mdash; <strong>identifiers</strong>: the names of columns. The comma
+      separates them; the order you write them is the order they come back in.</li>
+    <li><code>FROM</code> &mdash; a keyword introducing the row source.</li>
+    <li><code>customers</code> &mdash; an identifier again, this time the name of a table.</li>
+    <li><code>;</code> &mdash; the statement terminator. Optional for a single statement in most clients, required
+      between statements in a script. Get into the habit now.</li>
+    <li>Whitespace and line breaks mean nothing to the engine. The layout above is for people.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="star">The asterisk, and why it is a habit to unlearn</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption><code>SELECT *</code>: right while exploring, wrong in anything that will be kept.</figcaption>
+<pre><code>SELECT * FROM customers;        -- every column, in the table's own declared order
+SELECT id, name FROM customers; -- the two you actually need, in the order you want them
+</code></pre>
+<div class="cx-conv">
+  <b>Why the second one is the professional habit</b>
+  <ul>
+    <li><strong>It survives change.</strong> <code>*</code> is expanded at parse time, so adding a column to the
+      table silently changes what every <code>SELECT *</code> returns &mdash; including a
+      <code>VARCHAR(4000)</code> column nobody wanted to fetch.</li>
+    <li><strong>It moves less data.</strong> Fewer columns is fewer bytes read from disk, held in memory and pushed
+      over the network. On a wide table the difference is large.</li>
+    <li><strong>It can be answered from an index alone.</strong> A narrow index can contain <code>id</code> and
+      <code>name</code>; nothing can &ldquo;contain all columns&rdquo;, so <code>*</code> always means visiting the
+      table (<a href="25-how-an-index-works.html">chapter 25</a>).</li>
+    <li><strong>It documents intent.</strong> A named list tells the next reader what the query is for. Use
+      <code>*</code> at the prompt while exploring; name the columns in anything you save.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="alias">Aliases: naming things in the result</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Renaming a column for the reader, and naming a computed one because it has no name of its own.</figcaption>
+<pre><code>SELECT name        AS customer,       -- rename in the RESULT; the table is untouched
+       email       AS contact,        -- AS is optional, and worth writing anyway
+       total_cents / 100.0 AS eur     -- a COMPUTED column: without AS it has no name
+FROM orders_view;                     -- (a view: a saved query, used like a table)
+</code></pre>
+<div class="cx-conv">
+  <b>What an alias is, and what it is not</b>
+  <ul>
+    <li>An alias renames a column <strong>in the result only</strong>. Nothing about the table changes, and the
+      alias disappears when the query ends.</li>
+    <li>Computed columns need one. Without <code>AS eur</code> the header is engine-specific rubbish &mdash;
+      <code>?column?</code> in PostgreSQL, the expression text elsewhere &mdash; and an application reading the
+      result by column name breaks.</li>
+    <li><code>AS</code> is optional (<code>name customer</code> works) and omitting it is how a missing comma
+      becomes a silent bug: <code>SELECT name email FROM…</code> returns one column called <code>email</code>
+      containing names.</li>
+    <li>An alias with a space or a capital needs quoting: <code>AS "Customer name"</code> in the standard,
+      PostgreSQL and SQLite; <code>AS [Customer name]</code> in SQL Server. Double quotes are for
+      <em>identifiers</em>; single quotes are for <em>text</em>, and mixing them up is a first-week rite of
+      passage.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="distinct">DISTINCT: one of each</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Which values actually occur in a column &mdash; the first question to ask about unfamiliar data.</figcaption>
+<pre><code>SELECT DISTINCT status     -- one row per distinct value, duplicates removed
+FROM orders;               -- across every row of the table
+</code></pre>
+<div class="cx-conv">
+  <b>Useful, and a warning sign later</b>
+  <ul>
+    <li><code>DISTINCT</code> applies to the <strong>whole row</strong> of the result, not to one column. With two
+      columns selected it returns distinct <em>pairs</em>.</li>
+    <li>Here it is exactly the right tool: exploring an unfamiliar table by asking what values a column actually
+      holds.</li>
+    <li>Later, <code>DISTINCT</code> added to make duplicates go away is usually a symptom of a join multiplying
+      rows &mdash; it hides the cause and leaves every <code>SUM</code> wrong
+      (<a href="08-joins.html">chapter 08</a>). Remember that you were warned here.</li>
+    <li>It is not free: removing duplicates costs a sort or a hash over the result.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="comments">Comments, and how to read an error message</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Both comment styles, and the four errors you will meet in your first hour.</figcaption>
+<pre><code>-- Two hyphens comment out the rest of the LINE. This course uses them everywhere.
+/* A slash-star comment can span
+   several lines, and is useful for
+   temporarily disabling a whole clause. */
+SELECT name FROM customers;   -- a trailing comment is a comment too
+
+-- The four errors you will actually meet, and what each one means:
+--   "no such table: custmers"        → a typo, or you are in the wrong database
+--   "no such column: emial"          → a typo, or the column is on a DIFFERENT table
+--   "near ',': syntax error"         → usually a trailing comma before FROM
+--   "incomplete input"               → an unclosed bracket, quote, or missing ;
+</code></pre>
+<div class="cx-conv">
+  <b>How to read a database error</b>
+  <ul>
+    <li>They are unusually literal. <em>&ldquo;No such column: emial&rdquo;</em> means precisely that; it is very
+      rarely a deeper problem than the words on the screen.</li>
+    <li>The position it points at is where the parser <em>gave up</em>, which is often one token after the real
+      mistake. Look at the token before the one named.</li>
+    <li><em>&ldquo;No such column&rdquo;</em> where the column definitely exists usually means it exists on a table
+      you have not joined to, or you have quoted it with single quotes and asked for a text literal instead
+      (<a href="00g-expressions-and-types.html">chapter 0G</a>).</li>
+    <li>Comment out half the query and run it. Bisection finds a syntax error faster than reading does, and it is
+      the same method <a href="48-analysis-and-teamwork.html">chapter 48</a> applies to wrong answers.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="style">A layout convention worth adopting on day one</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The same query, written the way a reviewer wants to read it.</figcaption>
+<pre><code>SELECT c.id,                    -- one column per line, so a diff shows one change per line
+       c.name,                  -- the alias c. makes the source of each column explicit
+       c.email               -- …and the last one, still on its own line
+FROM customers AS c             -- alias the table once, use it everywhere
+WHERE c.city_id = 3             -- one condition per line, keywords starting the line
+ORDER BY c.name;                -- and a semicolon on the last line, always
+</code></pre>
+<div class="cx-conv">
+  <b>Why these four habits pay for themselves</b>
+  <ul>
+    <li><strong>One column per line.</strong> Adding a column is then a one-line diff, and code review actually
+      catches things.</li>
+    <li><strong>Keywords start the line.</strong> The clause structure &mdash; and therefore the evaluation order
+      &mdash; is visible without reading the words.</li>
+    <li><strong>Qualify columns with a table alias.</strong> With one table it is noise; with two it is the
+      difference between a query anyone can read and one that must be reverse-engineered. Adopt it now so it is
+      automatic later.</li>
+    <li><strong>Short, meaningful aliases.</strong> <code>c</code> for customers, <code>o</code> for orders.
+      <code>a</code>, <code>b</code>, <code>t1</code> are how a query becomes unreadable in six months.</li>
+  </ul>
+</div>
+</figure>
+
+<div class="rules">
+  <ol>
+    <li><code>SELECT</code> chooses columns, <code>FROM</code> names the row source — and the engine resolves <code>FROM</code> first, whatever the writing order says.</li>
+    <li><code>SELECT *</code> is for exploring. Name the columns in anything you save: it survives schema change, moves less data, and can be served by an index.</li>
+    <li>An alias renames a column <strong>in the result only</strong>, and a computed column needs one or it has no usable name.</li>
+    <li>Single quotes are for text; double quotes (or brackets in SQL Server) are for identifiers.</li>
+    <li>Database error messages are literal, and the position they report is where the parser gave up — look at the token before it.</li>
+    <li>One column per line, keywords starting the line, tables aliased: the layout is what makes a query reviewable.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">Why is <code>SELECT *</code> discouraged in production code?</p>
+  <p class="a">It is expanded at parse time, so the result changes silently when the table does; it fetches columns
+  nobody asked for, including large ones; it prevents a narrow index from covering the query; and it hides the
+  query's intent from the next reader. At an interactive prompt, while exploring, it is exactly the right tool.</p>
+</div>
+
+<div class="qa">
+  <p class="q">What is the difference between <code>'name'</code> and <code>"name"</code> in a query?</p>
+  <p class="a">Single quotes make a <strong>text literal</strong> &mdash; the five characters n-a-m-e. Double quotes
+  make a <strong>quoted identifier</strong> &mdash; a column or table called <code>name</code>. So
+  <code>WHERE city = 'Modena'</code> compares against text, while <code>WHERE "city" = Modena</code> compares two
+  columns and fails. SQL Server also accepts <code>[brackets]</code> for identifiers, and MySQL
+  <code>`backticks`</code>.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

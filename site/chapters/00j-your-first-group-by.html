@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>0J &middot; Counting things: your first GROUP BY &mdash; QueryForge Academy</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="../manifest.webmanifest">
+<meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101320" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="stylesheet" href="../assets/learn.css">
+</head>
+<body data-chapter="00j-your-first-group-by">
+<a class="skip" href="#main">Skip to content</a>
+<div class="layout">
+<aside class="sidebar" id="sidebar"></aside>
+<main class="main" id="main">
+
+<p class="crumbs">Part 0 — From absolute zero <span>&rsaquo;</span> Chapter 0J</p>
+<h1>Counting things: your first GROUP BY</h1>
+<p class="lede">From “list the orders” to “how many orders per customer” — the step where SQL stops being a filter.</p>
+
+<div class="box note">
+  <div class="box-title">No advert asked for this</div>
+  <p style="margin-bottom:0">Every reporting question anybody will ever ask you is a <code>GROUP BY</code>.
+  <a href="10-aggregation.html">Chapter 10</a> covers the traps &mdash; <code>HAVING</code>, conditional
+  aggregation, <code>ROLLUP</code>. This one covers the idea, and it is the last chapter of Part 0: after it, the
+  course proper begins.</p>
+</div>
+
+<nav id="toc"></nav>
+
+<h2 id="idea">Many rows in, one row out</h2>
+
+<div class="box kid">
+  <div class="box-title">🧒 Simple</div>
+  <p style="margin-bottom:0">
+    Put the cards into piles &mdash; one pile per customer. Now, instead of handing back the cards, hand back
+    <em>one slip of paper per pile</em>: the customer's name, and how many cards were in their pile. The piling up
+    is <code>GROUP BY</code>. The counting is <code>COUNT</code>. You get one row per pile, not one row per card.
+  </p>
+</div>
+
+<div class="box pro">
+  <div class="box-title">🎓 Professional</div>
+  <p style="margin-bottom:0">
+    <code>GROUP BY</code> partitions the rows surviving <code>WHERE</code> into groups sharing the listed values,
+    and collapses each group into a single output row. After it has run, only two things are legal in
+    <code>SELECT</code>: the grouping columns, and <em>aggregates</em> over the rest. Every other column no longer
+    has a single value to show, which is why asking for one is an error rather than a guess.
+  </p>
+</div>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The whole idea, in one query: how many orders each customer has placed.</figcaption>
+<pre><code>SELECT customer_id,               -- the grouping key: one output row per distinct value
+       COUNT(*) AS orders         -- the aggregate: how many rows fell into this group
+FROM orders                       -- the rows to be grouped
+GROUP BY customer_id              -- "for each customer_id"
+ORDER BY orders DESC              -- busiest customer first (the SELECT alias works here)
+LIMIT 10;                         -- the top ten
+</code></pre>
+<div class="cx-conv">
+  <b>What changed compared with everything before this chapter</b>
+  <ul>
+    <li><strong>The row count of the result no longer matches the table.</strong> Six thousand orders become one row
+      per customer. That is the first query you have written where output rows and input rows are different
+      things.</li>
+    <li><code>COUNT(*)</code> counts <strong>rows</strong>. It is never <code>NULL</code>, and it does not look at
+      any column &mdash; which is exactly what makes it right for &ldquo;how many&rdquo;.</li>
+    <li>The alias <code>orders</code> is usable in <code>ORDER BY</code> because that clause runs last. It would
+      <em>not</em> work in <code>WHERE</code>, which ran long before.</li>
+    <li>Reading the result: a customer who has never ordered does not appear at all &mdash; they have no rows in
+      <code>orders</code>, so there is no group. Getting them in needs a <code>LEFT JOIN</code> from
+      <code>customers</code> (<a href="00i-your-first-join.html">chapter 0I</a>), and that is one of the most
+      common reporting bugs there is.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="functions">The five aggregate functions</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>All five at once, over the same groups.</figcaption>
+<pre><code>SELECT status,                              -- one row per status value
+       COUNT(*)            AS n,            -- how many rows
+       SUM(total_cents)    AS total_cents,  -- their total…
+       AVG(total_cents)    AS mean_cents,   -- …mean…
+       MIN(total_cents)    AS smallest,     -- …smallest…
+       MAX(placed_at)      AS most_recent   -- …and the latest date in the group
+FROM orders                                  -- the table being grouped
+GROUP BY status                             -- the grouping key
+ORDER BY n DESC;                            -- commonest status first
+</code></pre>
+<div class="cx-conv">
+  <b>What each one does with <code>NULL</code> — the part that produces wrong reports</b>
+  <ul>
+    <li><code>COUNT(*)</code> counts <strong>rows</strong>; <code>COUNT(col)</code> counts
+      <strong>non-NULL values</strong> of that column. They differ by exactly the number of NULLs, and that
+      difference is a useful diagnostic in itself.</li>
+    <li><code>SUM</code>, <code>AVG</code>, <code>MIN</code> and <code>MAX</code> all <strong>ignore
+      NULLs</strong>. So <code>AVG</code> divides by the count of non-null values, not by the number of rows &mdash;
+      if NULL means &ldquo;zero happened&rdquo; in your data, the average is wrong and nothing says so.</li>
+    <li>Every aggregate except <code>COUNT</code> returns <code>NULL</code> over an empty set. A dashboard total
+      should therefore be <code>COALESCE(SUM(x), 0)</code>.</li>
+    <li><code>AVG</code> over an integer column does integer division in several engines:
+      <code>AVG(total_cents * 1.0)</code> is the safe spelling.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="error">The error that teaches the rule</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Asking for a column the group cannot answer for &mdash; and the two ways to fix it.</figcaption>
+<pre><code>-- ERROR: which placed_at? The group has hundreds, and no rule for choosing.
+SELECT customer_id, placed_at, COUNT(*)   -- placed_at is neither grouped nor aggregated
+FROM orders GROUP BY customer_id;         -- so the engine refuses
+
+-- Fix 1: aggregate it, and say WHICH one you want.
+SELECT customer_id,                       -- the grouping key, as before
+       MAX(placed_at) AS last_order,      -- "the latest one in this group"
+       COUNT(*)       AS orders           -- and the count
+FROM orders GROUP BY customer_id;         -- one row per customer
+
+-- Fix 2: group by it too — but notice this is a DIFFERENT question.
+SELECT customer_id, placed_at, COUNT(*) AS orders   -- one row per (customer, timestamp)
+FROM orders GROUP BY customer_id, placed_at;        -- almost certainly not what was wanted
+</code></pre>
+<div class="cx-conv">
+  <b>Why the error is a feature</b>
+  <ul>
+    <li>After grouping, each output row stands for many input rows. Asking for a bare column asks for one value out
+      of many with no rule for choosing, so the engine refuses rather than guessing.</li>
+    <li>MySQL historically returned an <em>arbitrary</em> value here instead of erroring, which is worse: it looks
+      like it worked. Modern MySQL enables <code>ONLY_FULL_GROUP_BY</code> and behaves like everyone else.</li>
+    <li>Fix 1 and fix 2 answer different questions. Adding a column to <code>GROUP BY</code> to make an error go
+      away is how a report quietly changes meaning &mdash; always check the row count afterwards.</li>
+    <li><code>MAX(placed_at)</code> gives the latest <em>timestamp</em>, not the rest of that row. &ldquo;The whole
+      row with the latest date&rdquo; is a different problem, and it needs a window function
+      (<a href="13-window-functions.html">chapter 13</a>).</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="having">Filtering groups, not rows</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Two filters in one query, each doing a job the other cannot.</figcaption>
+<pre><code>SELECT customer_id,                                        -- the rows to group
+       COUNT(*)         AS orders,          -- how many, after the WHERE filter
+       SUM(total_cents) AS spend            -- and how much
+FROM orders                                 -- one row per (customer, timestamp)
+WHERE status &lt;&gt; 'cancelled'                 -- filters ROWS, before grouping: one row at a time
+GROUP BY customer_id                        -- now the rows become groups
+HAVING COUNT(*) &gt;= 3                        -- filters GROUPS: impossible before they exist
+ORDER BY spend DESC                         -- biggest spender first
+LIMIT 10;                                        -- the same table again
+</code></pre>
+<div class="cx-conv">
+  <b>Which filter goes where</b>
+  <ul>
+    <li>Anything decidable by looking at <strong>one row</strong> goes in <code>WHERE</code>. It runs first, so it
+      shrinks the data before the expensive grouping, and it can use an index.</li>
+    <li>Anything that needs the <strong>whole group</strong> goes in <code>HAVING</code>. <code>WHERE COUNT(*) &gt;
+      3</code> is a syntax error, because <code>WHERE</code> runs before any group exists.</li>
+    <li><code>HAVING</code> usually has to repeat the expression rather than use the alias, because it runs before
+      <code>SELECT</code> creates it. PostgreSQL and MySQL bend this; SQL Server and Oracle do not.</li>
+    <li>Putting a row filter into <code>HAVING</code> still parses and still gives the right answer &mdash; slower,
+      for no benefit. Reviewers notice.</li>
+  </ul>
+</div>
+</figure>
+
+<h2 id="together">Everything in Part 0, in one query</h2>
+
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Six clauses, two tables, one report &mdash; and you now know every token in it.</figcaption>
+<pre><code>SELECT c.name                       AS customer,   -- from customers, via the join
+       COUNT(*)                     AS orders,     -- rows per group
+       SUM(o.total_cents) / 100.0   AS spend_eur   -- cents → euros, keeping the fraction
+FROM orders    AS o                                -- the facts…
+JOIN customers AS c ON c.id = o.customer_id        -- …joined to the names
+WHERE o.status &lt;&gt; 'cancelled'                      -- row filter, before grouping
+  AND o.placed_at &gt;= '2026-01-01'                  -- half-open date range…
+  AND o.placed_at &lt;  '2027-01-01'                  -- …so the index still works
+GROUP BY c.name                                    -- one row per customer name
+HAVING COUNT(*) &gt;= 2                               -- group filter: repeat customers only
+ORDER BY spend_eur DESC, customer                  -- biggest first, ties broken by name
+LIMIT 10;                                          -- the top ten
+</code></pre>
+<div class="cx-conv">
+  <b>The order the engine runs it in</b>
+  <ul>
+    <li><code>FROM</code> and <code>JOIN</code> &mdash; assemble the rows.</li>
+    <li><code>WHERE</code> &mdash; throw most of them away, one row at a time.</li>
+    <li><code>GROUP BY</code> &mdash; collapse what is left into groups.</li>
+    <li><code>HAVING</code> &mdash; throw away whole groups.</li>
+    <li><code>SELECT</code> &mdash; work out the columns, including <code>spend_eur</code>.</li>
+    <li><code>ORDER BY</code> &mdash; sort, and it can use the alias because <code>SELECT</code> has already run.</li>
+    <li><code>LIMIT</code> &mdash; take the first ten of that order.</li>
+    <li>That is <a href="06-how-select-is-evaluated.html">chapter 06</a> in advance, and if it makes sense here you
+      are ready for Part 1. <code>GROUP BY c.name</code> would merge two customers who share a name;
+      <code>GROUP BY c.id, c.name</code> is the honest version, and noticing that is a good sign.</li>
+  </ul>
+</div>
+</figure>
+
+<div class="box good">
+  <div class="box-title">✔ You have finished Part 0</div>
+  <p style="margin-bottom:0">
+    You can now read and write the query above, which is a real reporting query. From
+    <a href="01-engines-and-storage.html">chapter 01</a> the course stops teaching syntax and starts explaining
+    what the engine does with it &mdash; storage, the relational model, evaluation order, indexes, transactions.
+    Take the tests at the end of each Part 0 chapter first: they are what turns reading into recall
+    (<a href="../review.html">review</a>).
+  </p>
+</div>
+
+<div class="rules">
+  <ol>
+    <li><code>GROUP BY</code> collapses rows sharing a value into one output row each; the result's row count is no longer the table's.</li>
+    <li>After grouping, only the grouping columns and aggregates are legal in <code>SELECT</code> — anything else has many values and no rule for choosing.</li>
+    <li><code>COUNT(*)</code> counts rows and is never <code>NULL</code>; <code>COUNT(col)</code> counts non-NULL values of that column.</li>
+    <li><code>SUM</code>, <code>AVG</code>, <code>MIN</code> and <code>MAX</code> ignore <code>NULL</code>s, and every aggregate but <code>COUNT</code> returns <code>NULL</code> over an empty set.</li>
+    <li><code>WHERE</code> filters rows before grouping; <code>HAVING</code> filters groups after it.</li>
+    <li>A group with no rows does not exist — customers with no orders are simply absent, which needs a <code>LEFT JOIN</code> to fix.</li>
+  </ol>
+</div>
+
+<div class="qa">
+  <p class="q">What is the difference between <code>COUNT(*)</code> and <code>COUNT(column)</code>?</p>
+  <p class="a"><code>COUNT(*)</code> counts rows and never looks at a value, so it is never <code>NULL</code> and is
+  never affected by them. <code>COUNT(column)</code> counts rows where that column is <em>not</em>
+  <code>NULL</code>. Across a <code>LEFT JOIN</code> the difference is decisive: <code>COUNT(*)</code> counts the
+  null-padded row as 1, and <code>COUNT(o.id)</code> correctly reports 0.</p>
+</div>
+
+<div class="qa">
+  <p class="q">Why can you not put an aggregate in the <code>WHERE</code> clause?</p>
+  <p class="a">Because <code>WHERE</code> runs before <code>GROUP BY</code>: at that point there are no groups, so
+  there is nothing for <code>COUNT(*)</code> to count. Filtering on an aggregate is what <code>HAVING</code> is for,
+  and it runs immediately after the grouping.</p>
+</div>
+
+<div id="chapter-quiz"></div>
+<div id="pager"></div>
+
+</main>
+</div>
+
+<script src="../assets/chapters.js"></script>
+<script src="../assets/quizzes-1.js"></script>
+<script src="../assets/quizzes-2.js"></script>
+<script src="../assets/quizzes-3.js"></script>
+<script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
+<script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
+<script src="../assets/quiz.js"></script>
+<script src="../assets/learn.js"></script>
+<script src="../assets/notes.js"></script>
+<script src="../assets/account.js"></script>
+<script src="../assets/italiano.js"></script>
+<script src="../assets/italiano-panel.js"></script>
+</body>
+</html>

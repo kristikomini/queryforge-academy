@@ -14,10 +14,10 @@
    The precache list is the hard-coded shell PLUS every chapter, generated from
    the manifest via importScripts. That is why chapters.js assigns to `self` and
    not to `window`: there is no `window` in a worker, and a second hand-written
-   list of 52 chapters would go stale on the first rename.
+   list of 62 chapters would go stale on the first rename.
    =========================================================================== */
 
-const CACHE = "queryforge-ve544c23fa84b";   /* STAMPED by tools/stamp-sw.mjs */
+const CACHE = "queryforge-v63edceac978d";   /* STAMPED by tools/stamp-sw.mjs */
 
 /* Everything that is not a chapter. If a name here is wrong the install still
    completes — see the caught rejection below — so a typo cannot make the site
@@ -53,6 +53,8 @@ const SHELL = [
   "assets/italiano-panel.js",
   "assets/store.js",
   "assets/site.js",
+  "assets/syntax.js",
+  "assets/codex.js",
   "assets/quiz.js",
   "assets/learn.js",
   "assets/notes.js",
