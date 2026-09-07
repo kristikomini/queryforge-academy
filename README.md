@@ -250,6 +250,11 @@ git push                            # GitHub Pages — .github/workflows/pages.y
 All four publish `site/`, which is the course and everything that runs in the
 browser. There is no build step to configure and nothing to install.
 
+Two of them are wired to `git push`: `.github/workflows/pages.yml` publishes to
+GitHub Pages, and `.github/workflows/cloudflare.yml` publishes to Workers once a
+`CLOUDFLARE_API_TOKEN` secret exists — and skips itself with a notice until it
+does. Both refuse to publish unless the integrity gate passes.
+
 The accounts service is the exception: it needs a persistent process and a
 writable disk, so it is not a static deployment. The `Dockerfile` serves the site
 **and** the API from one process, for any host that takes a container.

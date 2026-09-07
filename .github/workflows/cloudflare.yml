@@ -1,0 +1,100 @@
+# =============================================================================
+#  Publish site/ to Cloudflare Workers.
+#
+#  WHY A SECOND WORKFLOW RATHER THAN A JOB IN pages.yml. The two hosts fail for
+#  different reasons and should fail separately: Cloudflare being unreachable
+#  must not stop Pages publishing, and a Pages permission problem must not stop
+#  Cloudflare. It costs one extra run of the gate — about fifteen seconds — and
+#  buys a red X that names its own cause, which is the same argument ci.yml
+#  makes for having six jobs instead of one.
+#
+#  IT SKIPS ITSELF WHEN UNCONFIGURED. A fork, or this repository before the
+#  secret exists, gets a green run and a notice rather than a red X on every
+#  push. A workflow that is always red is a workflow people stop reading, and
+#  then it stops reporting anything at all.
+#
+#  SETUP, once:
+#
+#    1. Cloudflare dashboard → My Profile → API Tokens → Create Token
+#       → use the "Edit Cloudflare Workers" template. That is far narrower than
+#         the OAuth scopes `wrangler login` requests, and it is all this needs.
+#    2. gh secret set CLOUDFLARE_API_TOKEN         (or Settings → Secrets)
+#    3. If the token can see more than one account, also set
+#       CLOUDFLARE_ACCOUNT_ID — with one account, wrangler infers it.
+#
+#  The Worker's name, the directory it serves and the html_handling decision all
+#  live in wrangler.jsonc, not here. This file only decides WHEN to deploy.
+# =============================================================================
+
+name: Cloudflare
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, and never cancel one in flight: a half-finished asset
+# upload is worse than a slightly late one.
+concurrency:
+  group: cloudflare
+  cancel-in-progress: false
+
+jobs:
+
+  # ------------------------------------------------------------------- gate
+  #  Identical to the check pages.yml runs before publishing, and for the same
+  #  reason: publishing a site whose cross-references have rotted is worse than
+  #  not publishing it.
+  gate:
+    name: the gate, and is Cloudflare configured
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.cfg.outputs.configured }}
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - name: Is a Cloudflare token configured for this repository?
+        id: cfg
+        run: |
+          # A secret cannot be read in a job-level `if`, so it is mapped to an
+          # env var here and the answer is passed on as an output.
+          if [ -z "$CF_TOKEN" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No CLOUDFLARE_API_TOKEN secret, so nothing will be published to Cloudflare. See .github/workflows/cloudflare.yml for the three setup steps."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+
+      - name: The gate must pass before anything is published
+        run: node tools/doctor.mjs
+
+      - name: Generated files must be current
+        run: |
+          node tools/build-playground-db.mjs --check
+          node tools/stamp-sw.mjs --check
+
+  # ---------------------------------------------------------------- publish
+  publish:
+    name: workers.dev
+    needs: gate
+    if: needs.gate.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      #  Only changed files are uploaded: Cloudflare's asset store is content
+      #  addressed, so a redeploy after a one-file edit moves one file. A
+      #  redeploy with nothing changed uploads nothing at all.
+      - name: Deploy site/ as an assets-only Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy

@@ -78,8 +78,35 @@ Worker code runs at all and every request is served by Cloudflare's asset
 server. `html_handling` is set to `"none"` for exactly the reason `cleanUrls` is
 off on Vercel — the friendlier `"auto-trailing-slash"` redirects `.html` paths.
 
+Only changed files are uploaded: the asset store is content-addressed, so a
+redeploy after editing one chapter moves one file, and a redeploy with nothing
+changed uploads nothing at all. Deploying is safe to repeat.
+
 Cloudflare **Pages** works too and needs no configuration file: set the build
 command to empty and the output directory to `site`.
+
+### Deploying it automatically
+
+[`.github/workflows/cloudflare.yml`](../.github/workflows/cloudflare.yml)
+publishes on every push to `main`, gated on `tools/doctor.mjs` exactly as the
+Pages workflow is. It is a **second workflow rather than a job inside
+pages.yml** on purpose: the two hosts fail for different reasons and should fail
+separately, so a red X names its own cause.
+
+It needs one secret, and **skips itself with a notice when that secret is
+absent** — a fork gets a green run rather than a red X on every push:
+
+1. Cloudflare dashboard → **My Profile → API Tokens → Create Token**, using the
+   **Edit Cloudflare Workers** template. That is much narrower than the OAuth
+   scopes `wrangler login` asks for, which include D1, queues, email routing and
+   containers; this deploy needs none of them.
+2. `gh secret set CLOUDFLARE_API_TOKEN` — or Settings → Secrets and variables →
+   Actions.
+3. Only if the token can see more than one account, also set
+   `CLOUDFLARE_ACCOUNT_ID`. With a single account wrangler infers it.
+
+Until then, `npx wrangler deploy` from a machine that has run `wrangler login`
+is the manual equivalent.
 
 ---
 
