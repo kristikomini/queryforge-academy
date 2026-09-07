@@ -52,16 +52,40 @@
   </p>
 </div>
 
-<pre><code>SELECT
-  customer_id,
-  placed_at,
-  total_cents,
-  SUM(total_cents)   OVER (PARTITION BY customer_id)                       AS customer_total,
-  ROW_NUMBER()       OVER (PARTITION BY customer_id ORDER BY placed_at)    AS nth_order,
-  total_cents * 100.0
-    / SUM(total_cents) OVER (PARTITION BY customer_id)                     AS pct_of_customer
-FROM orders;
--- Same number of rows as `orders`. Every row now knows about its neighbours.</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The defining property: an aggregate that does not collapse the rows it aggregates.</figcaption>
+<pre><code>SELECT                                                              -- no GROUP BY anywhere
+  customer_id,                                                      -- the raw row…
+  placed_at,                                                        -- …unchanged…
+  total_cents,                                                      -- …and still here
+  SUM(total_cents) OVER (PARTITION BY customer_id)                  -- the customer's WHOLE spend…
+                   AS customer_total,                               -- …repeated on every row
+  ROW_NUMBER()     OVER (PARTITION BY customer_id                   -- restart at each customer…
+                         ORDER BY placed_at)                        -- …counting in date order…
+                   AS nth_order,                                    -- …1, 2, 3 …
+  total_cents * 100.0                                               -- 100.0 forces REAL maths
+    / SUM(total_cents) OVER (PARTITION BY customer_id)              -- divided by that same total
+                   AS pct_of_customer                               -- this row's share, per cent
+FROM orders;                                                        -- one table, one pass
+-- Same number of rows as `orders`. Every row now knows about its neighbours.
+</code></pre>
+<div class="cx-conv">
+  <b>Window versus GROUP BY, and one arithmetic warning</b>
+  <ul>
+    <li><code>GROUP BY</code> replaces many rows with one. <code>OVER (PARTITION BY …)</code> leaves
+      the rows alone and adds a column computed across the partition. That is the entire difference,
+      and it is why you can show a row <em>and</em> its share of the total in one query.</li>
+    <li><code>total_cents * 100.0 / SUM(…)</code> — the <code>100.0</code> is doing two jobs: turning
+      the ratio into a percentage, and forcing REAL arithmetic. As integers,
+      <code>total_cents / SUM(…)</code> would be 0 for every row but the largest.</li>
+    <li>If a customer's total could be zero, wrap the divisor in
+      <code>NULLIF(…, 0)</code>. Here it cannot, because a check constraint forbids negative totals
+      and the partition contains at least this row.</li>
+    <li>Window functions are computed in step 5 with <code>SELECT</code>, so they cannot appear in
+      <code>WHERE</code> — which is what the next examples work around.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="ranking">The three ranking functions, and the difference that is always asked</h2>
 
@@ -77,10 +101,28 @@ FROM orders;
 </table>
 </div>
 
-<pre><code>-- salary:  5000  5000  4000  3000
-ROW_NUMBER()  ->    1     2     3     4
-RANK()        ->    1     1     3     4
-DENSE_RANK()  ->    1     1     2     3</code></pre>
+<figure class="codex" data-lang="text">
+<figcaption>The three ranking functions on the same four salaries &mdash; the difference is entirely about ties.</figcaption>
+<pre><code>-- salary:  5000  5000  4000  3000     ← two people tied at the top
+ROW_NUMBER()  ->    1     2     3     4   -- always distinct: the tie is broken arbitrarily
+RANK()        ->    1     1     3     4   -- ties share, and the next rank SKIPS
+DENSE_RANK()  ->    1     1     2     3   -- ties share, and no rank is skipped
+</code></pre>
+<div class="cx-conv">
+  <b>How to choose, in one line each</b>
+  <ul>
+    <li><code>ROW_NUMBER()</code> — &ldquo;give me exactly one row per group&rdquo;. Deduplication,
+      top-1-per-customer, pagination keys.</li>
+    <li><code>RANK()</code> — &ldquo;position in a leaderboard&rdquo;, where two firsts mean there is
+      no second.</li>
+    <li><code>DENSE_RANK()</code> — &ldquo;the <em>n</em>th distinct value&rdquo;. This is the right
+      answer to &ldquo;find the second highest salary&rdquo;, the most-asked SQL interview question
+      there is, and <code>ROW_NUMBER()</code> gets it wrong the moment there is a tie.</li>
+    <li>All three return BIGINT, and all three require an <code>ORDER BY</code> inside
+      <code>OVER</code> — without one, &ldquo;first&rdquo; has no meaning.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap</div>
@@ -95,14 +137,34 @@ DENSE_RANK()  ->    1     1     2     3</code></pre>
 
 <h2 id="topn">Top-N per group: the canonical use</h2>
 
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Top-N per group, the canonical shape: rank inside a CTE, filter outside it.</figcaption>
 <pre><code>-- The most recent order per customer.
-WITH ranked AS (
-  SELECT o.*,
-         ROW_NUMBER() OVER (PARTITION BY customer_id
-                            ORDER BY placed_at DESC, id DESC) AS rn
-  FROM orders o
-)
-SELECT * FROM ranked WHERE rn = 1;</code></pre>
+WITH ranked AS (                                     -- the CTE exists so rn has somewhere to live
+  SELECT o.*,                                        -- every column of orders…
+         ROW_NUMBER() OVER (PARTITION BY customer_id -- …plus a number restarting per customer
+                            ORDER BY placed_at DESC, -- newest first…
+                                     id DESC) AS rn  -- …with a deterministic tie-breaker
+  FROM orders o                                      -- every order is read and ranked
+)                                                    -- end of the CTE
+SELECT * FROM ranked WHERE rn = 1;                   -- now rn is an ordinary column, so WHERE works
+</code></pre>
+<div class="cx-conv">
+  <b>The two details an interviewer is listening for</b>
+  <ul>
+    <li><strong>The tie-breaker.</strong> Two orders placed in the same second are ordered
+      arbitrarily without <code>, id DESC</code>, so the query can return a different row on
+      different runs. That is a genuinely horrible bug to diagnose, and adding one column prevents
+      it.</li>
+    <li><strong>Why the wrapper exists.</strong> <code>WHERE rn = 1</code> inside the same
+      <code>SELECT</code> is illegal: the window function has not been computed when
+      <code>WHERE</code> runs. Say that out loud and you have explained SQL's evaluation order
+      without being asked.</li>
+    <li>Change <code>= 1</code> to <code>&lt;= 3</code> and it is top-three-per-customer. Nothing
+      else changes, which is why this shape is worth memorising.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Why the CTE is not optional</div>
@@ -118,15 +180,36 @@ SELECT * FROM ranked WHERE rn = 1;</code></pre>
 
 <h2 id="dedupe">De-duplication, done properly</h2>
 
-<pre><code>-- Keep the newest row per (email); delete the rest. One statement, no temp table.
-WITH dupes AS (
-  SELECT id,
-         ROW_NUMBER() OVER (PARTITION BY LOWER(email)
-                            ORDER BY updated_at DESC, id DESC) AS rn
-  FROM customers
-)
-DELETE FROM customers
-WHERE id IN (SELECT id FROM dupes WHERE rn &gt; 1);</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>De-duplication as one statement: number the duplicates, delete everything that is not number one.</figcaption>
+<pre><code>-- Keep the newest row per email address; delete the rest. No temp table.
+WITH dupes AS (                                      -- name the duplicates before touching them
+  SELECT id,                                         -- only the key is needed downstream
+         ROW_NUMBER() OVER (PARTITION BY LOWER(email)  -- case-insensitive grouping
+                            ORDER BY updated_at DESC,  -- newest survives…
+                                     id DESC) AS rn    -- …deterministically
+  FROM customers                                    -- read every row once
+)                                                    -- end of the CTE
+DELETE FROM customers                                -- the write, driven by the CTE above
+WHERE id IN (SELECT id FROM dupes WHERE rn &gt; 1);     -- everything that is not the survivor
+</code></pre>
+<div class="cx-conv">
+  <b>Run the SELECT first. Every time.</b>
+  <ul>
+    <li>Replace <code>DELETE FROM customers</code> with
+      <code>SELECT * FROM customers</code> and read what comes back before you run the delete. This
+      is the cheapest habit in the whole course.</li>
+    <li><code>LOWER(email)</code> groups <code>Anna@x.it</code> with <code>anna@x.it</code>. It is
+      also <strong>not sargable</strong> — but that is irrelevant here, because this statement is
+      meant to read the whole table once.</li>
+    <li>Then add the constraint that should have prevented it:
+      <code>CREATE UNIQUE INDEX … ON customers (LOWER(email))</code>. Cleaning up without adding the
+      constraint means doing it again next quarter.</li>
+    <li>Wrap it in a transaction, check the row count, and only then <code>COMMIT</code>
+      (<a href="21-transactions.html">chapter 21</a>).</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ Before you run this on production</div>
@@ -145,14 +228,32 @@ WHERE id IN (SELECT id FROM dupes WHERE rn &gt; 1);</code></pre>
   typo gets into one of them. Standard SQL lets you name it once:
 </p>
 
-<pre><code>SELECT customer_id, placed_at,
-       ROW_NUMBER() OVER w  AS nth,
-       LAG(total_cents) OVER w AS prev_total,
-       SUM(total_cents) OVER w AS running_total
-FROM orders
-WINDOW w AS (PARTITION BY customer_id ORDER BY placed_at)
-ORDER BY customer_id, placed_at;
--- PostgreSQL, MySQL 8, SQLite, Oracle. SQL Server does not support WINDOW.</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Naming a window once, so three functions cannot drift apart.</figcaption>
+<pre><code>SELECT customer_id, placed_at,                    -- the raw columns
+       ROW_NUMBER()     OVER w AS nth,            -- all three share the same window…
+       LAG(total_cents) OVER w AS prev_total,     -- …so a change is made in ONE place
+       SUM(total_cents) OVER w AS running_total   -- running: the frame defaults to "so far"
+FROM orders                                       -- one table, one pass
+WINDOW w AS (PARTITION BY customer_id ORDER BY placed_at)  -- defined once, after FROM
+ORDER BY customer_id, placed_at;                  -- the presentation order, unrelated to w
+-- PostgreSQL, MySQL 8, SQLite, Oracle. SQL Server does not support WINDOW.
+</code></pre>
+<div class="cx-conv">
+  <b>Why this is worth doing</b>
+  <ul>
+    <li>Writing <code>(PARTITION BY customer_id ORDER BY placed_at)</code> five times is how a typo
+      gets into one of them — and a window that differs by one column produces plausible, wrong
+      numbers in a single column of the report.</li>
+    <li><code>SUM(…) OVER w</code> has an <code>ORDER BY</code> and no frame, so the default frame
+      applies: <code>RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW</code> — a running total that
+      includes every row tying with the current one. <a href="14-frames-and-islands.html">Chapter
+      14</a> is about when that default is wrong.</li>
+    <li><code>LAG(total_cents)</code> returns NULL on each customer's first order, because there is
+      no previous row in the partition. That NULL is data, not an error.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="performance">What they cost</h2>
 
@@ -168,16 +269,38 @@ ORDER BY customer_id, placed_at;
 </div>
 
 <div class="tryit">
-  <pre><code>-- Every customer's orders, numbered, with their share of the customer's spend
--- and the gap in days since their previous order. One pass.
-SELECT customer_id, id, placed_at,
-       ROW_NUMBER() OVER w                              AS nth_order,
-       ROUND(100.0 * total_cents
-             / SUM(total_cents) OVER (PARTITION BY customer_id), 1) AS pct,
-       julianday(placed_at) - julianday(LAG(placed_at) OVER w)      AS days_since_prev
-FROM orders
-WINDOW w AS (PARTITION BY customer_id ORDER BY placed_at)
-ORDER BY customer_id, placed_at;</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Three window functions over one shared window, in a single pass.</figcaption>
+<pre><code>-- Every customer's orders: numbered, as a share of their spend, and the gap in days.
+SELECT customer_id, id, placed_at,                          -- the raw columns, unchanged
+       ROW_NUMBER() OVER w                    AS nth_order, -- 1, 2, 3 … per customer
+       ROUND(100.0 * total_cents                            -- 100.0 → REAL, so no truncation
+             / SUM(total_cents)                             -- share of the customer's total…
+               OVER (PARTITION BY customer_id), 1) AS pct,  -- …a DIFFERENT, unordered window
+       julianday(placed_at)                                 -- this order as a day number…
+         - julianday(LAG(placed_at) OVER w)                 -- …minus the previous order's…
+                                              AS days_since_prev  -- …is a gap in days
+FROM orders                                                 -- the only table involved
+WINDOW w AS (PARTITION BY customer_id ORDER BY placed_at)   -- the shared, ordered window
+ORDER BY customer_id, placed_at;                            -- read it chronologically
+</code></pre>
+<div class="cx-conv">
+  <b>Two windows in one query, and a date conversion</b>
+  <ul>
+    <li><code>w</code> is <em>ordered</em>, so anything using it sees a running frame. The
+      percentage needs the customer's <strong>whole</strong> total, so it uses an unordered window
+      written out in full. Getting this wrong gives a &ldquo;share&rdquo; that grows down the page.</li>
+    <li><code>julianday(x)</code> converts a timestamp to a REAL day number, so subtracting two of
+      them gives a difference in days with fractions. PostgreSQL subtracts timestamps directly and
+      returns an <code>INTERVAL</code>; SQL Server needs
+      <code>DATEDIFF(day, prev, placed_at)</code>, which counts midnights crossed rather than
+      elapsed time.</li>
+    <li>The first order of each customer has no previous row, so <code>LAG</code> is NULL and the
+      subtraction is NULL. That is the honest answer to &ldquo;how long since the previous
+      order&rdquo; when there was not one.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -230,7 +353,9 @@ ORDER BY customer_id, placed_at;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

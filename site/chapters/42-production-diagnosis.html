@@ -57,20 +57,44 @@
 
 <h2 id="waits">Wait statistics: what is the server waiting for?</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The first question in any triage: what is the server actually waiting for?</figcaption>
 <pre><code>-- SQL Server: the top waits since the last restart or clear.
-SELECT TOP 12 wait_type,
-       wait_time_ms / 1000 AS wait_s,
-       signal_wait_time_ms / 1000 AS cpu_queue_s,
-       waiting_tasks_count
-FROM sys.dm_os_wait_stats
-WHERE wait_type NOT IN ('CLR_SEMAPHORE','SLEEP_TASK','BROKER_TASK_STOP','XE_TIMER_EVENT',
-                        'LAZYWRITER_SLEEP','SQLTRACE_BUFFER_FLUSH','WAITFOR','HADR_FILESTREAM_IOMGR_IOCOMPLETION')
-ORDER BY wait_time_ms DESC;
+SELECT TOP 12 wait_type,                          -- what kind of wait…
+       wait_time_ms / 1000 AS wait_s,             -- …how long in total, in seconds…
+       signal_wait_time_ms / 1000 AS cpu_queue_s, -- …of which this much was waiting for CPU…
+       waiting_tasks_count                        -- …across how many waits
+FROM sys.dm_os_wait_stats                         -- cumulative since the last restart
+WHERE wait_type NOT IN ('CLR_SEMAPHORE','SLEEP_TASK',   -- the idle-wait exclusion list…
+                        'BROKER_TASK_STOP','XE_TIMER_EVENT',           -- …continues…
+                        'LAZYWRITER_SLEEP','SQLTRACE_BUFFER_FLUSH',  -- …and continues…
+                        'WAITFOR',                                     -- …to the end
+                        'HADR_FILESTREAM_IOMGR_IOCOMPLETION')  -- idle waits: pure noise
+ORDER BY wait_time_ms DESC;                       -- biggest total first
 
--- PostgreSQL: what is happening right now.
-SELECT wait_event_type, wait_event, state, count(*)
-FROM pg_stat_activity WHERE state &lt;&gt; 'idle'
-GROUP BY 1,2,3 ORDER BY count DESC;</code></pre>
+-- PostgreSQL: what is happening right NOW, rather than cumulatively.
+SELECT wait_event_type, wait_event, state, count(*)   -- group the live sessions…
+FROM pg_stat_activity WHERE state &lt;&gt; 'idle'           -- …ignoring idle connections…
+GROUP BY 1,2,3 ORDER BY count DESC;                   -- …commonest wait first
+</code></pre>
+<div class="cx-conv">
+  <b>Reading waits, in three sentences</b>
+  <ul>
+    <li>A server is always waiting for something. The question is whether it is waiting for
+      <em>disk</em> (PAGEIOLATCH), for <em>locks</em> (LCK_M_*), for <em>CPU</em> (a high signal wait),
+      or for the network — and each answer sends you somewhere completely different.</li>
+    <li>The <code>NOT IN</code> list filters idle waits: background threads sleeping. Leave them in
+      and they dominate the top twelve, which is why every version of this query on the internet
+      carries a list like it.</li>
+    <li><code>signal_wait_time_ms</code> is the part of the wait spent <em>runnable but not
+      running</em> — a queue for CPU. A large fraction of it means the box is CPU-bound, whatever the
+      wait type says.</li>
+    <li>SQL Server's view is cumulative since restart; PostgreSQL's is a live sample. Different
+      questions: &ldquo;what has this server been doing&rdquo; versus &ldquo;what is it doing right
+      now&rdquo;.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="table-wrap">
 <table>
@@ -100,25 +124,44 @@ GROUP BY 1,2,3 ORDER BY count DESC;</code></pre>
 
 <h2 id="topn">The top-ten list</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The top-ten list, sorted by total cost &mdash; never by average.</figcaption>
 <pre><code>-- Sort by TOTAL, never by average. See chapter 28 for why.
 -- PostgreSQL
-SELECT calls, round(total_exec_time::numeric) AS total_ms,
-       round(mean_exec_time::numeric, 2) AS mean_ms, rows,
-       left(query, 120) AS q
-FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10;
+SELECT calls,                                              -- how many times it ran
+       round(total_exec_time::numeric)      AS total_ms,   -- ::numeric so round() can take 2 args
+       round(mean_exec_time::numeric, 2)    AS mean_ms,    -- the mean, to two decimals
+       rows,                                               -- rows returned in total
+       left(query, 120) AS q                               -- the statement, truncated
+FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10;   -- the ten biggest totals
 
 -- SQL Server
-SELECT TOP 10 qs.execution_count,
-       qs.total_worker_time/1000  AS cpu_ms,
-       qs.total_elapsed_time/1000 AS elapsed_ms,
-       qs.total_logical_reads,
-       SUBSTRING(t.text, 1, 120)  AS q
-FROM sys.dm_exec_query_stats qs
-CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t
-ORDER BY qs.total_elapsed_time DESC;
+SELECT TOP 10 qs.execution_count,                          -- the same five questions…
+       qs.total_worker_time/1000  AS cpu_ms,               -- CPU, microseconds → ms
+       qs.total_elapsed_time/1000 AS elapsed_ms,           -- wall clock: includes waiting
+       qs.total_logical_reads,                             -- 8 KB pages touched
+       SUBSTRING(t.text, 1, 120)  AS q                     -- the statement text
+FROM sys.dm_exec_query_stats qs                            -- one row per cached plan
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t          -- resolve the handle
+ORDER BY qs.total_elapsed_time DESC;                       -- biggest total elapsed first
 
--- MySQL: the slow log with long_query_time = 0 for a sampling window,
--- then pt-query-digest.</code></pre>
+-- MySQL: the slow log with long_query_time = 0 for a sampling window, then
+-- pt-query-digest to aggregate it.
+</code></pre>
+<div class="cx-conv">
+  <b>Two columns worth comparing before you optimise anything</b>
+  <ul>
+    <li><code>cpu_ms</code> versus <code>elapsed_ms</code>: if elapsed is much larger, the query is
+      <em>waiting</em>, and rewriting the SQL will not help. Go back to the wait statistics.</li>
+    <li><code>total_logical_reads</code> is the most stable measure of &ldquo;how much work is this
+      query&rdquo;. It does not move with cache warmth or with how busy the server was, so it is the
+      right number to compare before and after a rewrite.</li>
+    <li><code>::numeric</code> is not decoration: PostgreSQL's <code>round(x, 2)</code> two-argument
+      form exists only for <code>numeric</code>, not for <code>double precision</code>. Without the
+      cast the query fails.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Run it twice, a few minutes apart</div>
@@ -131,21 +174,46 @@ ORDER BY qs.total_elapsed_time DESC;
 
 <h2 id="blocking">The blocking chain</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The blocking chain, and how to find its head.</figcaption>
 <pre><code>-- SQL Server: who is blocked, and by whom
-SELECT r.session_id, r.blocking_session_id, r.wait_type, r.wait_time,
-       r.status, SUBSTRING(t.text, 1, 120) AS running
-FROM sys.dm_exec_requests r
-CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
-WHERE r.blocking_session_id &lt;&gt; 0;
+SELECT r.session_id,                              -- the waiting session
+       r.blocking_session_id,                     -- the session it is waiting for
+       r.wait_type, r.wait_time,                  -- what kind, and how long
+       r.status,                                  -- running, suspended, runnable
+       SUBSTRING(t.text, 1, 120) AS running       -- what it is trying to do
+FROM sys.dm_exec_requests r                       -- live requests only
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t  -- one call per row
+WHERE r.blocking_session_id &lt;&gt; 0;                 -- 0 means "not blocked"
 
 -- Then find the HEAD of the chain — the session blocking others and blocked by
 -- nobody. That is the one to look at; everyone else is a queue behind it.
 
 -- PostgreSQL
-SELECT pid, state, now() - xact_start AS xact_age,
-       pg_blocking_pids(pid) AS blocked_by, left(query, 100)
-FROM pg_stat_activity
-WHERE state &lt;&gt; 'idle' ORDER BY xact_age DESC NULLS LAST;</code></pre>
+SELECT pid, state,                                -- the backend, and what it is doing
+       now() - xact_start AS xact_age,            -- how long its TRANSACTION has been open
+       pg_blocking_pids(pid) AS blocked_by,       -- an array of blocking pids
+       left(query, 100)                           -- the statement, truncated
+FROM pg_stat_activity                             -- one row per connection
+WHERE state &lt;&gt; 'idle'                             -- skip connections doing nothing…
+ORDER BY xact_age DESC NULLS LAST;                -- …oldest transaction first
+</code></pre>
+<div class="cx-conv">
+  <b>What to look for, and the answer that is usually right</b>
+  <ul>
+    <li>The head of the chain is very often <strong>idle in transaction</strong>: a session that ran
+      one statement, holds its locks, and is waiting for an application that has gone away. That is
+      why <code>xact_age</code> is in the PostgreSQL query — the oldest open transaction is nearly
+      always the culprit.</li>
+    <li><code>NULLS LAST</code> matters: sessions with no open transaction have a NULL age, and
+      PostgreSQL sorts NULLs first descending by default, which would bury the row you want.</li>
+    <li>Long blocking is usually an application problem — a transaction spanning a user's thinking
+      time or an HTTP call — rather than a slow query. Fixing the query does not fix that.</li>
+    <li>Killing the head clears the queue instantly. Do it knowing what it was doing, because
+      whatever it was, it will roll back.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ The head of the chain is often <code>idle in transaction</code></div>
@@ -240,7 +308,9 @@ WHERE state &lt;&gt; 'idle' ORDER BY xact_age DESC NULLS LAST;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

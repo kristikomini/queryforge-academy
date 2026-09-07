@@ -41,11 +41,29 @@
   </p>
 </div>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The race everybody writes at least once: check, then act, with a gap in between.</figcaption>
 <pre><code>-- The bug, written by everyone at least once:
-SELECT id FROM customers WHERE email = ?;      -- not found
-INSERT INTO customers (email, name) VALUES (?, ?);
--- Another session inserted the same email between those two statements.
--- Result: a duplicate, or a unique-violation exception in production only.</code></pre>
+SELECT id FROM customers WHERE email = ?;              -- statement 1: "not found"
+INSERT INTO customers (email, name) VALUES (?, ?);     -- statement 2: so insert it
+-- Another session ran BOTH of those between your two statements.
+-- Result: a duplicate row, or a unique-violation exception — in production only.
+</code></pre>
+<div class="cx-conv">
+  <b>Why testing never finds this</b>
+  <ul>
+    <li>The two statements are separate, so there is a real interval between them. On a laptop with
+      one user the interval is never contended; with fifty concurrent requests it is contended
+      constantly.</li>
+    <li>Wrapping both in a transaction does <strong>not</strong> fix it at READ COMMITTED: the
+      second session's insert is invisible to your <code>SELECT</code> until it commits, and then it
+      exists.</li>
+    <li>The fix is not to look harder — it is to make &ldquo;insert if absent&rdquo; a
+      <em>single indivisible statement</em>, backed by a unique constraint. The constraint does the
+      work; the syntax is just how you ask.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 Professional</div>
@@ -61,27 +79,51 @@ INSERT INTO customers (email, name) VALUES (?, ?);
 
 <h2 id="upsert">The four spellings</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The four spellings of upsert, and what differs between them.</figcaption>
 <pre><code>-- PostgreSQL, SQLite 3.24+ — the clearest of the four
-INSERT INTO customers (email, name, city_id)
-VALUES (?, ?, ?)
-ON CONFLICT (email) DO UPDATE
-  SET name = EXCLUDED.name, city_id = EXCLUDED.city_id
-RETURNING id;
---       ^ EXCLUDED is the row that was proposed. DO NOTHING is the other option.
+INSERT INTO customers (email, name, city_id)                 -- the row we propose…
+VALUES (?, ?, ?)                                             -- …with bound parameters
+ON CONFLICT (email) DO UPDATE                                -- name the CONSTRAINT's columns
+  SET name = EXCLUDED.name, city_id = EXCLUDED.city_id       -- EXCLUDED = the proposed row
+RETURNING id;                                                -- the id either way, insert or update
+--       ^ DO NOTHING is the other option, when a re-delivery should be a no-op.
 
 -- MySQL / MariaDB
-INSERT INTO customers (email, name, city_id) VALUES (?, ?, ?)
-ON DUPLICATE KEY UPDATE name = VALUES(name), city_id = VALUES(city_id);
---                                ^ note: it fires on ANY unique key, not one you name
+INSERT INTO customers (email, name, city_id) VALUES (?, ?, ?)   -- the same proposal…
+ON DUPLICATE KEY UPDATE name = VALUES(name),                    -- …VALUES(col) is MySQL's EXCLUDED
+                        city_id = VALUES(city_id);              -- one assignment per column
+--                                ^ it fires on ANY unique key, not one you name. That is the risk.
 
 -- SQL Server / Oracle — MERGE
-MERGE INTO customers AS t
-USING (VALUES (?, ?, ?)) AS s (email, name, city_id)
-   ON t.email = s.email
-WHEN MATCHED THEN UPDATE SET t.name = s.name, t.city_id = s.city_id
-WHEN NOT MATCHED THEN INSERT (email, name, city_id) VALUES (s.email, s.name, s.city_id);
---  SQL Server: terminate MERGE with a semicolon. It is required, and the error if
---  you forget is unhelpful.</code></pre>
+MERGE INTO customers AS t                                    -- the target table
+USING (VALUES (?, ?, ?)) AS s (email, name, city_id)         -- the source: an inline one-row table
+   ON t.email = s.email                                      -- how a target row is matched
+WHEN MATCHED THEN UPDATE                                     -- the row exists…
+  SET t.name = s.name, t.city_id = s.city_id                 -- …so update it
+WHEN NOT MATCHED THEN INSERT (email, name, city_id)          -- it does not exist…
+  VALUES (s.email, s.name, s.city_id);                       -- …so insert it
+--  SQL Server: the terminating semicolon is REQUIRED, and the error if you forget
+--  it is unhelpful.
+</code></pre>
+<div class="cx-conv">
+  <b>What actually makes these safe &mdash; and what does not</b>
+  <ul>
+    <li>All three rely on a <strong>unique constraint</strong>. Without one there is nothing to
+      conflict with, and <code>ON CONFLICT</code> is a syntax error rather than a silent risk —
+      which is the good outcome.</li>
+    <li><code>EXCLUDED</code> (PostgreSQL) and <code>VALUES(col)</code> (MySQL) both mean &ldquo;the
+      value that would have been inserted&rdquo;. Referring to the plain column name instead gives
+      you the value already stored, which is how an upsert quietly becomes a no-op.</li>
+    <li>MySQL's version fires on <em>any</em> unique key. With two unique columns you cannot tell
+      which one collided, so the update may target the wrong row entirely.</li>
+    <li><code>MERGE</code> is the most flexible and the most dangerous: in several engines it is
+      <strong>not</strong> atomic against concurrent inserts without <code>HOLDLOCK</code>, so two
+      sessions can both decide &ldquo;not matched&rdquo;. Prefer the native upsert where one
+      exists.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — MERGE has a reputation, and it earned it</div>
@@ -122,30 +164,70 @@ WHEN NOT MATCHED THEN INSERT (email, name, city_id) VALUES (s.email, s.name, s.c
 <p><strong>1 · A natural business key with a unique constraint.</strong> The most robust, because
 the database enforces it whatever the application does.</p>
 
-<pre><code>-- The payment table in the reference database does exactly this:
-external_ref TEXT NOT NULL,
-CONSTRAINT uq_payments_ref UNIQUE (external_ref)
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Idempotency by constraint: the reference database's payment table, and the re-delivered webhook it survives.</figcaption>
+<pre><code>-- The payments table in the reference database does exactly this:
+external_ref TEXT NOT NULL,                          -- the payment provider's own id
+CONSTRAINT uq_payments_ref UNIQUE (external_ref)     -- "the same payment, once"
 
--- so a re-delivered webhook is a no-op, not a second payment:
-INSERT INTO payments (order_id, amount_cents, method, external_ref)
-VALUES (?, ?, ?, ?)
-ON CONFLICT (external_ref) DO NOTHING;</code></pre>
+-- so a re-delivered webhook becomes a no-op rather than a second payment:
+INSERT INTO payments (order_id, amount_cents, method, external_ref)  -- name the columns
+VALUES (?, ?, ?, ?)                                                 -- all four bound
+ON CONFLICT (external_ref) DO NOTHING;                              -- second delivery: 0 rows
+</code></pre>
+<div class="cx-conv">
+  <b>Why the constraint, and not the application, is the right place</b>
+  <ul>
+    <li>Every payment provider retries. Delivery is &ldquo;at least once&rdquo;, never &ldquo;exactly
+      once&rdquo;, so the receiver must be idempotent — and the only component that can guarantee it
+      under concurrency is the one that serialises writes.</li>
+    <li><code>DO NOTHING</code> and not <code>DO UPDATE</code>: a payment that has already been
+      recorded must not be modified by a retry. The second delivery affects <strong>0 rows</strong>,
+      and the handler can return success honestly.</li>
+    <li>The unique key is the <em>provider's</em> reference, not one you generate. An id you invent
+      per request is different on every retry, which is exactly the property you do not want.</li>
+    <li>Check the row count if the caller needs to know: 1 means recorded, 0 means already had
+      it.</li>
+  </ul>
+</div>
+</figure>
 
 <p><strong>2 · A watermark.</strong> For incremental loads: record the highest source timestamp or
 id you have processed, and next time start from there.</p>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The watermark pattern: load what is new, and record how far you got, in one transaction.</figcaption>
 <pre><code>-- Load only what is new since last time, and record the new high-water mark
--- INSIDE THE SAME TRANSACTION as the load. If they are separate, a crash between
--- them either loses rows or reprocesses them.
-BEGIN;
-  INSERT INTO fact_orders (...)
-  SELECT ... FROM staging.orders
-  WHERE updated_at &gt; (SELECT watermark FROM etl_state WHERE job = 'orders');
+-- INSIDE THE SAME TRANSACTION as the load.
+BEGIN;                                                    -- both statements, or neither
+  INSERT INTO fact_orders (...)                           -- the load…
+  SELECT ... FROM staging.orders                          -- …from the source…
+  WHERE updated_at &gt; (SELECT watermark                    -- …restricted to what is new
+                      FROM etl_state WHERE job = 'orders');  -- one marker row per job
 
-  UPDATE etl_state
-  SET watermark = (SELECT MAX(updated_at) FROM staging.orders)
-  WHERE job = 'orders';
-COMMIT;</code></pre>
+  UPDATE etl_state                                        -- move the marker…
+  SET watermark = (SELECT MAX(updated_at) FROM staging.orders)  -- …to the newest row seen
+  WHERE job = 'orders';                                   -- one row per job
+COMMIT;                                                   -- now both are permanent
+</code></pre>
+<div class="cx-conv">
+  <b>Why the two statements must share a transaction</b>
+  <ul>
+    <li>Commit the load and crash before the update, and the next run reprocesses those rows.
+      Commit the update and crash before the load, and the rows are lost forever with nothing
+      reporting it. One transaction removes both cases.</li>
+    <li><code>&gt;</code> and not <code>&gt;=</code>: with <code>&gt;=</code> the boundary row is
+      loaded again every run. With <code>&gt;</code> you lose rows sharing the exact watermark
+      timestamp — which is why the load itself should still be idempotent (an upsert), so either
+      choice is survivable.</li>
+    <li><code>MAX(updated_at)</code> over an empty source is NULL, and setting the watermark to NULL
+      makes the next comparison UNKNOWN and loads nothing, forever. Guard it:
+      <code>COALESCE(MAX(updated_at), watermark)</code>.</li>
+    <li>The source must never write a timestamp <em>older</em> than one already loaded — a clock
+      skew between application servers is enough to break that assumption.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — the strictly-greater-than watermark</div>
@@ -160,27 +242,65 @@ COMMIT;</code></pre>
 
 <p><strong>3 · Delete-then-insert by partition.</strong> For a full daily reload of one slice:</p>
 
-<pre><code>BEGIN;
-  DELETE FROM fact_sales WHERE sale_date = ?;   -- the whole slice, whatever is there
-  INSERT INTO fact_sales SELECT ... WHERE sale_date = ?;
-COMMIT;
+<figure class="codex" data-lang="sql">
+<figcaption>Delete-then-insert by slice: idempotent by construction.</figcaption>
+<pre><code>BEGIN;                                                     -- one unit
+  DELETE FROM fact_sales WHERE sale_date = ?;              -- the whole slice, whatever is in it
+  INSERT INTO fact_sales SELECT ... WHERE sale_date = ?;   -- rebuild it from the source
+COMMIT;                                                    -- readers see old or new, never half
 -- Naturally idempotent: re-running replaces the slice with itself. On a
--- partitioned table this becomes a partition swap and is nearly instant. See ch. 31.</code></pre>
+-- partitioned table this becomes a partition swap and is nearly instant. See ch. 31.
+</code></pre>
+<div class="cx-conv">
+  <b>What it costs, and when it is the right shape</b>
+  <ul>
+    <li>Re-running is safe by construction: the delete removes whatever a previous partial run left
+      behind. No watermark, no upsert key, no merge logic.</li>
+    <li>The cost is a full delete and re-insert of the slice — fully logged, and holding locks on
+      those rows for the duration. Fine for a nightly slice; not fine for a slice being read by
+      users during business hours, unless the engine gives readers a consistent snapshot
+      (<a href="22-isolation-levels.html">chapter 22</a>).</li>
+    <li>On a partitioned table the same idea becomes <code>TRUNCATE PARTITION</code> or a partition
+      swap: a metadata change instead of millions of logged deletes.</li>
+    <li>The two <code>?</code> parameters must receive the same value. Bind it once in the
+      application, or you have written a very efficient way to delete data and not replace it.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="bulk-upsert">Upserting a batch, not a row</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Upserting a batch: one set-based statement, and a filter that skips rows nothing changed in.</figcaption>
 <pre><code>-- Load a staging table first, then ONE set-based upsert. Row-at-a-time upsert
 -- from application code is the N+1 problem wearing a different hat.
-INSERT INTO customers (email, name, city_id)
-SELECT s.email, s.name, s.city_id
-FROM staging_customers s
-WHERE s.email IS NOT NULL
-ON CONFLICT (email) DO UPDATE
-  SET name = EXCLUDED.name, city_id = EXCLUDED.city_id
-  -- Only write when something actually changed: avoids pointless page writes,
-  -- pointless WAL, and pointless trigger firing on a nightly no-op load.
-  WHERE customers.name IS DISTINCT FROM EXCLUDED.name
-     OR customers.city_id IS DISTINCT FROM EXCLUDED.city_id;</code></pre>
+INSERT INTO customers (email, name, city_id)                 -- the target columns
+SELECT s.email, s.name, s.city_id                            -- …from staging, not from VALUES
+FROM staging_customers s                                     -- the whole batch, one statement
+WHERE s.email IS NOT NULL                                    -- the conflict key must exist
+ON CONFLICT (email) DO UPDATE                                -- same conflict clause as one row
+  SET name = EXCLUDED.name, city_id = EXCLUDED.city_id       -- take the incoming values
+  WHERE customers.name    IS DISTINCT FROM EXCLUDED.name     -- …but only if something changed…
+     OR customers.city_id IS DISTINCT FROM EXCLUDED.city_id; -- …null-safely compared
+</code></pre>
+<div class="cx-conv">
+  <b>The <code>WHERE</code> on the <code>DO UPDATE</code> is the interesting part</b>
+  <ul>
+    <li>Without it, a nightly load rewrites every row whether or not anything changed: dirty pages,
+      write-ahead log, replication traffic, and triggers firing on a no-op. With it, an unchanged
+      night writes nothing.</li>
+    <li><code>IS DISTINCT FROM</code> and not <code>&lt;&gt;</code>: comparing NULLs with
+      <code>&lt;&gt;</code> yields UNKNOWN, so a row whose <code>city_id</code> went from NULL to a
+      value would look unchanged and be skipped. <code>IS DISTINCT FROM</code> is null-safe and
+      always TRUE or FALSE.</li>
+    <li>SQL Server has no <code>IS DISTINCT FROM</code>; there the portable spelling is
+      <code>EXISTS (SELECT a EXCEPT SELECT b)</code>, which uses the set operators' NULL rules.</li>
+    <li>Everything here is <strong>set-based</strong>: one statement, one pass, one transaction, for
+      any number of rows. That is the difference between a load that takes a second and one that
+      takes an hour.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ That WHERE clause is the senior detail</div>
@@ -193,15 +313,32 @@ ON CONFLICT (email) DO UPDATE
 </div>
 
 <div class="tryit">
-  <pre><code>-- In the playground, prove the constraint is doing the work:
-INSERT INTO payments (order_id, amount_cents, method, external_ref)
-VALUES (1, 5000, 'card', 'PAY-00000001');
--- UNIQUE constraint failed: payments.external_ref
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Prove it in the playground: the same insert, twice, with and without the conflict clause.</figcaption>
+<pre><code>-- First, prove the constraint is real:
+INSERT INTO payments (order_id, amount_cents, method, external_ref)  -- a payment already recorded
+VALUES (1, 5000, 'card', 'PAY-00000001');                            -- with an existing reference
+-- UNIQUE constraint failed: payments.external_ref  ← the write is REFUSED
 
-INSERT INTO payments (order_id, amount_cents, method, external_ref)
-VALUES (1, 5000, 'card', 'PAY-00000001')
-ON CONFLICT (external_ref) DO NOTHING;
--- 0 rows. Re-delivered webhook handled.</code></pre>
+-- Now the same insert, told what to do about it:
+INSERT INTO payments (order_id, amount_cents, method, external_ref)  -- identical row…
+VALUES (1, 5000, 'card', 'PAY-00000001')                             -- …identical reference…
+ON CONFLICT (external_ref) DO NOTHING;                               -- …handled deliberately
+-- 0 rows. The re-delivered webhook has been dealt with.
+</code></pre>
+<div class="cx-conv">
+  <b>What the two results tell you</b>
+  <ul>
+    <li>The first statement <em>fails</em>. That is the database refusing to hold two payments with
+      one provider reference — the guarantee no amount of application code can offer under
+      concurrency.</li>
+    <li>The second reports <strong>0 rows</strong>. Nothing was written and nothing failed, which is
+      exactly what a retry handler wants to see.</li>
+    <li>The difference between an error and a no-op is one clause. The <em>safety</em> came from the
+      constraint in both cases.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -254,7 +391,9 @@ ON CONFLICT (external_ref) DO NOTHING;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

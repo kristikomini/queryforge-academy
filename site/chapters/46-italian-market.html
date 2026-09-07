@@ -130,18 +130,39 @@
   </p>
 </div>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Gapless invoice numbering: the one place where serialising deliberately is the correct answer.</figcaption>
 <pre><code>-- The pattern, with the trade-off stated rather than hidden.
-BEGIN;
+BEGIN;                                                -- number and invoice, one unit
   -- Serialises invoice issuance for this year. Deliberate: the law requires no
   -- gaps, and gapless allocation is inherently serial. Volumes are low enough.
-  UPDATE invoice_counters SET next_no = next_no + 1
-  WHERE year = :year
-  RETURNING next_no - 1 AS invoice_no;
+  UPDATE invoice_counters SET next_no = next_no + 1   -- take the lock by WRITING…
+  WHERE year = :year                                  -- …one counter row per year
+  RETURNING next_no - 1 AS invoice_no;                -- the number we just consumed
 
-  INSERT INTO invoices (year, invoice_no, customer_id, total_cents, sdi_status)
-  VALUES (:year, :invoice_no, :customer_id, :total, 'pending');
-COMMIT;
--- If this rolls back, the number is released with it. That is the point.</code></pre>
+  INSERT INTO invoices (year, invoice_no, customer_id, total_cents, sdi_status)  -- the invoice itself
+  VALUES (:year, :invoice_no, :customer_id, :total, 'pending');  -- 'pending': not yet sent to SdI
+COMMIT;                                               -- number and invoice, together
+-- If this rolls back, the number is released with it. That is the point.
+</code></pre>
+<div class="cx-conv">
+  <b>Why a sequence is wrong here, and what this costs</b>
+  <ul>
+    <li>A <code>SEQUENCE</code> or <code>IDENTITY</code> is <strong>not transactional</strong>: a
+      rolled-back transaction keeps the number it consumed, leaving a gap. For a technical id that is
+      fine and normal. For an Italian invoice number it is a compliance failure.</li>
+    <li>Updating a counter row takes an exclusive lock on it, so every concurrent invoice for that
+      year queues behind this transaction. That is the price of gaplessness, and it is genuinely
+      unavoidable — you cannot allocate a gapless sequence in parallel.</li>
+    <li>Keep the transaction as short as possible for exactly that reason: allocate the number and
+      insert the invoice, then commit. Never call the SdI, render a PDF or send an email inside
+      it.</li>
+    <li>One counter row <em>per year</em> keeps the contention narrow and matches how the numbering
+      actually resets. Naming the trade-off in a comment is what stops a well-meaning colleague
+      &ldquo;fixing&rdquo; it with a sequence.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="bi">Reporting: SSRS, Power BI, and the analyst</h2>
 
@@ -270,7 +291,9 @@ COMMIT;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

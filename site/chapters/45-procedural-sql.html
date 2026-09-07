@@ -53,53 +53,79 @@
 
 <h2 id="tsql">T-SQL, the shape you will meet</h2>
 
-<pre><code>CREATE OR ALTER PROCEDURE dbo.usp_ShipOrder
-  @order_id INT,
-  @version  INT,
-  @actor    SYSNAME = NULL
-AS
-BEGIN
+<figure class="codex" data-lang="tsql">
+<figcaption>A complete T-SQL procedure: concurrency, the state machine, three distinct failures and an outbox &mdash; all in one transaction.</figcaption>
+<pre><code>CREATE OR ALTER PROCEDURE dbo.usp_ShipOrder   -- OR ALTER: keeps existing permissions
+  @order_id INT,                              -- which order…
+  @version  INT,                              -- …and which version the caller read
+  @actor    SYSNAME = NULL                    -- optional: defaults to the login below
+AS                                            -- the body follows
+BEGIN                                          -- open the procedure body
   SET NOCOUNT ON;              -- stop "n rows affected" messages confusing the caller
   SET XACT_ABORT ON;           -- ON ERROR, ROLL BACK THE WHOLE TRANSACTION.
   --  ^ Without this, some errors abort only the STATEMENT and leave the transaction
   --    open and half-applied. It is the single most important line in the file.
 
-  DECLARE @now DATETIME2(3) = SYSUTCDATETIME();
-  SET @actor = COALESCE(@actor, SUSER_SNAME());
+  DECLARE @now DATETIME2(3) = SYSUTCDATETIME();      -- one timestamp for every row written
+  SET @actor = COALESCE(@actor, SUSER_SNAME());      -- caller's name, or the login
 
-  BEGIN TRY
-    BEGIN TRANSACTION;
+  BEGIN TRY                                          -- everything below is guarded
+    BEGIN TRANSACTION;                               -- the unit of work opens here
 
-      UPDATE dbo.orders
-      SET status = 'shipped', shipped_at = @now, version = version + 1
-      WHERE id = @order_id
+      UPDATE dbo.orders                             -- the state change itself
+      SET status = 'shipped', shipped_at = @now,     -- the change…
+          version = version + 1                      -- …and the optimistic-lock bump
+      WHERE id = @order_id                    -- the row, by key…
         AND version = @version              -- optimistic concurrency, chapter 24
         AND status  = 'confirmed';          -- and the state machine, chapter 04
 
-      IF @@ROWCOUNT = 0
-      BEGIN
+      IF @@ROWCOUNT = 0                     -- read it IMMEDIATELY: the next statement resets it
+      BEGIN                                    -- …then work out WHICH failure it was
         -- Distinguish "gone", "changed under us" and "wrong state" — the caller
         -- needs different behaviour for each, so do not return one vague error.
-        IF NOT EXISTS (SELECT 1 FROM dbo.orders WHERE id = @order_id)
-          THROW 50404, 'Order not found.', 1;
-        THROW 50409, 'Order was modified or is not in a shippable state.', 1;
-      END
+        IF NOT EXISTS (SELECT 1 FROM dbo.orders WHERE id = @order_id)   -- does it exist at all?
+          THROW 50404, 'Order not found.', 1;                           -- → 404
+        THROW 50409, 'Order was modified or is not in a shippable state.', 1;  -- → 409
+      END                                      -- end of the failure branch
 
-      INSERT INTO dbo.order_events (order_id, from_status, to_status, at, actor)
-      VALUES (@order_id, 'confirmed', 'shipped', @now, @actor);
+      INSERT INTO dbo.order_events (order_id, from_status, to_status, at, actor)  -- the audit…
+      VALUES (@order_id, 'confirmed', 'shipped', @now, @actor);                   -- …same @now
 
-      INSERT INTO dbo.outbox (topic, payload, created_at)
-      VALUES ('order.shipped',
-              (SELECT @order_id AS orderId FOR JSON PATH, WITHOUT_ARRAY_WRAPPER), @now);
+      INSERT INTO dbo.outbox (topic, payload, created_at)               -- the message to publish
+      VALUES ('order.shipped',                             -- the topic…
+              (SELECT @order_id AS orderId                              -- build the JSON…
+               FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),                   -- …as one object
+              @now);                                              -- …and the same timestamp again
       --      ^ the outbox write is in the SAME transaction. Chapter 24.
 
-    COMMIT TRANSACTION;
-  END TRY
-  BEGIN CATCH
+    COMMIT TRANSACTION;                     -- all three writes become permanent together
+  END TRY                                     -- end of the guarded section
+  BEGIN CATCH                                  -- the handler
     IF @@TRANCOUNT &gt; 0 ROLLBACK TRANSACTION;   -- check the count; see chapter 21
     THROW;                                     -- rethrow PRESERVING the original error
-  END CATCH
-END</code></pre>
+  END CATCH                                   -- end of the handler
+END                                        -- end of the procedure
+</code></pre>
+<div class="cx-conv">
+  <b>The five decisions worth defending in an interview</b>
+  <ul>
+    <li><code>SET XACT_ABORT ON</code>. Without it a runtime error can abort the statement and leave
+      the transaction open, so the connection returns to the pool holding locks. It is one line and
+      it prevents a category of incident.</li>
+    <li><strong>Three different failures, three different errors.</strong> &ldquo;Not found&rdquo;
+      is a 404, &ldquo;version moved&rdquo; is a 409, &ldquo;wrong state&rdquo; is a 409 with a
+      different message. Returning one vague error makes the caller guess.</li>
+    <li><code>@@ROWCOUNT</code> is read on the very next line, because <em>anything</em> — including
+      an <code>IF</code> — resets it. This is the single most common T-SQL bug of its kind.</li>
+    <li>One <code>@now</code> for every row written, so the order, the audit row and the outbox
+      message agree about when it happened. Calling <code>SYSUTCDATETIME()</code> three times gives
+      three timestamps.</li>
+    <li><code>THROW;</code> with no arguments re-raises the original error with its number and line
+      intact. <code>THROW 50000, ERROR_MESSAGE(), 1</code> loses all of that, and
+      <code>RAISERROR</code> loses the severity.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Three T-SQL traps in that one procedure</div>
@@ -118,37 +144,61 @@ END</code></pre>
 
 <h2 id="plsql">PL/SQL, the same thing in Oracle</h2>
 
-<pre><code>CREATE OR REPLACE PACKAGE orders_pkg AS
-  -- The SPEC is the public interface. Anything not declared here is private to
-  -- the body — which is real encapsulation, and the thing PL/SQL genuinely has
-  -- that T-SQL does not.
-  PROCEDURE ship_order(p_order_id IN NUMBER, p_version IN NUMBER);
-  e_conflict EXCEPTION;
-  PRAGMA EXCEPTION_INIT(e_conflict, -20409);
-END orders_pkg;
-/
+<figure class="codex" data-lang="plsql">
+<figcaption>The same procedure in Oracle &mdash; and the one thing PL/SQL genuinely has that T-SQL does not.</figcaption>
+<pre><code>CREATE OR REPLACE PACKAGE orders_pkg AS       -- the SPEC: the public interface
+  -- Anything not declared here is private to the body — real encapsulation, and
+  -- the thing PL/SQL genuinely has that T-SQL does not.
+  PROCEDURE ship_order(p_order_id IN NUMBER,  -- IN: an input parameter…
+                       p_version  IN NUMBER); -- …declared, not defined, here
+  e_conflict EXCEPTION;                       -- a named exception, part of the interface
+  PRAGMA EXCEPTION_INIT(e_conflict, -20409);  -- bind it to an error number
+END orders_pkg;                                -- end of the spec
+/                                             -- SQL*Plus statement terminator, not SQL
 
-CREATE OR REPLACE PACKAGE BODY orders_pkg AS
-  PROCEDURE ship_order(p_order_id IN NUMBER, p_version IN NUMBER) IS
-  BEGIN
-    UPDATE orders
-       SET status = 'shipped', shipped_at = SYSTIMESTAMP, version = version + 1
-     WHERE id = p_order_id AND version = p_version AND status = 'confirmed';
+CREATE OR REPLACE PACKAGE BODY orders_pkg AS  -- the BODY: the implementation
+  PROCEDURE ship_order(p_order_id IN NUMBER, p_version IN NUMBER) IS  -- the definition, matching the spec
+  BEGIN                                        -- the implementation begins
+    UPDATE orders                                    -- the same conditional update as before
+       SET status = 'shipped', shipped_at = SYSTIMESTAMP,   -- Oracle's "now", with a zone
+           version = version + 1                            -- the optimistic-lock bump
+     WHERE id = p_order_id AND version = p_version          -- concurrency check…
+       AND status = 'confirmed';                            -- …and state check
 
     IF SQL%ROWCOUNT = 0 THEN                 -- the PL/SQL @@ROWCOUNT
-      RAISE_APPLICATION_ERROR(-20409, 'Order modified or not shippable');
-    END IF;
+      RAISE_APPLICATION_ERROR(-20409, 'Order modified or not shippable');  -- a 409
+    END IF;                                     -- end of the failure branch
 
-    INSERT INTO order_events (order_id, from_status, to_status)
-    VALUES (p_order_id, 'confirmed', 'shipped');
-    COMMIT;
-  EXCEPTION
-    WHEN OTHERS THEN
-      ROLLBACK;
-      RAISE;                                 -- rethrow, preserving the stack
-  END ship_order;
-END orders_pkg;
-/</code></pre>
+    INSERT INTO order_events (order_id, from_status, to_status)  -- the audit row
+    VALUES (p_order_id, 'confirmed', 'shipped');    -- the audit values
+    COMMIT;                                  -- Oracle does NOT autocommit: say it explicitly
+  EXCEPTION                                  -- the handler section
+    WHEN OTHERS THEN                         -- any error at all…
+      ROLLBACK;                              -- …undo…
+      RAISE;                                 -- …and rethrow, preserving the stack
+  END ship_order;                              -- end of the procedure
+END orders_pkg;                              -- end of the package body
+/                                            -- send it to the server
+</code></pre>
+<div class="cx-conv">
+  <b>What differs from the T-SQL version, beyond spelling</b>
+  <ul>
+    <li><strong>Spec and body are separate objects.</strong> Only what the spec declares is callable,
+      so a package is a genuine module with private helpers. T-SQL has schemas and permissions, which
+      is not the same thing.</li>
+    <li><code>SQL%ROWCOUNT</code> is an attribute of the <em>implicit cursor</em> — the statement just
+      executed. Same idea as <code>@@ROWCOUNT</code>, same warning about reading it immediately.</li>
+    <li>Oracle does not autocommit, so <code>COMMIT</code> is explicit here. In SQL Server the same
+      procedure without <code>BEGIN TRANSACTION</code> would commit each statement separately, which
+      is a different program.</li>
+    <li><code>WHEN OTHERS THEN … RAISE;</code> is acceptable because it rethrows. A
+      <code>WHEN OTHERS</code> that swallows the error is the most-criticised pattern in PL/SQL, and
+      for good reason.</li>
+    <li>The <code>/</code> is not SQL: it tells SQL*Plus to send the block. A missing one produces a
+      confusing error about an incomplete statement.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="table-wrap">
 <table>
@@ -181,16 +231,35 @@ END orders_pkg;
 
 <h2 id="cursors">Cursors, and the honest use for them</h2>
 
+<figure class="codex" data-lang="tsql">
+<figcaption>If you must write a cursor, declare it cheaply &mdash; and write down why.</figcaption>
 <pre><code>-- If you must, at least tell the engine what you are doing:
-DECLARE c CURSOR LOCAL FAST_FORWARD READ_ONLY FOR SELECT ...;
+DECLARE c CURSOR LOCAL FAST_FORWARD READ_ONLY FOR SELECT ...;  -- the cheapest cursor there is
 --            ^ local scope  ^ forward-only, read-only: far cheaper than the default
 
 -- But first ask: could this be one statement? It usually could.
 -- The legitimate cases:
---   * each row requires a separate external action
+--   * each row requires a separate EXTERNAL action (a file, an API call)
 --   * you are deliberately batching a huge update to avoid lock escalation
 -- And in both cases, write the reason in a comment — because the default
--- assumption on reading a cursor is that the author did not know better.</code></pre>
+-- assumption on reading a cursor is that the author did not know better.
+</code></pre>
+<div class="cx-conv">
+  <b>What those keywords actually save</b>
+  <ul>
+    <li>The default cursor is updatable and scrollable, which means the engine keeps a keyset and
+      supports moving backwards. <code>FAST_FORWARD READ_ONLY</code> gives up both and is
+      dramatically cheaper.</li>
+    <li><code>LOCAL</code> scopes it to the batch. A <code>GLOBAL</code> cursor — the default in some
+      configurations — outlives the procedure and can collide with another one of the same name.</li>
+    <li>None of that changes the real cost: one statement per row, each with its own plan lookup,
+      lock and log record. Two to three orders of magnitude slower than the set-based version is
+      normal.</li>
+    <li>The comment is part of the recommendation. A cursor with a stated reason is a decision; a
+      cursor without one is a smell.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="reading">Reading somebody else's procedure</h2>
 
@@ -261,7 +330,9 @@ DECLARE c CURSOR LOCAL FAST_FORWARD READ_ONLY FOR SELECT ...;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

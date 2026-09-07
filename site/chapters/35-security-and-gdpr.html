@@ -40,18 +40,36 @@
   </p>
 </div>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Least privilege, written as roles &mdash; and what is deliberately absent from them.</figcaption>
 <pre><code>-- Grant to ROLES, assign roles to users. Never grant to a person: people leave,
 -- roles do not, and a role is a sentence about a job rather than about a name.
-CREATE ROLE app_readwrite;
-GRANT SELECT, INSERT, UPDATE ON orders, order_lines TO app_readwrite;
-GRANT SELECT                  ON products, customers  TO app_readwrite;
--- Note what is absent: DELETE, DDL, and any access to the audit tables.
+CREATE ROLE app_readwrite;                                    -- what the API may do
+GRANT SELECT, INSERT, UPDATE ON orders, order_lines TO app_readwrite;   -- write the workflow
+GRANT SELECT                  ON products, customers TO app_readwrite;  -- read the reference data
+-- Note what is ABSENT: DELETE, any DDL, and any access to the audit tables.
 
-CREATE ROLE reporting_readonly;
-GRANT SELECT ON v_orders_geo, v_order_totals TO reporting_readonly;
--- Views only. The analyst never sees a column the view does not expose.
+CREATE ROLE reporting_readonly;                               -- what an analyst may do
+GRANT SELECT ON v_orders_geo, v_order_totals TO reporting_readonly;     -- VIEWS only
+-- The analyst never sees a column the view does not expose. That is the point.
 
-GRANT app_readwrite TO svc_orders_api;</code></pre>
+GRANT app_readwrite TO svc_orders_api;                        -- the service account gets the role
+</code></pre>
+<div class="cx-conv">
+  <b>Reading a grant list as a design document</b>
+  <ul>
+    <li>The missing <code>DELETE</code> is a decision: this application cancels orders by changing
+      their status, so nothing needs to remove rows. A privilege you never grant is an incident you
+      never have.</li>
+    <li>Granting on <strong>views</strong> rather than tables is column-level security done with the
+      tools every engine has. The view is the contract.</li>
+    <li>Roles survive people. An access review against roles is a page; an access review against
+      individual grants is an archaeology project.</li>
+    <li>The application's own login should not own the schema. If it can <code>DROP TABLE</code>,
+      then so can an injection you have not found yet.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — the application logs in as the owner</div>
@@ -72,16 +90,38 @@ GRANT app_readwrite TO svc_orders_api;</code></pre>
   forgets. RLS moves the rule into the database, where it cannot be forgotten:
 </p>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Row-level security: the tenant filter that cannot be forgotten, because it is not in the query.</figcaption>
 <pre><code>-- PostgreSQL
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON orders
-  USING (tenant_id = current_setting('app.tenant_id')::int);
+ALTER TABLE orders ENABLE ROW LEVEL SECURITY;         -- from now on, policies apply
+CREATE POLICY tenant_isolation ON orders              -- name it: errors will quote the name
+  USING (tenant_id = current_setting('app.tenant_id')::int);  -- the predicate, cast to int
 -- Every query against orders now silently carries that predicate.
--- The application sets: SET LOCAL app.tenant_id = '42';
+-- The application sets it per transaction:  SET LOCAL app.tenant_id = '42';
 
 -- SQL Server: an inline table-valued function plus a security policy.
-CREATE SECURITY POLICY TenantFilter
-  ADD FILTER PREDICATE dbo.fn_tenant_predicate(tenant_id) ON dbo.orders;</code></pre>
+CREATE SECURITY POLICY TenantFilter                            -- the policy object…
+  ADD FILTER PREDICATE dbo.fn_tenant_predicate(tenant_id)      -- …binds a function…
+  ON dbo.orders;                                               -- …to a table
+</code></pre>
+<div class="cx-conv">
+  <b>Why this beats &ldquo;remember the WHERE clause&rdquo;</b>
+  <ul>
+    <li>A tenant filter in application code works until one query forgets — a report, a background
+      job, a migration script, a developer in a console. Row-level security moves the rule into the
+      engine, where it cannot be forgotten.</li>
+    <li><code>SET LOCAL</code> scopes the setting to the <em>transaction</em>, so a pooled connection
+      cannot leak one tenant's context into the next request. Using <code>SET</code> without
+      <code>LOCAL</code> is exactly that bug.</li>
+    <li><code>::int</code> matters: <code>current_setting</code> returns text, and comparing text to
+      an integer column would either fail or force a per-row conversion that defeats the index.</li>
+    <li>The policy predicate is evaluated per row, so it must be cheap and it must be indexable.
+      A function that queries another table here is a per-row query.</li>
+    <li>Table owners and superusers bypass RLS unless you say
+      <code>FORCE ROW LEVEL SECURITY</code>. Check which account the application connects as.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Two things to know about it</div>
@@ -154,22 +194,60 @@ CREATE SECURITY POLICY TenantFilter
   </p>
 </div>
 
-<pre><code>-- Pseudonymisation in practice: the person disappears, the accounting does not.
-UPDATE customers
-SET name        = 'ERASED',
-    email       = 'erased+' || id || '@invalid',   -- keeps the unique constraint valid
-    vat_number  = NULL,
-    erased_at   = now()
-WHERE id = :id;
+<figure class="codex" data-lang="sql">
+<figcaption>Erasure that satisfies GDPR without destroying the accounts: pseudonymisation.</figcaption>
+<pre><code>-- The person disappears; the accounting does not.
+UPDATE customers                                      -- the person's own row…
+SET name       = 'ERASED',                            -- the identifying data goes…
+    email      = 'erased+' || id || '@invalid',       -- …but the UNIQUE constraint stays valid
+    vat_number = NULL,                                -- nullable, so it can simply go
+    erased_at  = now()                                -- record that it happened, and when
+WHERE id = :id;                                       -- one person, by key
 -- orders, order_lines and payments are untouched: they reference customer_id,
--- which is now a meaningless surrogate. Which is what a surrogate key is for.</code></pre>
+-- which is now a meaningless surrogate. Which is what a surrogate key is FOR.
+</code></pre>
+<div class="cx-conv">
+  <b>Why not <code>DELETE</code></b>
+  <ul>
+    <li>Deleting the customer would either fail on the foreign keys or cascade and destroy the
+      order history — which you are legally required to keep for accounting. The right to erasure is
+      not a right to delete the invoices.</li>
+    <li><code>'erased+' || id || '@invalid'</code> keeps every erased row distinct, so a
+      <code>UNIQUE(email)</code> constraint survives the second erasure. Setting them all to
+      <code>'ERASED'</code> fails on customer number two. <code>.invalid</code> is a reserved TLD
+      that can never route.</li>
+    <li>Remember the copies: backups, replicas, the data warehouse, the search index, and the log
+      files. Naming those in an interview is what distinguishes somebody who has done this from
+      somebody who has read about it.</li>
+    <li><code>erased_at</code> is not decoration — it is how you prove the request was honoured, and
+      how you exclude the row from future exports.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="masking">Masking, and what it is worth</h2>
 
+<figure class="codex" data-lang="tsql">
+<figcaption>Masking: a presentation feature that is often mistaken for a security control.</figcaption>
 <pre><code>-- SQL Server dynamic data masking: non-privileged users see a masked value.
-ALTER TABLE customers ALTER COLUMN email
-  ADD MASKED WITH (FUNCTION = 'email()');
--- 'mario.rossi@esempio.it'  ->  'mXXX@XXXX.com'</code></pre>
+ALTER TABLE customers ALTER COLUMN email               -- an existing column…
+  ADD MASKED WITH (FUNCTION = 'email()');              -- …gets a masking rule
+-- 'mario.rossi@esempio.it'  ->  'mXXX@XXXX.com'
+</code></pre>
+<div class="cx-conv">
+  <b>What it is worth, precisely</b>
+  <ul>
+    <li>It masks the value <em>on the way out</em>. The data is unchanged on disk, in backups and in
+      the log. This is not encryption and not anonymisation.</li>
+    <li>It is not a permission boundary either: a user who can run
+      <code>WHERE email LIKE 'mario%'</code> can still confirm a guess, one character at a time.
+      Filtering happens before masking.</li>
+    <li>Where it genuinely helps: keeping a support tool's screenshots clean, and reducing what a
+      curious but authorised user sees by default. Treat it as a UI feature implemented in the
+      database.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Masking is a display feature, not a security boundary</div>
@@ -233,7 +311,9 @@ ALTER TABLE customers ALTER COLUMN email
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

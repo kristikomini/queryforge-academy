@@ -91,17 +91,35 @@
   </p>
 </div>
 
+<figure class="codex" data-lang="text">
+<figcaption>The same skill written three ways: presence, action, and result.</figcaption>
 <pre><code>❌ "Utilizzo di SQL Server per la gestione di database aziendali"
    (Presence. Says nothing. Could be written by anyone who has seen SSMS.)
 
 ⚠  "Ottimizzazione di query e stored procedure"
-   (Action, no result. Better, still unfalsifiable.)
+   (Action, no result. Better, and still unfalsifiable.)
 
 ✅ "Ridotto il tempo di apertura del report vendite da 40 s a 1,2 s
     riprogettando la vista sottostante e aggiungendo un indice covering
     (SQL Server, 12M righe)."
    (Result, number, method, scale. And it invites exactly the question
-    you want to be asked.)</code></pre>
+    you want to be asked.)
+</code></pre>
+<div class="cx-conv">
+  <b>What the third version does that the others do not</b>
+  <ul>
+    <li>It contains a <strong>number that could be checked</strong>, which is what makes it
+      believable. &ldquo;Optimised queries&rdquo; is a claim anyone can make; &ldquo;40 s to
+      1,2 s&rdquo; is one you can be asked about.</li>
+    <li>It names the <em>method</em> — restructuring a view, a covering index — so a technical reader
+      can tell you understood the cause rather than tried things.</li>
+    <li>It states the <em>scale</em>. Twelve million rows tells the reader which problems you have
+      actually met.</li>
+    <li>And it plants the question you want in the interview. Every line of a CV is an invitation;
+      write the ones you want accepted.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ Where a junior finds numbers</div>
@@ -116,6 +134,8 @@
 
 <h2 id="structure">A structure that works</h2>
 
+<figure class="codex" data-lang="text">
+<figcaption>A CV structure that works for a junior database role in Italy &mdash; projects before experience.</figcaption>
 <pre><code>NOME COGNOME
 Database Developer  ·  Modena  ·  email  ·  telefono  ·  github.com/…  ·  linkedin.com/in/…
 
@@ -141,7 +161,26 @@ PROGETTI                                          (per un junior: PRIMA dell'esp
 ESPERIENZA / FORMAZIONE / LINGUE / PATENTE
 Inglese B2 (tecnico C1) · Italiano madrelingua · Patente B
 
-Autorizzo il trattamento dei miei dati personali ai sensi del Reg. UE 2016/679 …</code></pre>
+Autorizzo il trattamento dei miei dati personali ai sensi del Reg. UE 2016/679 …
+</code></pre>
+<div class="cx-conv">
+  <b>The five structural decisions</b>
+  <ul>
+    <li><strong>Projects before experience</strong>, for a junior. The reader is looking for
+      evidence you can do the work; a project with a link is stronger evidence than a job title in
+      another field.</li>
+    <li><strong>Skills grouped and levelled.</strong> A flat list of forty keywords reads as noise
+      and as keyword-stuffing. Four groups read as somebody who knows what belongs together.</li>
+    <li><strong>Each project bullet is a decision, not a feature.</strong> &ldquo;State machine
+      enforced with CHECK constraints&rdquo; invites a conversation you can hold; &ldquo;used
+      SQL&rdquo; does not.</li>
+    <li><strong>The GDPR authorisation line</strong> is expected on an Italian CV. Its absence is
+      noticed; its presence is not.</li>
+    <li><strong>Three lines of profile, not eight.</strong> The profile's job is to make the reader
+      continue, and nothing more.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Never use a self-rating bar</div>
@@ -264,7 +303,9 @@ Autorizzo il trattamento dei miei dati personali ai sensi del Reg. UE 2016/679 �
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

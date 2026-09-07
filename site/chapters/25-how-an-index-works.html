@@ -150,12 +150,34 @@
   </p>
 </div>
 
-<pre><code>-- ix_orders_status is (status, placed_at). This needs customer_id too:
-SELECT customer_id FROM orders WHERE status = 'shipped';
---  seek on the index, then one lookup per matching row
+<figure class="codex" data-lang="sql">
+<figcaption>The lookup, and the <code>INCLUDE</code> that removes it.</figcaption>
+<pre><code>-- ix_orders_status is (status, placed_at). This query also needs customer_id:
+SELECT customer_id FROM orders WHERE status = 'shipped';  -- seek, then fetch the column
+--  seek the index to find the rows, then ONE LOOKUP per matching row to fetch
+--  customer_id from the table itself. A thousand matches, a thousand lookups.
 
 -- Covered, so zero lookups:
-CREATE INDEX ix_orders_status_cov ON orders (status, placed_at) INCLUDE (customer_id);</code></pre>
+CREATE INDEX ix_orders_status_cov ON orders (status, placed_at)  -- the key, for seeking
+  INCLUDE (customer_id);                                         -- the payload, for reading
+</code></pre>
+<div class="cx-conv">
+  <b>What &ldquo;covering&rdquo; means, precisely</b>
+  <ul>
+    <li>An index is a narrow, sorted copy. If every column the query mentions is in that copy, the
+      engine never touches the table — the index <em>covers</em> the query. If one column is
+      missing, it must go back to the table once per row.</li>
+    <li><code>INCLUDE</code> columns live only in the leaf level. They cannot be searched or sorted
+      by, they do not bloat the upper levels of the tree, and they are exactly what a lookup would
+      have fetched.</li>
+    <li>The lookup is called a key lookup (SQL Server), a bookmark lookup (older names) or a heap
+      fetch (PostgreSQL). Seeing thousands of them in a plan is one of the most reliable performance
+      diagnoses there is.</li>
+    <li>The cost is disk and write time: every <code>UPDATE</code> to <code>customer_id</code> now
+      maintains this index too. Covering is a trade, not a free win.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="fragmentation">Fill factor and fragmentation</h2>
 
@@ -178,12 +200,30 @@ CREATE INDEX ix_orders_status_cov ON orders (status, placed_at) INCLUDE (custome
 </div>
 
 <div class="tryit">
-  <pre><code>-- In the playground, watch a seek turn into a scan.
-EXPLAIN QUERY PLAN SELECT * FROM orders WHERE customer_id = 7;
--- SEARCH orders USING INDEX ix_orders_cust_date (customer_id=?)
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Watch a seek become a scan, in the playground.</figcaption>
+<pre><code>-- There IS an index on (customer_id, placed_at):
+EXPLAIN QUERY PLAN SELECT * FROM orders WHERE customer_id = 7;   -- ask for the plan
+-- SEARCH orders USING INDEX ix_orders_cust_date (customer_id=?)  ← it jumped straight there
 
-EXPLAIN QUERY PLAN SELECT * FROM orders WHERE total_cents &gt; 500000;
--- SCAN orders   ← no index on total_cents, and it would not help much anyway</code></pre>
+-- There is NO index on total_cents:
+EXPLAIN QUERY PLAN SELECT * FROM orders WHERE total_cents &gt; 500000;  -- the same shape of query
+-- SCAN orders   ← every row read. And an index would not help much here anyway.
+</code></pre>
+<div class="cx-conv">
+  <b>Why the second one would not improve much even with an index</b>
+  <ul>
+    <li><code>SEARCH</code> versus <code>SCAN</code> is the whole vocabulary you need from SQLite's
+      plan output. Everything else is detail.</li>
+    <li>An index helps when it eliminates most of the table. A predicate matching a large fraction
+      of rows is better served by a scan: reading the index <em>and then</em> most of the table is
+      more work than reading the table once.</li>
+    <li>That threshold is why the optimiser needs statistics
+      (<a href="28-statistics-and-sniffing.html">chapter 28</a>), and why the same query can get two
+      different plans for two different parameter values.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="others">Index types that are not B-trees</h2>
@@ -259,7 +299,9 @@ EXPLAIN QUERY PLAN SELECT * FROM orders WHERE total_cents &gt; 500000;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

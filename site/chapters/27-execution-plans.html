@@ -31,18 +31,38 @@
 
 <h2 id="getting">Getting a plan</h2>
 
-<pre><code>-- PostgreSQL. ANALYZE actually RUNS it and reports real numbers.
-EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT ...;
+<figure class="codex" data-lang="sql">
+<figcaption>How to ask each engine for a plan &mdash; and which of these actually run the query.</figcaption>
+<pre><code>-- PostgreSQL. ANALYZE actually RUNS it and reports real numbers, not estimates.
+EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT ...;   -- BUFFERS: cache hits vs disk reads
 
 -- SQL Server
 SET STATISTICS IO, TIME ON;          -- logical reads and CPU: often enough on its own
--- then "Include Actual Execution Plan" (Ctrl+M), or:
-SET SHOWPLAN_ALL ON;                 -- estimated, without running
+-- then "Include Actual Execution Plan" (Ctrl+M) in SSMS, or:
+SET SHOWPLAN_ALL ON;                 -- ESTIMATED plan, without running the statement
 
 -- MySQL
-EXPLAIN ANALYZE SELECT ...;          -- 8.0.18+
+EXPLAIN ANALYZE SELECT ...;          -- 8.0.18+; also runs the query
 -- Oracle
-EXPLAIN PLAN FOR SELECT ...;  SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);</code></pre>
+EXPLAIN PLAN FOR SELECT ...;         -- store the plan…
+SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);   -- …then read it back as rows
+</code></pre>
+<div class="cx-conv">
+  <b>Estimated versus actual, and the warning that matters</b>
+  <ul>
+    <li>An <em>estimated</em> plan is what the optimiser intends. An <em>actual</em> plan adds what
+      really happened. The gap between estimated and actual row counts is the single most useful
+      number on the page: a factor of a thousand means the statistics are wrong
+      (<a href="28-statistics-and-sniffing.html">chapter 28</a>) or the predicate is unestimatable.</li>
+    <li><code>EXPLAIN ANALYZE</code> <strong>executes the statement</strong>. On an
+      <code>UPDATE</code> or <code>DELETE</code> that is a real change — run it inside a transaction
+      you intend to roll back, or not at all.</li>
+    <li><code>SET STATISTICS IO</code> reports <em>logical reads</em>: 8&nbsp;KB pages touched. It is
+      the one measurement that does not move with cache warmth or a busy server, which makes it the
+      right number to compare two versions of a query.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Estimated is not actual</div>
@@ -164,17 +184,36 @@ EXPLAIN PLAN FOR SELECT ...;  SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);</code></p
 </ol>
 
 <div class="tryit">
-  <pre><code>-- In the playground: two forms of the same question, two plans.
-EXPLAIN QUERY PLAN
-SELECT * FROM orders WHERE customer_id = 7 ORDER BY placed_at DESC;
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Two plans, side by side: an index that already sorts, and a sort the engine has to do itself.</figcaption>
+<pre><code>-- Question one: one customer's orders, newest first.
+EXPLAIN QUERY PLAN                                            -- ask for the plan…
+SELECT * FROM orders WHERE customer_id = 7                    -- …of this query…
+ORDER BY placed_at DESC;                                      -- …including its sort
 --   SEARCH orders USING INDEX ix_orders_cust_date (customer_id=?)
---   ...and no "USE TEMP B-TREE FOR ORDER BY" line, because the index is already
---   in that order. That missing line is the win.
+--   …and NO "USE TEMP B-TREE FOR ORDER BY" line, because the index is already in
+--   that order. The missing line is the win.
 
-EXPLAIN QUERY PLAN
-SELECT * FROM orders ORDER BY total_cents DESC LIMIT 10;
---   SCAN orders
---   USE TEMP B-TREE FOR ORDER BY      ← it sorted 1800 rows to return 10</code></pre>
+-- Question two: the ten largest orders overall.
+EXPLAIN QUERY PLAN                                            -- the same request…
+SELECT * FROM orders ORDER BY total_cents DESC LIMIT 10;      -- …for a different question
+--   SCAN orders                       ← every row read…
+--   USE TEMP B-TREE FOR ORDER BY      ← …then all of them sorted, to return ten
+</code></pre>
+<div class="cx-conv">
+  <b>Reading a plan, in three habits</b>
+  <ul>
+    <li>Look for what is <strong>missing</strong> as well as what is there. A plan with no sort step
+      for an <code>ORDER BY</code> means an index supplied the order — the cheapest possible
+      outcome.</li>
+    <li><code>LIMIT 10</code> does not mean &ldquo;read ten rows&rdquo;. Without a matching index the
+      engine must sort everything to know which ten. An index on
+      <code>(total_cents DESC)</code> would turn this into reading ten index entries.</li>
+    <li>Change <strong>one thing at a time</strong> and re-read the plan. Two changes at once and
+      you have learned nothing about either.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="box good">
@@ -240,7 +279,9 @@ SELECT * FROM orders ORDER BY total_cents DESC LIMIT 10;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

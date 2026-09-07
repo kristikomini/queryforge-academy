@@ -56,7 +56,22 @@
 
 <h2 id="views">A plain view is not a cache</h2>
 
-<pre><code>CREATE VIEW v_order_totals AS SELECT ... ;   -- a NAME for a query, nothing more</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>A plain view stores no data at all.</figcaption>
+<pre><code>CREATE VIEW v_order_totals AS SELECT ... ;   -- a NAME for a query, and nothing more
+</code></pre>
+<div class="cx-conv">
+  <b>What that means in practice</b>
+  <ul>
+    <li>Reading the view runs its query, every time, at whatever it costs. A view is not a cache and
+      never becomes one by being queried often.</li>
+    <li>What it <em>does</em> buy is a stable interface: the definition of &ldquo;order total&rdquo;
+      lives in one place, and every report agrees with every other one.</li>
+    <li>Views nest, and nested views are how a five-table query quietly becomes a thirty-table one.
+      Read the plan, not the view.</li>
+  </ul>
+</div>
+</figure>
 <p>
   A view is expanded into whatever selects from it and re-executed every time. It is an excellent
   <em>interface</em> — it lets the tables underneath change without every report changing — and it
@@ -90,21 +105,41 @@
   </p>
 </div>
 
-<pre><code>-- PostgreSQL: refreshed on a schedule, readers never blocked.
-CREATE MATERIALIZED VIEW mv_monthly_sales AS
-SELECT date_trunc('month', o.placed_at) AS month,
-       r.name                           AS region,
-       COUNT(*)                         AS orders,
-       SUM(o.total_cents)               AS revenue_cents
-FROM orders o
-JOIN customers c ON c.id = o.customer_id
-JOIN cities   ci ON ci.id = c.city_id
-JOIN regions   r ON r.id = ci.region_id
-WHERE o.status &lt;&gt; 'cancelled'
-GROUP BY 1, 2;
+<figure class="codex" data-lang="sql">
+<figcaption>A materialised view does store data &mdash; which is exactly why it can be stale.</figcaption>
+<pre><code>-- PostgreSQL: refreshed on a schedule, and readers are never blocked.
+CREATE MATERIALIZED VIEW mv_monthly_sales AS          -- the result is STORED, not recomputed
+SELECT date_trunc('month', o.placed_at) AS month,     -- the grain: one row per month…
+       r.name                           AS region,    -- …per region
+       COUNT(*)                         AS orders,    -- how many
+       SUM(o.total_cents)               AS revenue_cents   -- and how much, in cents
+FROM orders o                                         -- the fact table
+JOIN customers c ON c.id = o.customer_id              -- …to reach the city…
+JOIN cities   ci ON ci.id = c.city_id                 -- …and the region…
+JOIN regions   r ON r.id = ci.region_id               -- …four tables, resolved once
+WHERE o.status &lt;&gt; 'cancelled'                         -- cancellations are not revenue
+GROUP BY 1, 2;                                        -- by the first two select columns
 
-CREATE UNIQUE INDEX ON mv_monthly_sales (month, region);   -- required by CONCURRENTLY
-REFRESH MATERIALIZED VIEW CONCURRENTLY mv_monthly_sales;</code></pre>
+CREATE UNIQUE INDEX ON mv_monthly_sales (month, region);  -- REQUIRED by CONCURRENTLY
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_monthly_sales;  -- rebuild without blocking readers
+</code></pre>
+<div class="cx-conv">
+  <b>The two words that decide whether this is safe on a live system</b>
+  <ul>
+    <li><code>CONCURRENTLY</code> keeps the view readable while it rebuilds. Without it, the refresh
+      takes an exclusive lock and every dashboard hangs for its duration — which is how a
+      &ldquo;performance improvement&rdquo; becomes an outage.</li>
+    <li>It requires a <strong>unique index</strong> on the view, because the refresh works out the
+      difference row by row and needs to identify rows. That is why the index above is not
+      optional.</li>
+    <li>The data is as old as the last refresh. Decide the staleness budget explicitly — five
+      minutes, an hour, overnight — and put it in the name or the documentation, because someone
+      will eventually ask why the number differs from the live query.</li>
+    <li>SQL Server's indexed views are the opposite trade: maintained synchronously, always current,
+      and every writer pays for them on every write.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="summary">Summary tables, and the incremental refresh</h2>
 
@@ -113,16 +148,37 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_monthly_sales;</code></pre>
   The pattern that does scale is to refresh only what changed:
 </p>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Incremental refresh: recompute only the slice that changed.</figcaption>
 <pre><code>-- Recompute only the affected slice, inside one transaction. Naturally idempotent,
 -- so re-running it after a failure is safe. See chapter 20.
-BEGIN;
-  DELETE FROM summary_daily_sales WHERE d = :day;
-  INSERT INTO summary_daily_sales (d, region, orders, revenue_cents)
-  SELECT date(placed_at), region, COUNT(*), SUM(total_cents)
-  FROM v_orders_geo
-  WHERE date(placed_at) = :day AND status &lt;&gt; 'cancelled'
-  GROUP BY 1, 2;
-COMMIT;</code></pre>
+BEGIN;                                                      -- both statements, or neither
+  DELETE FROM summary_daily_sales WHERE d = :day;           -- remove the old version of the day
+  INSERT INTO summary_daily_sales (d, region, orders, revenue_cents)  -- and rebuild it
+  SELECT date(placed_at), region, COUNT(*), SUM(total_cents)  -- the same aggregation as before
+  FROM v_orders_geo                                         -- a view that joins the geography
+  WHERE date(placed_at) = :day                              -- …restricted to one day…
+    AND status &lt;&gt; 'cancelled'                               -- …and to real revenue
+  GROUP BY 1, 2;                                            -- by day and region
+COMMIT;                                                     -- readers see old or new, never half
+</code></pre>
+<div class="cx-conv">
+  <b>Why this scales where a full refresh does not</b>
+  <ul>
+    <li><code>REFRESH MATERIALIZED VIEW</code> recomputes <em>everything</em>, and
+      &ldquo;everything&rdquo; is two years of data. This touches one day, so its cost is constant
+      as the table grows.</li>
+    <li>Delete-then-insert of a slice is idempotent by construction: re-running replaces the day
+      with itself, so a failed job can simply be run again
+      (<a href="20-upsert-and-idempotency.html">chapter 20</a>).</li>
+    <li><code>date(placed_at) = :day</code> is <strong>not sargable</strong> — a function on the
+      column. In a nightly job over one day's rows that is acceptable; if this table were large, the
+      predicate would be a half-open range on the raw timestamp instead.</li>
+    <li>You are now maintaining a cache by hand. That is a real cost, and it is worth paying only
+      when the query is genuinely too slow and genuinely tolerates being stale.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Always store when it was computed</div>
@@ -136,10 +192,29 @@ COMMIT;</code></pre>
 
 <h2 id="counters">Maintained counters, and why they hurt</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The maintained counter: correct, tempting, and a contention point you cannot index away.</figcaption>
 <pre><code>-- Tempting: keep orders.total_cents in step with a trigger on order_lines.
 -- Correct, and it serialises every concurrent write to the same order behind one
--- row lock — because they all update the same parent row. On a hot parent this is
--- a contention point you cannot index your way out of.</code></pre>
+-- row lock — because they all update the same parent row. On a hot parent this
+-- is a contention point you cannot index your way out of.
+</code></pre>
+<div class="cx-conv">
+  <b>The trade, stated plainly</b>
+  <ul>
+    <li>Every insert into <code>order_lines</code> now also updates one row of
+      <code>orders</code>. Two concurrent line inserts for the same order both want that row's
+      lock, so they queue — and the queue is invisible in any per-query report.</li>
+    <li>The alternative is computing the total on read, from an index that makes it cheap. Slower per
+      read, and no write contention at all.</li>
+    <li>Which is right depends on the read/write ratio, and saying <em>that</em> — rather than
+      &ldquo;triggers are bad&rdquo; — is the answer an interviewer is listening for.</li>
+    <li>If you do maintain a counter, the trigger must handle <code>UPDATE</code> and
+      <code>DELETE</code> of lines too, not just <code>INSERT</code>. Most hand-written ones do
+      not.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 The standard fix: sharded counters</div>
@@ -229,7 +304,9 @@ COMMIT;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

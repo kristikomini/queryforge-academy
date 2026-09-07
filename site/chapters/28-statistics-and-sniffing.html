@@ -51,14 +51,35 @@
   </p>
 </div>
 
-<pre><code>-- Look at what it believes
-DBCC SHOW_STATISTICS('dbo.orders', 'ix_orders_status');   -- SQL Server
-SELECT * FROM pg_stats WHERE tablename = 'orders';        -- PostgreSQL
+<figure class="codex" data-lang="sql">
+<figcaption>Seeing what the optimiser believes, and telling it to look again.</figcaption>
+<pre><code>-- Look at what it BELIEVES about the data
+DBCC SHOW_STATISTICS('dbo.orders', 'ix_orders_status');   -- SQL Server: the histogram itself
+SELECT * FROM pg_stats WHERE tablename = 'orders';        -- PostgreSQL: per-column statistics
 
 -- Tell it to look again
-UPDATE STATISTICS dbo.orders WITH FULLSCAN;               -- SQL Server
-ANALYZE orders;                                           -- PostgreSQL
-ANALYZE TABLE orders;                                     -- MySQL</code></pre>
+UPDATE STATISTICS dbo.orders WITH FULLSCAN;               -- SQL Server: read every row, not a sample
+ANALYZE orders;                                           -- PostgreSQL: resample this table
+ANALYZE TABLE orders;                                     -- MySQL: the same idea again
+</code></pre>
+<div class="cx-conv">
+  <b>What statistics are, and how they go wrong</b>
+  <ul>
+    <li>Statistics are a <em>histogram</em>: how many rows fall in each range of values. The
+      optimiser uses them to guess how many rows a predicate will match, and that guess decides seek
+      versus scan, and nested loops versus hash join.</li>
+    <li>Stale statistics do not make the optimiser slow. They make it <strong>confidently
+      wrong</strong> — it plans for 10 rows and meets 10 million, and a nested loop that was optimal
+      becomes a catastrophe.</li>
+    <li>Sampling is the default because reading every row is expensive.
+      <code>WITH FULLSCAN</code> is exact and slow: right after a bulk load, wrong as a nightly
+      habit on a large table.</li>
+    <li>The classic symptom is an <em>ascending key</em>: rows added today are beyond the histogram's
+      last bucket, so &ldquo;yesterday's orders&rdquo; is estimated at one row. Recognising that
+      symptom is most of what an interviewer is checking.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — auto-update fires later than you think</div>
@@ -152,20 +173,42 @@ ANALYZE TABLE orders;                                     -- MySQL</code></pre>
 
 <h2 id="cache">The plan cache</h2>
 
-<pre><code>-- Which cached plans are costing the most in total? (Not average — total.)
-SELECT TOP 20
-       qs.execution_count,
-       qs.total_worker_time / 1000 AS cpu_ms,
-       qs.total_logical_reads,
-       qs.total_elapsed_time / qs.execution_count / 1000 AS avg_ms,
-       SUBSTRING(t.text, 1, 200) AS sql
-FROM sys.dm_exec_query_stats qs
-CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t
-ORDER BY qs.total_worker_time DESC;
+<figure class="codex" data-lang="sql">
+<figcaption>The plan cache: which statements cost the most <em>in total</em>.</figcaption>
+<pre><code>-- SQL Server: sort by TOTAL cost, never by average.
+SELECT TOP 20                                               -- the twenty worst offenders
+       qs.execution_count,                                  -- how often it ran
+       qs.total_worker_time / 1000 AS cpu_ms,               -- microseconds → milliseconds
+       qs.total_logical_reads,                              -- 8 KB pages touched, in total
+       qs.total_elapsed_time / qs.execution_count / 1000 AS avg_ms,  -- mean duration, ms
+       SUBSTRING(t.text, 1, 200) AS sql                     -- the first 200 characters
+FROM sys.dm_exec_query_stats qs                             -- one row per cached plan
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t           -- the text behind the handle
+ORDER BY qs.total_worker_time DESC;                         -- the biggest total wins
 
 -- PostgreSQL, with pg_stat_statements enabled:
-SELECT calls, total_exec_time, mean_exec_time, rows, left(query, 120)
-FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20;</code></pre>
+SELECT calls, total_exec_time, mean_exec_time, rows,        -- the same four questions…
+       left(query, 120)                                     -- …and the statement, truncated
+FROM pg_stat_statements                                     -- one row per normalised statement
+ORDER BY total_exec_time DESC LIMIT 20;                     -- again: total, not mean
+</code></pre>
+<div class="cx-conv">
+  <b>Why total and not average</b>
+  <ul>
+    <li>The query that runs ten thousand times at 8&nbsp;ms costs eighty seconds of server time. The
+      nightly report that takes four seconds costs four. Sorting by average finds the second and
+      misses the first, and the first is what your users are waiting for.</li>
+    <li><code>total_worker_time</code> is CPU; <code>total_elapsed_time</code> is wall clock. A big
+      gap between them means waiting — for locks, or for disk — and that is a different
+      investigation (<a href="42-production-diagnosis.html">chapter 42</a>).</li>
+    <li><code>/ 1000</code> twice in one expression: these columns are microseconds, and integer
+      division truncates. For a sub-millisecond statement that reads as 0 — accurate enough for
+      ranking, misleading if you quote it.</li>
+    <li>Both views are cumulative since the last restart or reset. Note the uptime before drawing
+      conclusions.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — sorting by average duration hides the real problem</div>
@@ -227,7 +270,9 @@ FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

@@ -51,13 +51,42 @@
 </div>
 
 <h2 id="one">1 · A function wrapping the filtered column</h2>
-<pre><code>WHERE YEAR(placed_at) = 2026                 -- scan
-WHERE placed_at &gt;= '2026-01-01' AND placed_at &lt; '2027-01-01'   -- seek</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Pattern 1: a function wrapping the filtered column.</figcaption>
+<pre><code>WHERE YEAR(placed_at) = 2026                                   -- scan: computed per row
+WHERE placed_at &gt;= '2026-01-01' AND placed_at &lt; '2027-01-01'   -- seek: a range over stored values
+</code></pre>
+<div class="cx-conv">
+  <b>The tell, and the fix</b>
+  <ul>
+    <li><strong>Tell:</strong> the indexed column appears inside a function call in the
+      <code>WHERE</code> clause.</li>
+    <li><strong>Fix:</strong> rewrite as a half-open range on the bare column. If that is genuinely
+      impossible, index the expression itself.</li>
+    <li>Full treatment in <a href="07-predicates-and-sargability.html">chapter 07</a> — this list is
+      for recognising it in ten seconds, not for learning it.</li>
+  </ul>
+</div>
+</figure>
 <p class="small muted">The commonest single cause. See <a href="07-predicates-and-sargability.html">chapter 07</a>.</p>
 
 <h2 id="two">2 · Implicit conversion</h2>
-<pre><code>WHERE vat_number = 12345678901     -- column is VARCHAR: converts every row, loses the index
-WHERE vat_number = '12345678901'</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Pattern 2: implicit conversion &mdash; the one with no visible symptom.</figcaption>
+<pre><code>WHERE vat_number = 12345678901     -- column is VARCHAR: converts EVERY row, loses the index
+WHERE vat_number = '12345678901'   -- text to text: no conversion, index seek
+</code></pre>
+<div class="cx-conv">
+  <b>The tell, and the fix</b>
+  <ul>
+    <li><strong>Tell:</strong> a <code>CONVERT_IMPLICIT</code> in the SQL Server plan, or a seek you
+      expected and did not get. The query is <em>correct</em>, which is why nobody notices.</li>
+    <li><strong>Fix:</strong> match the literal's and the parameter's type to the column's. It is
+      often the application's driver choosing <code>NVARCHAR</code> for a <code>VARCHAR</code>
+      column, so the fix may be in the ORM's mapping, not in the SQL.</li>
+  </ul>
+</div>
+</figure>
 <p class="small muted">
   Invisible: the query is correct and returns the right answer, merely a hundred times slower. Very
   often introduced by an ORM binding <code>NVARCHAR</code> against a <code>VARCHAR</code> column.
@@ -71,9 +100,27 @@ WHERE vat_number = '12345678901'</code></pre>
 </p>
 
 <h2 id="four">4 · N+1</h2>
-<pre><code>SELECT id FROM orders WHERE customer_id = 42;      -- 500 rows
--- then, in a loop, 500 times:
-SELECT * FROM order_lines WHERE order_id = ?;</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Pattern 4: N+1 &mdash; one query to get the list, then one per item.</figcaption>
+<pre><code>SELECT id FROM orders WHERE customer_id = 42;      -- 1 query, 500 rows back
+-- then, in an application loop, 500 times:
+SELECT * FROM order_lines WHERE order_id = ?;      -- 500 more queries, one per row
+</code></pre>
+<div class="cx-conv">
+  <b>The tell, and the fix</b>
+  <ul>
+    <li><strong>Tell:</strong> the database log shows the same statement thousands of times with
+      different parameters. Each is fast — a millisecond — and five hundred of them is half a second
+      of pure network latency.</li>
+    <li><strong>Fix:</strong> one query with a join, or one query with
+      <code>WHERE order_id IN (…)</code> and grouping in the application. In an ORM it is
+      <code>.Include()</code> / <code>fetch join</code> / <code>selectinload</code>
+      (<a href="38-the-orm-boundary.html">chapter 38</a>).</li>
+    <li>This is the most common performance bug in applications built on an ORM, and it never
+      appears in a query-level report because no single query is slow.</li>
+  </ul>
+</div>
+</figure>
 <div class="box trap">
   <div class="box-title">⚠ Why this one hides</div>
   <p style="margin-bottom:0">
@@ -85,14 +132,33 @@ SELECT * FROM order_lines WHERE order_id = ?;</code></pre>
 </div>
 
 <h2 id="five">5 · A cursor or a row-by-row loop</h2>
+<figure class="codex" data-lang="tsql">
+<figcaption>Pattern 5: a cursor doing what one statement could do.</figcaption>
 <pre><code>-- Anything shaped like this in T-SQL or PL/SQL:
-DECLARE c CURSOR FOR SELECT id FROM orders WHERE status = 'confirmed';
-OPEN c; FETCH NEXT FROM c INTO @id;
-WHILE @@FETCH_STATUS = 0
-BEGIN
-  UPDATE orders SET total_cents = (...) WHERE id = @id;   -- one statement per row
-  FETCH NEXT FROM c INTO @id;
-END</code></pre>
+DECLARE c CURSOR FOR                                    -- declare a row-at-a-time reader…
+  SELECT id FROM orders WHERE status = 'confirmed';     -- …over this set
+OPEN c;                                                 -- start it
+FETCH NEXT FROM c INTO @id;                             -- read the first row
+WHILE @@FETCH_STATUS = 0                                -- 0 means the fetch succeeded
+BEGIN                                                   -- the loop body
+  UPDATE orders SET total_cents = (...) WHERE id = @id; -- ONE statement per row
+  FETCH NEXT FROM c INTO @id;                           -- next row
+END                                                     -- …and repeat, thousands of times
+</code></pre>
+<div class="cx-conv">
+  <b>The tell, and the fix</b>
+  <ul>
+    <li><strong>Tell:</strong> <code>DECLARE … CURSOR</code>, or a <code>WHILE</code> loop around a
+      single-row <code>UPDATE</code>. Each statement carries its own parse, plan lookup, lock and
+      log record.</li>
+    <li><strong>Fix:</strong> one set-based <code>UPDATE … FROM</code> over the whole set. Two to
+      three orders of magnitude is a normal improvement, not an exaggeration.</li>
+    <li>Cursors are not forbidden — maintenance scripts and genuinely sequential algorithms use
+      them. They are simply almost never the reason a business query is slow, and almost always the
+      reason a batch job is.</li>
+  </ul>
+</div>
+</figure>
 <p>
   Ten thousand statements, ten thousand plans looked up, ten thousand log records. The set-based
   equivalent is one statement. The rare legitimate cursor: calling an external procedure per row,
@@ -101,7 +167,24 @@ END</code></pre>
 </p>
 
 <h2 id="six">6 · Scalar user-defined functions in the SELECT or WHERE</h2>
-<pre><code>SELECT id, dbo.fn_CalculateTax(total_cents) FROM orders;   -- ~1.8 million rows</code></pre>
+<figure class="codex" data-lang="tsql">
+<figcaption>Pattern 6: a scalar user-defined function in the <code>SELECT</code> list.</figcaption>
+<pre><code>SELECT id, dbo.fn_CalculateTax(total_cents) FROM orders;   -- ~1.8 million calls, one per row
+</code></pre>
+<div class="cx-conv">
+  <b>The tell, and the fix</b>
+  <ul>
+    <li><strong>Tell:</strong> a <code>dbo.fn_…</code> call in the <code>SELECT</code> or
+      <code>WHERE</code>. Before SQL Server 2019 these were invisible in the plan and ran once per
+      row, single-threaded, blocking parallelism for the whole query.</li>
+    <li><strong>Fix:</strong> rewrite as an inline table-valued function, a <code>CROSS APPLY</code>,
+      or a plain expression. SQL Server 2019's scalar UDF inlining does this automatically —
+      sometimes.</li>
+    <li>The same warning applies to a scalar function in a <code>CHECK</code> constraint or a
+      computed column: it runs on every write instead.</li>
+  </ul>
+</div>
+</figure>
 <p>
   Before SQL Server 2019, that function was executed <strong>once per row</strong>, with no
   costing, and it made the whole query serial. Inlining (2019+) helps, but only for functions
@@ -110,13 +193,45 @@ END</code></pre>
 </p>
 
 <h2 id="seven">7 · <code>OR</code> across different columns</h2>
-<pre><code>WHERE email = ? OR phone = ?
+<figure class="codex" data-lang="sql">
+<figcaption>Pattern 7: <code>OR</code> across different columns.</figcaption>
+<pre><code>WHERE email = ? OR phone = ?                    -- no single index leads with both columns
 -- becomes:
-SELECT ... WHERE email = ? UNION SELECT ... WHERE phone = ?</code></pre>
+SELECT ... WHERE email = ?                      -- one seek, on the email index…
+UNION                                           -- …combined with…
+SELECT ... WHERE phone = ?;                     -- …one seek, on the phone index
+</code></pre>
+<div class="cx-conv">
+  <b>The tell, and the fix</b>
+  <ul>
+    <li><strong>Tell:</strong> a scan on a table that has perfectly good indexes on both columns
+      mentioned.</li>
+    <li><strong>Fix:</strong> <code>UNION</code> of two seeks, which the optimiser can cost
+      separately. Use <code>UNION ALL</code> if a row cannot match both sides — it skips the
+      deduplication.</li>
+    <li><code>OR</code> between values of the <em>same</em> column is fine, and is usually rewritten
+      as an <code>IN</code> list of seeks.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="eight">8 · <code>OFFSET</code> deep in a result set</h2>
-<pre><code>ORDER BY placed_at DESC OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;
--- reads 100 020 rows to return 20</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Pattern 8: <code>OFFSET</code> deep in a result set.</figcaption>
+<pre><code>ORDER BY placed_at DESC OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;  -- page 5001
+-- The engine produces 100 020 rows and throws 100 000 of them away.
+</code></pre>
+<div class="cx-conv">
+  <b>The tell, and the fix</b>
+  <ul>
+    <li><strong>Tell:</strong> page one is instant and page five hundred takes eight seconds. The
+      cost grows with the page number, which is the signature.</li>
+    <li><strong>Fix:</strong> keyset pagination — <code>WHERE (placed_at, id) &lt; (?, ?)</code>
+      ordered by the same columns. Constant cost per page, at the price of losing &ldquo;jump to
+      page 37&rdquo;. <a href="30-pagination.html">Chapter 30</a> is the long version.</li>
+  </ul>
+</div>
+</figure>
 <p class="small muted">See <a href="30-pagination.html">chapter 30</a> for keyset pagination.</p>
 
 <h2 id="nine">9 · <code>COUNT(DISTINCT …)</code>, several times, on a dashboard</h2>
@@ -126,8 +241,25 @@ SELECT ... WHERE email = ? UNION SELECT ... WHERE phone = ?</code></pre>
 </p>
 
 <h2 id="ten">10 · The optional-parameter <code>WHERE</code></h2>
-<pre><code>WHERE (@customer_id IS NULL OR customer_id = @customer_id)
-  AND (@status      IS NULL OR status      = @status)</code></pre>
+<figure class="codex" data-lang="tsql">
+<figcaption>Pattern 10: the optional-parameter <code>WHERE</code> clause.</figcaption>
+<pre><code>WHERE (@customer_id IS NULL OR customer_id = @customer_id)  -- "filter, if one was supplied"
+  AND (@status      IS NULL OR status      = @status)       -- …and again, per optional filter
+</code></pre>
+<div class="cx-conv">
+  <b>The tell, and the fix</b>
+  <ul>
+    <li><strong>Tell:</strong> a reporting screen with several optional filters, and a query that is
+      fast for some combinations and disastrous for others depending on which one compiled the
+      cached plan.</li>
+    <li><strong>Fix:</strong> <code>OPTION (RECOMPILE)</code> for a fresh plan per execution, or
+      genuinely dynamic SQL built with <code>sp_executesql</code> and parameters
+      (<a href="34-dynamic-sql-and-injection.html">chapter 34</a>).</li>
+    <li>Naming this pattern in an interview is a strong signal: it means you have maintained a
+      reporting screen.</li>
+  </ul>
+</div>
+</figure>
 <p>
   One cached plan for every combination of supplied parameters. Fix with
   <code>OPTION (RECOMPILE)</code> or safe parameterised dynamic SQL.
@@ -159,17 +291,36 @@ SELECT ... WHERE email = ? UNION SELECT ... WHERE phone = ?</code></pre>
 </div>
 
 <div class="tryit">
-  <pre><code>-- The classic "optimise this" exercise. Rewrite it, then compare the plans.
-SELECT DISTINCT c.name,
-       (SELECT COUNT(*)         FROM orders o WHERE o.customer_id = c.id) AS n,
-       (SELECT SUM(total_cents) FROM orders o WHERE o.customer_id = c.id) AS spend
-FROM customers c
-JOIN orders o2 ON o2.customer_id = c.id
-WHERE strftime('%Y', o2.placed_at) = '2026';
-
--- Four problems: a non-sargable date filter, two correlated subqueries over the
--- same table, a join that is only there to filter (so it fans out), and the
--- DISTINCT hiding that fan-out. The answer is in course/SOLUTIONS.md.</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>The classic &ldquo;optimise this&rdquo; exercise: four separate problems in six lines.</figcaption>
+<pre><code>-- Rewrite this, then compare the two plans.
+SELECT DISTINCT c.name,                                              -- problem 4: hides a fan-out
+       (SELECT COUNT(*)         FROM orders o WHERE o.customer_id = c.id) AS n,      -- problem 2…
+       (SELECT SUM(total_cents) FROM orders o WHERE o.customer_id = c.id) AS spend   -- …twice
+FROM customers c                                                     -- the driving table
+JOIN orders o2 ON o2.customer_id = c.id                              -- problem 3: a join to filter
+WHERE strftime('%Y', o2.placed_at) = '2026';                         -- problem 1: not sargable
+-- The answer is worked through in course/SOLUTIONS.md.
+</code></pre>
+<div class="cx-conv">
+  <b>The four problems, in the order you would fix them</b>
+  <ul>
+    <li><strong>1 · The date filter is not sargable.</strong>
+      <code>strftime('%Y', …) = '2026'</code> computes a value per row. Replace with
+      <code>placed_at &gt;= '2026-01-01' AND placed_at &lt; '2027-01-01'</code>.</li>
+    <li><strong>2 · Two correlated subqueries over the same rows.</strong> Aggregate once in a
+      derived table and join to it (<a href="11-subqueries.html">chapter 11</a>).</li>
+    <li><strong>3 · A join that exists only to filter.</strong> It multiplies rows — a customer with
+      forty orders appears forty times — which is why the <code>DISTINCT</code> is there. It should
+      be <code>EXISTS</code>.</li>
+    <li><strong>4 · <code>DISTINCT</code> hiding the fan-out.</strong> It makes the row list look
+      right. If the query ever grows a <code>SUM</code> over <code>o2</code>, the numbers will be
+      forty times too high and still look plausible.</li>
+    <li>Also note the two aliases for the same table, <code>o</code> and <code>o2</code>: a reliable
+      sign that a query has grown by accretion rather than been designed.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -223,7 +374,9 @@ WHERE strftime('%Y', o2.placed_at) = '2026';
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

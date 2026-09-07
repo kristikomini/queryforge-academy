@@ -51,14 +51,33 @@
   </p>
 </div>
 
-<pre><code>-- The reference database's orders table carries this column for exactly this.
-UPDATE orders
-SET    status = 'confirmed',
-       version = version + 1
-WHERE  id = ? AND version = ?;      -- the version the caller read
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Optimistic concurrency: no lock, no waiting, and the row count is the answer.</figcaption>
+<pre><code>-- The reference database's orders table carries a version column for exactly this.
+UPDATE orders                                 -- one row, changed in place
+SET    status  = 'confirmed',                 -- the change the user asked for…
+       version = version + 1                  -- …and the stamp that says "I moved it"
+WHERE  id = ? AND version = ?;                -- only if it is still the version we read
 
--- rows affected = 1  -> committed
--- rows affected = 0  -> someone else got there first: 409 Conflict, reload, retry</code></pre>
+-- rows affected = 1  -> we won: committed.
+-- rows affected = 0  -> somebody else got there first: 409 Conflict, reload, retry.
+</code></pre>
+<div class="cx-conv">
+  <b>Why this beats a lock for anything a human edits</b>
+  <ul>
+    <li>No lock is held across the user's thinking time. A pessimistic lock taken when the form
+      opens is held while somebody goes to lunch.</li>
+    <li>The check and the write are <strong>one statement</strong>, so there is no window between
+      them. That is what makes it safe without a lock — not the version column by itself.</li>
+    <li>The row count is the result. Zero is not an error and must not be treated as one: it means
+      the data moved, and the caller has to re-read and decide, because the engine cannot know
+      whether the two changes conflict in business terms.</li>
+    <li><code>version + 1</code> is computed by the engine from the current row, under its own
+      short-lived lock. Reading the version into the application and writing back a number is the
+      race this pattern exists to remove.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="table-wrap">
 <table>
@@ -84,15 +103,38 @@ WHERE  id = ? AND version = ?;      -- the version the caller read
 
 <h2 id="pessimistic">Pessimistic locking, and SKIP LOCKED</h2>
 
-<pre><code>-- Take the lock while reading, hold it to the end of the transaction.
-BEGIN;
-  SELECT on_hand FROM stock WHERE product_id = ? FOR UPDATE;   -- X lock, others wait
-  UPDATE stock SET on_hand = on_hand - ? WHERE product_id = ?;
-COMMIT;
+<figure class="codex" data-lang="sql">
+<figcaption>Pessimistic locking, and the two modifiers that make it usable in production.</figcaption>
+<pre><code>-- Take the lock while READING, and hold it to the end of the transaction.
+BEGIN;                                               -- the lock lives as long as this
+  SELECT on_hand FROM stock WHERE product_id = ?     -- read the row…
+  FOR UPDATE;                                        -- …exclusively: others wait here
+  UPDATE stock SET on_hand = on_hand - ?             -- now nobody can have changed it
+  WHERE product_id = ?;                              -- the same row, by key
+COMMIT;                                              -- the lock is released here, not before
 
 -- The two modifiers that make it usable:
-SELECT ... FOR UPDATE NOWAIT;       -- fail immediately rather than queue
-SELECT ... FOR UPDATE SKIP LOCKED;  -- ignore locked rows and take the next free one</code></pre>
+SELECT ... FOR UPDATE NOWAIT;       -- fail immediately rather than queue behind someone
+SELECT ... FOR UPDATE SKIP LOCKED;  -- ignore locked rows and take the next free one
+</code></pre>
+<div class="cx-conv">
+  <b>What the lock does and does not cover</b>
+  <ul>
+    <li><code>FOR UPDATE</code> locks the rows the <code>SELECT</code> returned, until
+      <code>COMMIT</code> or <code>ROLLBACK</code>. It does not stop new rows appearing that would
+      have matched — that is a phantom, and it needs <code>SERIALIZABLE</code>
+      (<a href="22-isolation-levels.html">chapter 22</a>).</li>
+    <li>Without <code>NOWAIT</code> or a lock timeout, a blocked session waits indefinitely by
+      default in some engines. Under load that turns into a queue of connections and looks like the
+      database being down.</li>
+    <li><code>SKIP LOCKED</code> changes the meaning of the query: it returns a <em>different</em>
+      set of rows depending on what else is running. That is wrong for a report and exactly right
+      for a work queue.</li>
+    <li>SQL Server spells these as hints: <code>WITH (UPDLOCK)</code>,
+      <code>WITH (UPDLOCK, READPAST)</code>.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ <code>SKIP LOCKED</code> is the whole reason a queue in a table works</div>
@@ -107,25 +149,50 @@ SELECT ... FOR UPDATE SKIP LOCKED;  -- ignore locked rows and take the next free
 
 <h2 id="queue">A work queue in a table, done properly</h2>
 
-<pre><code>-- PostgreSQL: claim ONE job atomically. No race, no double processing.
-UPDATE outbox
-SET    claimed_at = now(), claimed_by = $1, attempts = attempts + 1
-WHERE  id = (
-  SELECT id FROM outbox
-  WHERE  published_at IS NULL
-    AND (claimed_at IS NULL OR claimed_at &lt; now() - INTERVAL '5 minutes')  -- reclaim the dead
-  ORDER  BY created_at
-  FOR UPDATE SKIP LOCKED
-  LIMIT  1
-)
-RETURNING id, topic, payload;
+<figure class="codex" data-lang="sql">
+<figcaption>A work queue in a table: claiming exactly one job, atomically, with no race and no double processing.</figcaption>
+<pre><code>-- PostgreSQL: claim ONE job atomically.
+UPDATE outbox                                 -- claim by WRITING, not by reading
+SET    claimed_at = now(),                    -- stamp who took it and when…
+       claimed_by = $1,                       -- $1 is a bound parameter: the worker id
+       attempts   = attempts + 1              -- …and count the attempt, for poison-message limits
+WHERE  id = (                                 -- the subquery picks exactly one id
+  SELECT id FROM outbox                     -- …by looking at the queue itself…
+  WHERE  published_at IS NULL                 -- not done yet…
+    AND (claimed_at IS NULL                   -- …and either never claimed…
+      OR claimed_at &lt; now() - INTERVAL '5 minutes')  -- …or claimed by a worker that died
+  ORDER  BY created_at                        -- oldest first: fair, and keeps latency bounded
+  FOR UPDATE SKIP LOCKED                      -- step over rows other workers hold
+  LIMIT  1                                    -- exactly one job
+)                                             -- end of the id subquery
+RETURNING id, topic, payload;                 -- hand the job back in the same round trip
 
--- SQL Server
-UPDATE TOP (1) o
-SET    claimed_at = SYSUTCDATETIME(), claimed_by = @worker, attempts = attempts + 1
-OUTPUT inserted.id, inserted.topic, inserted.payload
-FROM   outbox o WITH (UPDLOCK, READPAST)
-WHERE  o.published_at IS NULL;</code></pre>
+-- SQL Server: the same idea, with hints instead of SKIP LOCKED.
+UPDATE TOP (1) o                              -- one row…
+SET    claimed_at = SYSUTCDATETIME(),         -- UTC, at full precision
+       claimed_by = @worker,                  -- a parameter again
+       attempts   = attempts + 1             -- the same attempt counter
+OUTPUT inserted.id, inserted.topic, inserted.payload  -- T-SQL's RETURNING
+FROM   outbox o WITH (UPDLOCK, READPAST)      -- lock what we read; skip what others hold
+WHERE  o.published_at IS NULL;                -- unpublished jobs only
+</code></pre>
+<div class="cx-conv">
+  <b>Every clause here is load-bearing</b>
+  <ul>
+    <li><code>SKIP LOCKED</code> / <code>READPAST</code> is what makes the queue scale: without it,
+      ten workers all try to claim the same oldest row and nine of them wait. With it, each takes
+      the next free one and throughput rises with worker count.</li>
+    <li>The claim is a single <code>UPDATE … RETURNING</code>. Select-then-update would leave a
+      window in which two workers claim the same job.</li>
+    <li>The <code>claimed_at &lt; now() - INTERVAL '5 minutes'</code> branch reclaims jobs from
+      workers that died mid-flight. Without it, one crash loses a message permanently.</li>
+    <li><code>attempts</code> is what lets you stop retrying a poison message forever. Add
+      <code>AND attempts &lt; 5</code> and a dead-letter path.</li>
+    <li>A table-as-queue is fine into the low thousands of jobs a second. Beyond that the answer is
+      a real broker, and saying so is the right answer in an interview.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Three details that make it production-grade</div>
@@ -164,18 +231,41 @@ WHERE  o.published_at IS NULL;</code></pre>
   </p>
 </div>
 
-<pre><code>BEGIN;
-  UPDATE orders SET status = 'shipped', shipped_at = now(), version = version + 1
-  WHERE id = $1 AND version = $2;
-  -- 0 rows -> ROLLBACK, 409
+<figure class="codex" data-lang="sql">
+<figcaption>The transactional outbox: state change, audit trail and the message to publish, in one transaction.</figcaption>
+<pre><code>BEGIN;                                         -- three writes, one unit
+  UPDATE orders SET status = 'shipped',        -- the state change…
+                    shipped_at = now(),        -- …with its timestamp…
+                    version = version + 1      -- …and the optimistic-lock bump
+  WHERE id = $1 AND version = $2;              -- only if nobody moved it first
+  -- 0 rows -> ROLLBACK and return 409. Check it before continuing.
 
-  INSERT INTO order_events (order_id, from_status, to_status, actor)
-  VALUES ($1, 'confirmed', 'shipped', $3);
+  INSERT INTO order_events (order_id, from_status, to_status, actor)  -- the audit row…
+  VALUES ($1, 'confirmed', 'shipped', $3);                            -- …written here, not later
 
-  INSERT INTO outbox (topic, payload)
-  VALUES ('order.shipped', json_build_object('orderId', $1)::text);
-COMMIT;
--- Everything or nothing. The worker publishes afterwards, and may publish twice.</code></pre>
+  INSERT INTO outbox (topic, payload)                                 -- the message to publish…
+  VALUES ('order.shipped',                                            -- …its topic…
+          json_build_object('orderId', $1)::text);                    -- …and its body, as text
+COMMIT;                                        -- all three, or none of them
+-- A separate worker publishes from the outbox afterwards, and may publish twice.
+</code></pre>
+<div class="cx-conv">
+  <b>The problem this solves, and the honest cost</b>
+  <ul>
+    <li>Publishing to a message broker inside the transaction is impossible to make atomic: the
+      commit can succeed and the publish fail, or the reverse. Writing the message to a
+      <em>table</em> makes it part of the same transaction, and a worker publishes it after.</li>
+    <li>The cost is <strong>at-least-once</strong> delivery: the worker can publish and then crash
+      before marking the row published, so the message goes twice. That is not a flaw to hide — it
+      is why consumers must be idempotent (<a href="20-upsert-and-idempotency.html">chapter 20</a>).</li>
+    <li><code>json_build_object(...)::text</code> — build the JSON in the engine rather than
+      concatenating strings, then cast to text because the column is text. Hand-built JSON breaks
+      the first time an order id needs escaping.</li>
+    <li>Keep the transaction short. It now contains three writes; adding an HTTP call to it would
+      hold locks for the duration of somebody else's outage.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="oversell">The last-unit problem</h2>
 
@@ -184,17 +274,36 @@ COMMIT;
   is not the code:
 </p>
 
-<pre><code>-- 1. The constraint. Even if every other defence fails, the database refuses.
-CONSTRAINT ck_stock_nonneg CHECK (on_hand &gt;= 0)
+<figure class="codex" data-lang="sql">
+<figcaption>Three defences against overselling the last item &mdash; and the strongest one is not the code.</figcaption>
+<pre><code>-- 1. THE CONSTRAINT. Even if every other defence fails, the database refuses.
+CONSTRAINT ck_stock_nonneg CHECK (on_hand &gt;= 0)   -- declared once, enforced always
 
--- 2. An atomic, conditional update. No read-modify-write, so no window.
-UPDATE stock
-SET    on_hand = on_hand - :qty
-WHERE  product_id = :id AND on_hand &gt;= :qty;
+-- 2. An atomic, conditional UPDATE. No read-modify-write, so there is no window.
+UPDATE stock                                      -- no SELECT anywhere in this pattern
+SET    on_hand = on_hand - :qty                   -- computed by the engine, from the current row
+WHERE  product_id = :id                           -- the row…
+  AND  on_hand   &gt;= :qty;                         -- …and the condition, in the SAME statement
 -- rows affected = 0 -> not enough stock. No SELECT involved, so nothing to race.
 
--- 3. Only if you must serialise something more complex:
-SELECT on_hand FROM stock WHERE product_id = :id FOR UPDATE;</code></pre>
+-- 3. Only if you must serialise something more complex than one row:
+SELECT on_hand FROM stock WHERE product_id = :id FOR UPDATE;   -- take the lock, then decide
+</code></pre>
+<div class="cx-conv">
+  <b>Why the order matters</b>
+  <ul>
+    <li>The constraint is the only defence that survives a second application, a manual fix in a SQL
+      console, or a bug in the retry path. Everything above it is optimisation.</li>
+    <li>Defence 2 removes the race by never reading the value into the application at all: the
+      comparison and the arithmetic happen inside one statement, on one row, under the engine's own
+      lock.</li>
+    <li>Zero rows affected is the &ldquo;out of stock&rdquo; answer, and it arrives without an
+      exception — so the caller can return a clean message instead of parsing an error string.</li>
+    <li>Defence 3 is a real lock and therefore a real queue. Reach for it when the decision spans
+      several rows or tables, not for a single decrement.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ Say this in an interview</div>
@@ -207,13 +316,30 @@ SELECT on_hand FROM stock WHERE product_id = :id FOR UPDATE;</code></pre>
 </div>
 
 <div class="tryit">
-  <pre><code>-- In the playground: the constraint refusing to be talked round.
-UPDATE stock SET on_hand = on_hand - 1000 WHERE product_id = 1;
--- CHECK constraint failed: ck_stock_nonneg
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>The constraint refusing to be talked round, and the conditional update that simply declines.</figcaption>
+<pre><code>-- The blunt version: the database refuses outright.
+UPDATE stock SET on_hand = on_hand - 1000 WHERE product_id = 1;  -- more than we have
+-- CHECK constraint failed: ck_stock_nonneg      ← an error, and the row is unchanged
 
--- And the conditional form, which just declines:
-UPDATE stock SET on_hand = on_hand - 1000 WHERE product_id = 1 AND on_hand &gt;= 1000;
-SELECT changes();   -- 0. No error, no oversell, and the caller can say why.</code></pre>
+-- The conditional form, which declines politely instead:
+UPDATE stock SET on_hand = on_hand - 1000                        -- the same arithmetic…
+WHERE product_id = 1 AND on_hand &gt;= 1000;                        -- …guarded by the condition
+SELECT changes();   -- 0. No error, no oversell, and the caller can say why.
+</code></pre>
+<div class="cx-conv">
+  <b>Two correct outcomes, one of which is nicer to the user</b>
+  <ul>
+    <li>Both prevent the oversell. The difference is whether the application handles an
+      <em>exception</em> or reads a <em>row count</em> — and row counts are far easier to turn into
+      a good error message.</li>
+    <li>Keep the constraint anyway. The conditional update is the polite path; the constraint is the
+      one that still works when somebody writes a second application against the same database.</li>
+    <li><code>changes()</code> is SQLite; T-SQL is <code>@@ROWCOUNT</code>, PostgreSQL exposes it
+      through the driver as the command tag.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -267,7 +393,9 @@ SELECT changes();   -- 0. No error, no oversell, and the caller can say why.</co
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

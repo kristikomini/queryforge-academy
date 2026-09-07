@@ -51,16 +51,36 @@
 
 <h2 id="n1">N+1, from the database side</h2>
 
+<figure class="codex" data-lang="csharp">
+<figcaption>N+1, from both sides of the boundary: four innocent lines, and what the database receives.</figcaption>
 <pre><code>// The code. It looks completely innocent.
-var orders = db.Orders.Where(o =&gt; o.CustomerId == 42).ToList();
-foreach (var o in orders)
-    Console.WriteLine(o.Lines.Count);        // ← lazy load, once per order
+var orders = db.Orders.Where(o =&gt; o.CustomerId == 42).ToList();  // ToList() runs the query
+foreach (var o in orders)                     // …and now we iterate the results…
+    Console.WriteLine(o.Lines.Count);         // ← lazy load: a QUERY, once per order
 
--- What the database sees:
-SELECT * FROM orders WHERE customer_id = 42;                 -- 1
-SELECT * FROM order_lines WHERE order_id = 1;                -- 2
+-- What the database actually sees:
+SELECT * FROM orders WHERE customer_id = 42;                 -- 1: the one you intended
+SELECT * FROM order_lines WHERE order_id = 1;                -- 2: the one you did not
 SELECT * FROM order_lines WHERE order_id = 2;                -- 3
-...                                                          -- N+1</code></pre>
+...                                                          -- N+1
+</code></pre>
+<div class="cx-conv">
+  <b>Where the query is hiding</b>
+  <ul>
+    <li><code>o.Lines.Count</code> is a property access in C# and a network round trip in reality.
+      Nothing in the syntax marks the boundary, which is precisely why this bug is so common.</li>
+    <li><code>ToList()</code> is the moment the expression tree becomes SQL. Everything before it is
+      composed on the server; everything after it happens in memory, over data you have already
+      paid to fetch.</li>
+    <li>Each of these queries is <em>fast</em>. Five hundred of them is half a second of latency, and
+      no per-query report will ever flag it — which is why you sort by <em>call count</em>
+      (<a href="42-production-diagnosis.html">chapter 42</a>).</li>
+    <li>The fix is to say what you want up front: <code>.Include(o =&gt; o.Lines)</code>, a
+      <code>fetch join</code>, or <code>selectinload</code>. Then read the next example, because the
+      obvious fix has its own failure mode.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Why you will not find it in a slow-query report</div>
@@ -87,10 +107,28 @@ SELECT * FROM order_lines WHERE order_id = 2;                -- 3
 <h2 id="others">The other four ORM shapes you will meet</h2>
 
 <h3>1 · The Cartesian explosion from over-eager loading</h3>
+<figure class="codex" data-lang="sql">
+<figcaption>The fix for N+1, and the fan-out it causes when applied twice.</figcaption>
 <pre><code>-- .Include(o => o.Lines).Include(o => o.Payments)
--- becomes one query joining BOTH collections: 2 lines x 3 payments = 6 rows per
--- order, every order column repeated six times. The fan-out of chapter 08, over
--- the wire. EF Core calls the fix "split queries"; Hibernate needs two fetches.</code></pre>
+-- becomes ONE query joining BOTH collections: 2 lines × 3 payments = 6 rows per
+-- order, with every order column repeated six times. That is the fan-out of
+-- chapter 08, paid for over the wire instead of in a SUM.
+-- EF Core calls the fix "split queries" (AsSplitQuery); Hibernate needs two fetches.
+</code></pre>
+<div class="cx-conv">
+  <b>Why eager loading is not simply &ldquo;the answer&rdquo;</b>
+  <ul>
+    <li>One <code>.Include()</code> is usually right: one query, one join, one round trip.
+      <strong>Two sibling collections</strong> multiply, and the multiplication is in bytes on the
+      network, not just in rows.</li>
+    <li>The ORM then de-duplicates in memory and hands you the object graph you expected — so the
+      result is correct and the cost is invisible from the application side.</li>
+    <li><code>AsSplitQuery()</code> issues one query per collection: three round trips instead of one
+      enormous result. Which is faster depends on latency and on the fan-out factor, and measuring
+      is the only honest answer.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>2 · <code>SELECT</code> of every column, always</h3>
 <p>
@@ -101,9 +139,26 @@ SELECT * FROM order_lines WHERE order_id = 2;                -- 3
 </p>
 
 <h3>3 · Client-side evaluation</h3>
+<figure class="codex" data-lang="csharp">
+<figcaption>Client-side evaluation: a filter the ORM could not translate, applied after fetching everything.</figcaption>
 <pre><code>// A filter the ORM cannot translate is sometimes applied IN MEMORY —
 // after fetching the whole table. EF Core 3+ throws instead, which is a mercy.
-.Where(o =&gt; MyHelper.IsInteresting(o))     // not translatable to SQL</code></pre>
+.Where(o =&gt; MyHelper.IsInteresting(o))     // a C# method: there is no SQL for it
+</code></pre>
+<div class="cx-conv">
+  <b>How to spot it before production does</b>
+  <ul>
+    <li>The tell is a query that is fast on a developer's 200-row table and unusable on a
+      million-row one, with no plan problem to find — because the <code>WHERE</code> never reached
+      the database.</li>
+    <li>Only expressions the provider can translate become SQL. A call into your own code cannot be,
+      so the provider either gives up loudly (EF Core 3+) or quietly downloads the table (EF Core 2,
+      and several other ORMs).</li>
+    <li>The fix is to express the rule in terms the provider understands — comparisons on mapped
+      columns — or to move it into the database as a view or a computed column.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>4 · Parameter type mismatch</h3>
 <p>
@@ -116,21 +171,42 @@ SELECT * FROM order_lines WHERE order_id = 2;                -- 3
 
 <h2 id="see">Seeing what it really sends</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Seeing what the ORM really sends: from the application first, from the database when you must.</figcaption>
 <pre><code>-- The application side (ask for this first — it is the fastest route):
 --   EF Core:     LogTo(Console.WriteLine) with EnableSensitiveDataLogging
 --   Hibernate:   show_sql, or the org.hibernate.SQL logger
 --   Eloquent:    DB::listen(...)
 --   SQLAlchemy:  echo=True
 
--- The database side, when nobody can turn logging on:
-SELECT calls, total_exec_time, mean_exec_time, rows, left(query, 150)
-FROM pg_stat_statements ORDER BY calls DESC LIMIT 20;    -- ← sort by CALLS for N+1
+-- The database side, when nobody can turn application logging on:
+SELECT calls, total_exec_time, mean_exec_time, rows,   -- how often, how long, how many rows
+       left(query, 150)                                -- and the statement, truncated
+FROM pg_stat_statements                                -- one row per normalised statement
+ORDER BY calls DESC LIMIT 20;                          -- ← sort by CALLS: that is the N+1 signal
 
-SELECT TOP 20 qs.execution_count, qs.total_worker_time/1000 AS cpu_ms,
-       SUBSTRING(t.text, 1, 150) AS sql
-FROM sys.dm_exec_query_stats qs
-CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t
-ORDER BY qs.execution_count DESC;</code></pre>
+SELECT TOP 20 qs.execution_count,                      -- the same idea in SQL Server
+       qs.total_worker_time/1000 AS cpu_ms,            -- microseconds → milliseconds
+       SUBSTRING(t.text, 1, 150) AS sql                -- the statement text
+FROM sys.dm_exec_query_stats qs                        -- one row per cached plan
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) t      -- resolve the handle to text
+ORDER BY qs.execution_count DESC;                      -- most-executed first
+</code></pre>
+<div class="cx-conv">
+  <b>Why sort by call count here, and by total time elsewhere</b>
+  <ul>
+    <li>For performance triage you sort by <strong>total time</strong>
+      (<a href="28-statistics-and-sniffing.html">chapter 28</a>). For finding an N+1 you sort by
+      <strong>execution count</strong>: the signature is a trivially cheap statement executed tens of
+      thousands of times.</li>
+    <li>A parameterised statement appears once in these views with a high count. A statement built by
+      string concatenation appears thousands of times with a count of one each — which tells you
+      something else useful about the application.</li>
+    <li>Ask for the application log first anyway. It shows the call site; the database only shows the
+      symptom.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="drop">When to drop to SQL</h2>
 
@@ -221,7 +297,9 @@ ORDER BY qs.execution_count DESC;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

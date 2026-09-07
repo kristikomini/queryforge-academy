@@ -161,6 +161,8 @@
 </table>
 </div>
 
+<figure class="codex" data-lang="text">
+<figcaption>A slowly changing dimension, type 2 &mdash; and why the warehouse invents its own keys.</figcaption>
 <pre><code>-- Type 2 in practice. The SURROGATE key is what makes it work:
 dim_customer
  customer_key  customer_id  name        city     valid_from   valid_to     is_current
@@ -168,10 +170,29 @@ dim_customer
  501           42           Rossi SpA   Modena   2024-01-01   2026-06-30   0
  902           42           Rossi SpA   Milano   2026-07-01   9999-12-31   1
 
--- A fact row records customer_key 501, so it is permanently attached to the
--- version of the customer that existed when the sale happened. This is the whole
--- reason a warehouse uses surrogate keys instead of the source system's ids —
--- a natural key cannot express "this row, as it was then".</code></pre>
+-- A fact row records customer_key 501, so it stays permanently attached to the
+-- version of the customer that existed when the sale happened.
+</code></pre>
+<div class="cx-conv">
+  <b>How to read the table, and why it is shaped this way</b>
+  <ul>
+    <li>Two rows, one real customer. <code>customer_id</code> 42 is the source system's id;
+      <code>customer_key</code> is the warehouse's own, and it identifies <em>a version</em> of the
+      customer rather than the customer.</li>
+    <li>A fact recorded in 2025 points at key 501. When Rossi SpA moved to Milano, a new row was
+      added rather than the old one updated — so last year's revenue by city does not silently move
+      cities.</li>
+    <li><code>valid_to = 9999-12-31</code> rather than NULL is deliberate: a date range with no NULLs
+      can be filtered with a plain <code>BETWEEN</code> and needs no three-valued logic
+      (<a href="09-null-and-three-valued-logic.html">chapter 09</a>).</li>
+    <li><code>is_current</code> is redundant — it can be derived from <code>valid_to</code> — and it
+      is kept anyway because it makes the common query trivial and indexable. That is a deliberate
+      denormalisation, which is what a warehouse is for.</li>
+    <li>A natural key cannot express &ldquo;this row, as it was then&rdquo;. That is the whole reason
+      a warehouse uses surrogate keys.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ Say this in an interview</div>
@@ -194,18 +215,40 @@ dim_customer
 </p>
 
 <div class="tryit">
-  <pre><code>-- The reference database already has a dim_date. Build the smallest possible
--- fact table from it and see the shape:
-SELECT d.year, d.month, r.name AS region, COUNT(*) AS orders,
-       SUM(o.total_cents)/100.0 AS revenue_eur
-FROM orders o
-JOIN dim_date d ON d.d = date(o.placed_at)
-JOIN customers c ON c.id = o.customer_id
-JOIN cities   ci ON ci.id = c.city_id
-JOIN regions   r ON r.id = ci.region_id
-WHERE o.status &lt;&gt; 'cancelled'
-GROUP BY d.year, d.month, r.name
-ORDER BY d.year, d.month, revenue_eur DESC;</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>The smallest possible star query, over the reference database's real date dimension.</figcaption>
+<pre><code>-- The reference database already has a dim_date. This is the shape of every
+-- warehouse query you will ever write: facts, joined to dimensions, grouped.
+SELECT d.year, d.month,                        -- from the DATE dimension
+       r.name AS region,                       -- from the geography dimension
+       COUNT(*) AS orders,                     -- a fact: how many
+       SUM(o.total_cents)/100.0 AS revenue_eur -- a fact: how much, in euros
+FROM orders o                                  -- the fact table
+JOIN dim_date d  ON d.d  = date(o.placed_at)   -- date() truncates the timestamp to a day
+JOIN customers c ON c.id = o.customer_id       -- …then walk out to the geography…
+JOIN cities   ci ON ci.id = c.city_id          -- …one level…
+JOIN regions   r ON r.id = ci.region_id        -- …at a time
+WHERE o.status &lt;&gt; 'cancelled'                  -- cancellations are not revenue
+GROUP BY d.year, d.month, r.name               -- the grain of the report
+ORDER BY d.year, d.month, revenue_eur DESC;    -- chronological, biggest region first
+</code></pre>
+<div class="cx-conv">
+  <b>What makes this an OLAP query rather than an OLTP one</b>
+  <ul>
+    <li>It touches every order and returns a handful of rows. An OLTP query touches one order and
+      returns one row. That difference — not the SQL — is what decides the schema, the indexes and
+      even the storage format (<a href="40-etl-and-warehouses.html">chapter 40</a>).</li>
+    <li>The three joins out to <code>regions</code> are the price of a normalised OLTP schema. A
+      warehouse would flatten them into one <code>dim_geography</code> row per city, deliberately, so
+      the query is one join instead of three.</li>
+    <li><code>date(o.placed_at)</code> on the join is <strong>not sargable</strong>. In a report over
+      the whole table that is irrelevant — it is a scan either way — but the same expression in a
+      <code>WHERE</code> on a live table is chapter 07's mistake. Context decides.</li>
+    <li>A calendar dimension is what lets you group by fiscal quarter, working day or week number
+      without writing date arithmetic in every query.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -259,7 +302,9 @@ ORDER BY d.year, d.month, revenue_eur DESC;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

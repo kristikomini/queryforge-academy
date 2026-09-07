@@ -96,15 +96,32 @@
 
 <h2 id="rownum">The Oracle trap worth knowing</h2>
 
-<pre><code>-- WRONG. ROWNUM is assigned BEFORE the ORDER BY, so this returns an arbitrary
--- 10 rows and then sorts those. It is the classic Oracle mistake.
-SELECT * FROM orders WHERE ROWNUM &lt;= 10 ORDER BY total_cents DESC;
+<figure class="codex" data-lang="sql">
+<figcaption>The Oracle trap worth knowing: <code>ROWNUM</code> is assigned before the sort.</figcaption>
+<pre><code>-- WRONG. ROWNUM is assigned as rows are PRODUCED, before ORDER BY runs, so this
+-- takes an arbitrary 10 rows and then sorts those ten. The classic Oracle mistake.
+SELECT * FROM orders WHERE ROWNUM &lt;= 10 ORDER BY total_cents DESC;   -- 10 arbitrary rows
 
--- Right, the old way:
-SELECT * FROM (SELECT * FROM orders ORDER BY total_cents DESC) WHERE ROWNUM &lt;= 10;
+-- Right, the old way: sort in a subquery, THEN take the first ten.
+SELECT * FROM (SELECT * FROM orders ORDER BY total_cents DESC)       -- sorted first…
+WHERE ROWNUM &lt;= 10;                                                  -- …then numbered
 
 -- Right, and standard, from Oracle 12c:
-SELECT * FROM orders ORDER BY total_cents DESC FETCH FIRST 10 ROWS ONLY;</code></pre>
+SELECT * FROM orders ORDER BY total_cents DESC FETCH FIRST 10 ROWS ONLY;  -- says what it means
+</code></pre>
+<div class="cx-conv">
+  <b>Why the first version is not simply &ldquo;slower&rdquo;</b>
+  <ul>
+    <li>It returns the <strong>wrong rows</strong>. Not fewer, not slower — different. And it looks
+      correct, because ten rows come back in descending order.</li>
+    <li>The general lesson is about evaluation order: <code>WHERE</code> runs before
+      <code>ORDER BY</code>, so anything the <code>WHERE</code> depends on must be knowable before
+      sorting. <code>ROWNUM</code> is assigned at production time, and that is the whole trap.</li>
+    <li>The same reasoning explains why <code>WHERE rn = 1</code> needs a wrapper around a window
+      function (<a href="13-window-functions.html">chapter 13</a>). One rule, two dialects.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="portable">Writing portable SQL — and when not to</h2>
 
@@ -150,18 +167,38 @@ SELECT * FROM orders ORDER BY total_cents DESC FETCH FIRST 10 ROWS ONLY;</code><
 </div>
 
 <div class="tryit">
-  <pre><code>-- One query, four dialects. Write it in each without looking, then check.
--- "Top 5 customers by 2026 revenue, excluding cancelled orders."
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>One question, four dialects: write it in each without looking, then check.</figcaption>
+<pre><code>-- "Top 5 customers by 2026 revenue, excluding cancelled orders."
 
 -- SQL Server
-SELECT TOP (5) c.name, SUM(o.total_cents)/100.0 AS eur
-FROM orders o JOIN customers c ON c.id = o.customer_id
-WHERE o.placed_at &gt;= '2026-01-01' AND o.placed_at &lt; '2027-01-01'
-  AND o.status &lt;&gt; 'cancelled'
-GROUP BY c.name ORDER BY eur DESC;
+SELECT TOP (5) c.name,                            -- TOP goes BEFORE the column list…
+       SUM(o.total_cents)/100.0 AS eur            -- …and takes no ORDER BY of its own
+FROM orders o JOIN customers c ON c.id = o.customer_id   -- facts, joined to the name
+WHERE o.placed_at &gt;= '2026-01-01'                 -- half-open range, so it stays sargable…
+  AND o.placed_at &lt;  '2027-01-01'                 -- …at any precision
+  AND o.status &lt;&gt; 'cancelled'                     -- cancellations are not revenue
+GROUP BY c.name ORDER BY eur DESC;                -- one row per customer, biggest first
 
--- PostgreSQL / MySQL / SQLite: same, with LIMIT 5 at the end instead of TOP.
--- Oracle 12c+: same, with FETCH FIRST 5 ROWS ONLY at the end.</code></pre>
+-- PostgreSQL / MySQL / SQLite: identical, with LIMIT 5 at the END instead of TOP.
+-- Oracle 12c+: identical, with FETCH FIRST 5 ROWS ONLY at the end.
+</code></pre>
+<div class="cx-conv">
+  <b>What is portable here, and what is not</b>
+  <ul>
+    <li>Everything except the row limit. The join, the half-open date range, the aggregate, the
+      grouping and the ordering are identical on all four engines — which is the chapter's whole
+      point: about 85% of what you write is portable.</li>
+    <li><code>ORDER BY eur</code> uses the <code>SELECT</code> alias, which every one of the four
+      permits because <code>ORDER BY</code> runs last. <code>GROUP BY c.name</code> could not use an
+      alias so portably.</li>
+    <li><code>/100.0</code> not <code>/100</code>: integer division would silently drop the cents on
+      every engine here.</li>
+    <li>Grouping by <code>c.name</code> merges two customers who share a name. <code>c.id,
+      c.name</code> is the honest version — worth saying out loud even in an exercise.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -217,7 +254,9 @@ GROUP BY c.name ORDER BY eur DESC;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

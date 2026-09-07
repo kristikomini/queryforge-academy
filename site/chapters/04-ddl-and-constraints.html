@@ -82,27 +82,48 @@
 </div>
 
 <div class="tryit">
-  <pre><code>CREATE TABLE orders (
-  id           INTEGER PRIMARY KEY,
-  customer_id  INTEGER NOT NULL REFERENCES customers(id),
-  status       VARCHAR(12) NOT NULL DEFAULT 'draft',
-  placed_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  shipped_at   TIMESTAMP   NULL,
-  total_cents  BIGINT      NOT NULL DEFAULT 0,
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>The <code>orders</code> table with its state machine written into the schema, where no application bug can bypass it.</figcaption>
+<pre><code>CREATE TABLE orders (                        -- DDL: define a new table
+  id           INTEGER PRIMARY KEY,          -- surrogate key; unique and NOT NULL for free
+  customer_id  INTEGER NOT NULL REFERENCES customers(id),  -- FK: the parent must exist
+  status       VARCHAR(12) NOT NULL DEFAULT 'draft',       -- every order starts in 'draft'
+  placed_at    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,  -- set at INSERT time
+  shipped_at   TIMESTAMP   NULL,             -- deliberately nullable: not shipped yet
+  total_cents  BIGINT      NOT NULL DEFAULT 0,   -- money as whole cents, never a float
 
   -- The state machine, enforced where it cannot be bypassed.
-  CONSTRAINT ck_orders_status CHECK (status IN
-    ('draft','submitted','confirmed','shipped','delivered','cancelled')),
+  CONSTRAINT ck_orders_status CHECK (status IN     -- named, so the error names itself
+    ('draft','submitted','confirmed','shipped','delivered','cancelled')),  -- the whole domain
   -- A total can be zero but never negative.
-  CONSTRAINT ck_orders_total CHECK (total_cents &gt;= 0),
+  CONSTRAINT ck_orders_total CHECK (total_cents &gt;= 0),   -- one FALSE row and the write fails
   -- Shipped implies a ship date, and it cannot precede the order.
-  CONSTRAINT ck_orders_shipped CHECK (
-    (status &lt;&gt; 'shipped' AND status &lt;&gt; 'delivered')
-    OR (shipped_at IS NOT NULL AND shipped_at &gt;= placed_at))
-);
+  CONSTRAINT ck_orders_shipped CHECK (                   -- a rule ACROSS columns of one row
+    (status &lt;&gt; 'shipped' AND status &lt;&gt; 'delivered')      -- either we are not shipped…
+    OR (shipped_at IS NOT NULL AND shipped_at &gt;= placed_at))  -- …or the date is there and sane
+);                                           -- end of the table definition
 
 -- The index the foreign key did NOT create for you:
-CREATE INDEX ix_orders_customer ON orders (customer_id);</code></pre>
+CREATE INDEX ix_orders_customer ON orders (customer_id);  -- makes the FK check, and the join, cheap
+</code></pre>
+<div class="cx-conv">
+  <b>Types, defaults and the three-valued trap</b>
+  <ul>
+    <li><code>DEFAULT CURRENT_TIMESTAMP</code> — evaluated <strong>per INSERT</strong>, not once when
+      the table is created. Each row gets its own moment. Store UTC
+      (<a href="17-strings-dates-timezones.html">chapter 17</a>); in SQL Server that means
+      <code>SYSUTCDATETIME()</code>, not <code>GETDATE()</code>.</li>
+    <li><code>total_cents BIGINT</code> — money as an integer count of the smallest unit. Exact
+      arithmetic, no rounding, and the unit is in the column name so nobody has to guess.</li>
+    <li><code>shipped_at TIMESTAMP NULL</code> — the nullable column is a <em>decision</em>: it
+      means &ldquo;not shipped yet&rdquo;, and the <code>ck_orders_shipped</code> check is what stops
+      it from also meaning &ldquo;shipped, and we lost the date&rdquo;.</li>
+    <li><strong>A CHECK passes when it is UNKNOWN.</strong> A constraint is only violated by a
+      definite FALSE, so <code>CHECK (shipped_at &gt;= placed_at)</code> alone would let a NULL
+      through. That is why the last check spells out the <code>IS NOT NULL</code> half.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="cascade">ON DELETE: the four options and when each is right</h2>
@@ -140,11 +161,28 @@ CREATE INDEX ix_orders_customer ON orders (customer_id);</code></pre>
   error message that mentions it tells the support engineer nothing.
 </p>
 
-<pre><code>-- Not this:
-ALTER TABLE orders ADD CHECK (total_cents &gt;= 0);
+<figure class="codex" data-lang="sql">
+<figcaption>The same constraint, twice: once anonymous, once with a name you can read in an error log.</figcaption>
+<pre><code>-- Not this: the engine invents a name like CK__orders__3213E83F2.
+ALTER TABLE orders ADD CHECK (total_cents &gt;= 0);          -- valid, and unmaintainable
 
 -- This. The error message now reads "ck_orders_total_nonneg", which is a sentence.
-ALTER TABLE orders ADD CONSTRAINT ck_orders_total_nonneg CHECK (total_cents &gt;= 0);</code></pre>
+ALTER TABLE orders ADD CONSTRAINT ck_orders_total_nonneg  -- the name is the diagnosis
+  CHECK (total_cents &gt;= 0);                               -- the rule itself is identical
+</code></pre>
+<div class="cx-conv">
+  <b>Why the name is not cosmetic</b>
+  <ul>
+    <li>An invented name differs in <em>every environment</em>, because it is derived from an
+      object id. So a migration that says <code>DROP CONSTRAINT CK__orders__3213E83F2</code> works
+      on the developer's machine and fails in production.</li>
+    <li><code>ALTER TABLE … ADD CONSTRAINT</code> validates the rule against every existing row
+      before it is accepted. On a large table that is a scan, and in some engines a lock — which is
+      why <a href="36-migrations.html">chapter 36</a> adds constraints as <code>NOT VALID</code>
+      first and validates them separately.</li>
+  </ul>
+</div>
+</figure>
 
 <p>
   A convention that survives contact with a real team:
@@ -217,7 +255,9 @@ ALTER TABLE orders ADD CONSTRAINT ck_orders_total_nonneg CHECK (total_cents &gt;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

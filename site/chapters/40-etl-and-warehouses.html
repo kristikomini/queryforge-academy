@@ -80,18 +80,40 @@
 
 <h2 id="incremental">Incremental loading</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Incremental loading: the watermark pattern, with the two details that decide whether it is correct.</figcaption>
 <pre><code>-- The watermark pattern, with the two details that matter.
-BEGIN;
-  INSERT INTO staging.orders (…)
-  SELECT … FROM raw.orders
-  WHERE ingested_at &gt;= (SELECT watermark FROM etl_state WHERE job = 'orders')
-  --                 ^ inclusive, and safe BECAUSE the load is idempotent
-  ON CONFLICT (order_id) DO UPDATE SET …;      -- ← the idempotency
+BEGIN;                                                   -- load and marker, together
+  INSERT INTO staging.orders (…)                         -- the target…
+  SELECT … FROM raw.orders                               -- …from the raw landing table…
+  WHERE ingested_at &gt;= (SELECT watermark                 -- …restricted to what is new
+                        FROM etl_state WHERE job = 'orders')  -- one marker row per job
+  --                 ^ INCLUSIVE, and safe only BECAUSE the load is idempotent
+  ON CONFLICT (order_id) DO UPDATE SET …;                -- ← the idempotency itself
 
-  UPDATE etl_state SET watermark = :new_high, run_at = now()
-  WHERE job = 'orders';
-  --  ^ same transaction: a crash between the two would lose or duplicate rows
-COMMIT;</code></pre>
+  UPDATE etl_state SET watermark = :new_high,            -- move the marker forward…
+                       run_at    = now()                 -- …and record when
+  WHERE job = 'orders';                                  -- one row per job
+  --  ^ SAME transaction: a crash between the two would lose or duplicate rows
+COMMIT;                                                  -- both, or neither
+</code></pre>
+<div class="cx-conv">
+  <b>The two details, spelled out</b>
+  <ul>
+    <li><code>&gt;=</code> rather than <code>&gt;</code> deliberately reloads the boundary rows. That
+      is <em>safe because the load is an upsert</em> — reprocessing a row rewrites it with the same
+      values. With a plain <code>INSERT</code> it would be a duplicate-key error every run.</li>
+    <li>The marker update lives in the same transaction as the load. Split them and a crash between
+      the two either loses rows forever or reprocesses them silently, and neither failure raises an
+      alert.</li>
+    <li>The pattern depends on the source setting <code>ingested_at</code> monotonically. Clock skew
+      between two application servers is enough to break that, which is the argument for change data
+      capture when correctness really matters.</li>
+    <li>Extract into a <em>raw</em> landing table first and transform from there. Re-running a
+      transform is then free; re-running an extract may not be possible at all.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — late-arriving data</div>
@@ -132,15 +154,39 @@ COMMIT;</code></pre>
 
 <h2 id="quality">Data quality: test the pipeline, not just the code</h2>
 
-<pre><code>-- The four checks that catch most incidents, run after every load.
--- 1. Nothing arrived (the job "succeeded" against an empty extract)
-SELECT CASE WHEN COUNT(*) = 0 THEN RAISE_FAIL('no rows loaded') END FROM staging.orders …;
--- 2. Volume anomaly: today is 3x or 0.3x the trailing average
--- 3. Referential: every fact key exists in its dimension
-SELECT COUNT(*) FROM fact_sales f
-LEFT JOIN dim_customer d ON d.customer_key = f.customer_key
-WHERE d.customer_key IS NULL;                       -- must be 0
--- 4. Reconciliation: the mart total equals the source total for the period</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Test the pipeline, not just the code: the four checks that catch most incidents.</figcaption>
+<pre><code>-- Run these AFTER every load. Each one has caused a real incident by being absent.
+-- 1. Nothing arrived — the job "succeeded" against an empty extract.
+SELECT CASE WHEN COUNT(*) = 0                            -- no rows at all…
+            THEN RAISE_FAIL('no rows loaded') END        -- …is a failure, not a quiet success
+FROM staging.orders …;                                   -- the table just loaded
+-- 2. Volume anomaly: today is 3x or 0.3x the trailing average. Alert, do not fail.
+-- 3. Referential: every fact key must exist in its dimension.
+SELECT COUNT(*) FROM fact_sales f                        -- count the orphans…
+LEFT JOIN dim_customer d ON d.customer_key = f.customer_key   -- …by looking for non-matches…
+WHERE d.customer_key IS NULL;                            -- …which must be 0
+-- 4. Reconciliation: the mart total equals the source total for the period.
+</code></pre>
+<div class="cx-conv">
+  <b>Why these four, and not unit tests</b>
+  <ul>
+    <li>The code can be correct and the <em>data</em> still wrong: an upstream schema change, a
+      truncated extract, a timezone shift. Unit tests do not see any of that, because the input they
+      test with is the input you imagined.</li>
+    <li>Check 1 is the most valuable line in this chapter. A job that processes zero rows and exits 0
+      is the most common silent pipeline failure there is.</li>
+    <li>Check 3 is the <code>LEFT JOIN … IS NULL</code> anti-join of
+      <a href="08-joins.html">chapter 08</a>: rows on the left with no partner on the right. Its
+      answer must be exactly 0, which makes it a build assertion rather than a report.</li>
+    <li><code>RAISE_FAIL</code> stands in for your engine's own error verb — <code>THROW</code> in
+      T-SQL, <code>RAISE EXCEPTION</code> in PL/pgSQL, a non-zero exit in the orchestrator. The
+      point is that a failed check must <em>fail</em> something.</li>
+    <li>Alert on 2, fail on 1, 3 and 4. A volume anomaly is often a real Monday; an orphan key never
+      is.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">dbt made this normal, and that is its real contribution</div>
@@ -231,7 +277,9 @@ WHERE d.customer_key IS NULL;                       -- must be 0
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

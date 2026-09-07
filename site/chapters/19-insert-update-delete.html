@@ -49,15 +49,37 @@
   </p>
 </div>
 
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The fifteen seconds that prevent a restore: count first, then delete inside a transaction.</figcaption>
 <pre><code>-- 1. What am I about to touch?
-SELECT COUNT(*) FROM orders WHERE status = 'draft' AND placed_at &lt; DATE '2025-01-01';
+SELECT COUNT(*) FROM orders                              -- the SAME predicate as the delete…
+WHERE status = 'draft' AND placed_at &lt; DATE '2025-01-01'; -- …copied, not retyped
 -- 412
 
 -- 2. Do it, but keep the door open.
-BEGIN;
-  DELETE FROM orders WHERE status = 'draft' AND placed_at &lt; DATE '2025-01-01';
-  -- read the affected row count: 412?  COMMIT.  Anything else?  ROLLBACK.
-COMMIT;</code></pre>
+BEGIN;                                                    -- open a transaction
+  DELETE FROM orders                                      -- the write…
+  WHERE status = 'draft' AND placed_at &lt; DATE '2025-01-01'; -- …with that identical predicate
+  -- Read the affected row count. 412? COMMIT. Anything else? ROLLBACK.
+COMMIT;                                                   -- only now is it permanent
+</code></pre>
+<div class="cx-conv">
+  <b>Why this habit is worth more than any recovery plan</b>
+  <ul>
+    <li>The row count is a <strong>check on the predicate</strong>, not a formality. If the count
+      comes back 41 200 instead of 412, the <code>WHERE</code> clause means something other than
+      what you thought — and you are one keystroke from finding out for free.</li>
+    <li>Copy the predicate; do not retype it. Two nearly-identical <code>WHERE</code> clauses is
+      exactly how the check stops checking the thing you are about to run.</li>
+    <li>Until <code>COMMIT</code>, nothing is visible to anyone else and everything is reversible.
+      After it, you are restoring from a backup. Note the cost of holding the transaction open:
+      other sessions may block on those rows (<a href="23-locks-and-deadlocks.html">chapter 23</a>),
+      so read the number and decide promptly.</li>
+    <li>SQLite's autocommit means a bare <code>DELETE</code> is already committed. That is exactly
+      the situation <code>BEGIN</code> removes.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — autocommit</div>
@@ -76,22 +98,43 @@ COMMIT;</code></pre>
   affected. Three dialects, three spellings, one idea:
 </p>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Getting back what the write actually did &mdash; three dialects, three spellings, one idea.</figcaption>
 <pre><code>-- PostgreSQL, SQLite 3.35+, MariaDB
-INSERT INTO customers (email, name, city_id) VALUES (?, ?, ?)
-RETURNING id, created_at;
+INSERT INTO customers (email, name, city_id) VALUES (?, ?, ?)  -- ? are bound parameters
+RETURNING id, created_at;                                      -- the generated values, atomically
 
-UPDATE orders SET status = 'confirmed', version = version + 1
-WHERE id = ? AND version = ?
-RETURNING id, version;                 -- zero rows back = somebody else won. See ch. 24
+UPDATE orders SET status = 'confirmed',                        -- the change…
+                  version = version + 1                        -- …and the optimistic-lock bump
+WHERE id = ? AND version = ?                                   -- only if nobody else moved first
+RETURNING id, version;                                         -- ZERO rows back = we lost. Ch. 24.
 
--- SQL Server: OUTPUT, and it can capture both images
-UPDATE orders SET status = 'confirmed'
-OUTPUT inserted.id, deleted.status AS was, inserted.status AS now
-WHERE id = ?;
+-- SQL Server: OUTPUT, and it can capture BOTH images of the row
+UPDATE orders SET status = 'confirmed'                         -- the change itself
+OUTPUT inserted.id,                                            -- the new row…
+       deleted.status  AS was,                                 -- …the value before…
+       inserted.status AS now                                  -- …and after
+WHERE id = ?;                                                  -- one row, by key
 
 -- Oracle
-UPDATE orders SET status = 'confirmed' WHERE id = :id
-RETURNING id INTO :out_id;</code></pre>
+UPDATE orders SET status = 'confirmed' WHERE id = :id          -- :id is a named parameter
+RETURNING id INTO :out_id;                                     -- into an output bind variable
+</code></pre>
+<div class="cx-conv">
+  <b>Why this is not just convenience</b>
+  <ul>
+    <li>Insert-then-<code>SELECT last_insert_id()</code> is two statements with a gap between them.
+      <code>RETURNING</code> is one, so there is no window in which another session can change the
+      row underneath you — and no dependence on a connection-scoped &ldquo;last id&rdquo; that a
+      connection pool can hand to somebody else.</li>
+    <li>The <code>UPDATE … WHERE version = ?</code> pattern is optimistic concurrency: the row count
+      <em>is</em> the answer. One row means you won; zero means somebody else updated it first and
+      the application must re-read and retry, not overwrite.</li>
+    <li>SQL Server's <code>deleted</code> and <code>inserted</code> pseudo-tables give both images,
+      which is how you write an audit row in the same statement as the change.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ Why this matters more than it looks</div>
@@ -106,23 +149,44 @@ RETURNING id INTO :out_id;</code></pre>
 
 <h2 id="update-from">UPDATE from another table</h2>
 
-<pre><code>-- PostgreSQL
-UPDATE orders o
-SET total_cents = t.total
-FROM (SELECT order_id, SUM(quantity * unit_price_cents) AS total
-      FROM order_lines GROUP BY order_id) t
-WHERE t.order_id = o.id;
+<figure class="codex" data-lang="sql">
+<figcaption>Updating one table from another: two dialect spellings, and the portable one that is also correct at the edges.</figcaption>
+<pre><code>-- PostgreSQL: the extra table goes in a FROM clause on the UPDATE.
+UPDATE orders o                                              -- the table being changed
+SET total_cents = t.total                                    -- the new value…
+FROM (SELECT order_id, SUM(quantity * unit_price_cents) AS total  -- …from a derived table…
+      FROM order_lines GROUP BY order_id) t                  -- …one row per order
+WHERE t.order_id = o.id;                                     -- the join condition lives in WHERE
 
--- SQL Server: same idea, the join goes in a FROM clause after SET
-UPDATE o SET total_cents = t.total
-FROM orders o
-JOIN (SELECT order_id, SUM(quantity * unit_price_cents) AS total
-      FROM order_lines GROUP BY order_id) t ON t.order_id = o.id;
+-- SQL Server: same idea, but the target is named by its ALIAS after UPDATE.
+UPDATE o SET total_cents = t.total                           -- note: UPDATE o, not UPDATE orders
+FROM orders o                                                -- the target, aliased
+JOIN (SELECT order_id, SUM(quantity * unit_price_cents) AS total  -- the same aggregation…
+      FROM order_lines GROUP BY order_id) t                  -- …in the same derived table
+  ON t.order_id = o.id;                                      -- an ordinary join
 
--- Portable everywhere, and correct even when a row has no lines:
-UPDATE orders
-SET total_cents = COALESCE(
-  (SELECT SUM(quantity * unit_price_cents) FROM order_lines l WHERE l.order_id = orders.id), 0);</code></pre>
+-- Portable everywhere, and correct even for an order with no lines:
+UPDATE orders                                                -- every row, no join to skip any
+SET total_cents = COALESCE(                                  -- no lines → NULL → use 0
+  (SELECT SUM(quantity * unit_price_cents)                   -- a correlated scalar subquery…
+   FROM order_lines l WHERE l.order_id = orders.id), 0);     -- …per row of orders
+</code></pre>
+<div class="cx-conv">
+  <b>The bug the third version fixes</b>
+  <ul>
+    <li>The first two forms <strong>skip</strong> orders with no lines: the join finds no match, so
+      those rows are not updated and keep whatever total they had. That is usually wrong — an order
+      whose lines were all deleted should total zero, not retain yesterday's figure.</li>
+    <li>The third form touches every row, and <code>COALESCE(…, 0)</code> turns
+      &ldquo;<code>SUM</code> over no rows&rdquo; — which is NULL, not 0 — into a real zero.</li>
+    <li>It is also the slowest: a correlated subquery per row versus one grouped pass. Which is
+      right depends on whether &ldquo;no lines&rdquo; can happen, and knowing that you are choosing
+      is the point.</li>
+    <li><code>UPDATE … FROM</code> is not standard SQL, and the two dialects disagree about what goes
+      after <code>UPDATE</code>. If it must run on both, use the portable form.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — the non-deterministic UPDATE ... FROM</div>
@@ -185,12 +249,29 @@ SET total_cents = COALESCE(
 </div>
 
 <div class="tryit">
-  <pre><code>-- In the playground: watch the row count, and roll it back.
-BEGIN;
-  UPDATE orders SET status = 'cancelled' WHERE status = 'draft';
-  SELECT changes() AS rows_affected;     -- SQLite; @@ROWCOUNT in T-SQL
-ROLLBACK;
-SELECT status, COUNT(*) FROM orders GROUP BY status;   -- unchanged</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Run it, read the row count, roll it back &mdash; the whole habit in five lines.</figcaption>
+<pre><code>BEGIN;                                                    -- nothing below is permanent yet
+  UPDATE orders SET status = 'cancelled'                  -- a deliberately sweeping change…
+  WHERE status = 'draft';                                 -- …to see what it would have hit
+  SELECT changes() AS rows_affected;                      -- SQLite; @@ROWCOUNT in T-SQL
+ROLLBACK;                                                 -- and undo all of it
+SELECT status, COUNT(*) FROM orders GROUP BY status;      -- proof: unchanged
+</code></pre>
+<div class="cx-conv">
+  <b>Two things to take away</b>
+  <ul>
+    <li><code>changes()</code> and <code>@@ROWCOUNT</code> report the previous statement's row count.
+      Read it <strong>immediately</strong> — in T-SQL even an <code>IF</code> resets
+      <code>@@ROWCOUNT</code>, which is a classic source of &ldquo;it worked in testing&rdquo;.</li>
+    <li><code>ROLLBACK</code> genuinely undoes the data change, but not everything: an identity or
+      sequence value consumed inside the transaction is <em>not</em> returned. Gaps in an
+      auto-numbered column are normal and are not corruption.</li>
+    <li>Rehearsing a destructive statement this way costs one transaction and answers the only
+      question that matters: how many rows does my <code>WHERE</code> clause actually mean?</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -244,7 +325,9 @@ SELECT status, COUNT(*) FROM orders GROUP BY status;   -- unchanged</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

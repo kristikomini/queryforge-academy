@@ -107,13 +107,32 @@
 </div>
 
 <div class="tryit">
-  <pre><code>-- Surrogate for the plumbing, natural for the truth.
-CREATE TABLE customers (
-  id          INTEGER PRIMARY KEY,           -- stable, meaningless, narrow
-  vat_number  VARCHAR(13) NOT NULL UNIQUE,   -- the business rule, ENFORCED
-  email       VARCHAR(200) NOT NULL UNIQUE,
-  name        VARCHAR(200) NOT NULL
-);</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>A surrogate key for the plumbing and natural keys for the truth &mdash; both, not either.</figcaption>
+<pre><code>-- Surrogate for the plumbing, natural for the truth. Both, not either.
+CREATE TABLE customers (                        -- DDL: defines a new table
+  id          INTEGER PRIMARY KEY,              -- surrogate: stable, meaningless, narrow
+  vat_number  VARCHAR(13) NOT NULL UNIQUE,      -- natural key, ENFORCED rather than assumed
+  email       VARCHAR(200) NOT NULL UNIQUE,     -- a second candidate key, also enforced
+  name        VARCHAR(200) NOT NULL             -- not a key: two customers may share a name
+);                                              -- the semicolon ends the statement
+</code></pre>
+<div class="cx-conv">
+  <b>What each declaration costs and buys</b>
+  <ul>
+    <li><code>INTEGER PRIMARY KEY</code> — in SQLite this exact spelling makes the column the
+      <em>rowid</em>, the physical row address, so lookups by <code>id</code> need no second index.
+      In SQL Server the primary key also becomes the clustered index by default, which decides the
+      physical order of the whole table.</li>
+    <li><code>VARCHAR(13)</code> — the 13 is a <strong>constraint, not an allocation</strong>.
+      Storing <code>'IT01234567890'</code> costs the characters plus a length, not 13 bytes always.
+      Getting this backwards is what produces tables full of <code>VARCHAR(255)</code>.</li>
+    <li><code>UNIQUE</code> — implemented as an index, so it also makes lookups by VAT number fast.
+      It permits many NULLs in most engines (two NULLs are not equal), and exactly one in SQL
+      Server. <code>NOT NULL</code> beside it removes the question.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="null">Where NULL came from, and what it costs</h2>
@@ -261,7 +280,9 @@ CREATE TABLE customers (
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

@@ -68,22 +68,43 @@
 
 <h2 id="dialects">Reading it, four ways</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Reading a value out of a JSON document, in the four dialects you will meet.</figcaption>
 <pre><code>-- PostgreSQL (jsonb — the binary, indexable one; prefer it to json)
-SELECT data -&gt;&gt; 'email'                    AS email,      -- ->> returns text, -> returns jsonb
-       (data -&gt; 'prefs' -&gt;&gt; 'lang')        AS lang,
-       jsonb_array_length(data -&gt; 'tags')  AS n_tags
-FROM events WHERE data @&gt; '{"type":"signup"}';             -- @> is the containment operator
+SELECT data -&gt;&gt; 'email'                    AS email,   -- ->> returns TEXT, -> returns jsonb
+       (data -&gt; 'prefs' -&gt;&gt; 'lang')        AS lang,    -- chain -> then ->> at the last step
+       jsonb_array_length(data -&gt; 'tags')  AS n_tags   -- array length, as an integer
+FROM events                                            -- one row per event document
+WHERE data @&gt; '{"type":"signup"}';                     -- @> is containment, and GIN can index it
 
 -- SQL Server 2016+
-SELECT JSON_VALUE(data, '$.email')          AS email,      -- scalar
-       JSON_QUERY(data, '$.prefs')          AS prefs       -- object or array
-FROM events WHERE ISJSON(data) = 1;
+SELECT JSON_VALUE(data, '$.email')          AS email,  -- a SCALAR; NULL if the path is an object
+       JSON_QUERY(data, '$.prefs')          AS prefs   -- an object or array; NULL for a scalar
+FROM events WHERE ISJSON(data) = 1;                    -- the column is text, so validate it
 
 -- MySQL 5.7+
-SELECT data -&gt;&gt; '$.email' AS email FROM events;
+SELECT data -&gt;&gt; '$.email' AS email FROM events;        -- same operator, path syntax instead of key
 
 -- Oracle 12c+
-SELECT JSON_VALUE(data, '$.email') FROM events;</code></pre>
+SELECT JSON_VALUE(data, '$.email') FROM events;        -- the same function name as SQL Server
+</code></pre>
+<div class="cx-conv">
+  <b>Types, and the conversion that catches everyone</b>
+  <ul>
+    <li><code>-&gt;</code> returns <strong>JSON</strong>; <code>-&gt;&gt;</code> returns
+      <strong>TEXT</strong>. So <code>data -&gt; 'email' = 'a@b.it'</code> is comparing a JSON value
+      to a string and fails or misses, while <code>data -&gt;&gt; 'email' = 'a@b.it'</code> works.</li>
+    <li>Everything you extract is text until you <em>cast</em> it. <code>(data -&gt;&gt; 'qty')::int
+      &gt; 5</code> compares numbers; without the cast it compares strings, and
+      <code>'10' &lt; '9'</code> is TRUE.</li>
+    <li><code>JSON_VALUE</code> returns NULL rather than raising when the path points at an object —
+      which is exactly why <code>JSON_QUERY</code> exists. Using the wrong one gives you a silent
+      column of NULLs.</li>
+    <li>In SQL Server the column is ordinary <code>NVARCHAR</code>: nothing guarantees it is JSON
+      until you add <code>CHECK (ISJSON(data) = 1)</code>. Add it.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">json vs jsonb in PostgreSQL</div>
@@ -99,15 +120,37 @@ SELECT JSON_VALUE(data, '$.email') FROM events;</code></pre>
 
 <h2 id="indexing">Indexing inside a document</h2>
 
-<pre><code>-- PostgreSQL: a GIN index supports containment (@>) and key-existence over the WHOLE document.
-CREATE INDEX ix_events_data ON events USING GIN (data jsonb_path_ops);
+<figure class="codex" data-lang="sql">
+<figcaption>Indexing inside a document &mdash; whole-document, one path, or a computed column.</figcaption>
+<pre><code>-- PostgreSQL: a GIN index supports containment (@>) over the WHOLE document.
+CREATE INDEX ix_events_data ON events                    -- one index, any key…
+  USING GIN (data jsonb_path_ops);                       -- …smaller, because it indexes @> only
 
--- Or, far more often what you want: index ONE extracted path with a B-tree.
-CREATE INDEX ix_events_email ON events ((data -&gt;&gt; 'email'));
+-- Or, far more often what you actually want: ONE extracted path, in a B-tree.
+CREATE INDEX ix_events_email ON events ((data -&gt;&gt; 'email'));  -- note the double parentheses
 
--- SQL Server has no JSON index. You index a computed column instead:
-ALTER TABLE events ADD email AS JSON_VALUE(data, '$.email') PERSISTED;
-CREATE INDEX ix_events_email ON events (email);</code></pre>
+-- SQL Server has no JSON index. Index a computed column instead:
+ALTER TABLE events ADD email AS JSON_VALUE(data, '$.email') PERSISTED;  -- stored, so indexable
+CREATE INDEX ix_events_email ON events (email);          -- an ordinary index on an ordinary column
+</code></pre>
+<div class="cx-conv">
+  <b>Choosing between them</b>
+  <ul>
+    <li>A <strong>GIN</strong> index is right when queries filter on <em>varying</em> keys —
+      genuinely schemaless data. It is large, slower to update, and only helps the operators it
+      supports.</li>
+    <li>An <strong>expression index</strong> on one path is right when one or two keys are queried
+      constantly. The predicate must be written <em>exactly</em> as the index expression, or it is
+      not used — <code>data-&gt;&gt;'email'</code> matches, <code>JSON_VALUE(...)</code> does not.</li>
+    <li>The double parentheses in <code>((data -&gt;&gt; 'email'))</code> are required: the inner pair
+      says &ldquo;this is an expression&rdquo;, the outer pair is the index's column list.</li>
+    <li><code>PERSISTED</code> in SQL Server means the computed value is physically stored. Without
+      it the column is recomputed per read and cannot be indexed.</li>
+    <li>If a key is queried in every request, it is not a document attribute — it is a column. Say
+      that in an interview.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ The pattern that actually works in production</div>
@@ -120,39 +163,96 @@ CREATE INDEX ix_events_email ON events (email);</code></pre>
   </p>
 </div>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The best of both: a real, typed, indexable column that cannot drift from the document.</figcaption>
 <pre><code>-- PostgreSQL 12+: a stored generated column. Always in step, indexable, typed.
-ALTER TABLE events
-  ADD COLUMN email TEXT GENERATED ALWAYS AS (data -&gt;&gt; 'email') STORED;
-CREATE INDEX ix_events_email ON events (email);</code></pre>
+ALTER TABLE events                                 -- change the table definition…
+  ADD COLUMN email TEXT                              -- a real column, with a real type…
+  GENERATED ALWAYS AS (data -&gt;&gt; 'email') STORED;     -- …whose value is derived, never written
+CREATE INDEX ix_events_email ON events (email);      -- and now an ordinary index works
+</code></pre>
+<div class="cx-conv">
+  <b>Why this beats both alternatives</b>
+  <ul>
+    <li><code>GENERATED ALWAYS</code> means an <code>INSERT</code> may not supply the value — so the
+      column cannot disagree with the document. A trigger-maintained copy can, and eventually
+      does.</li>
+    <li><code>STORED</code> writes the value physically. It costs disk and a little write time, and
+      it buys an index that behaves exactly like any other.</li>
+    <li>Queries stay readable: <code>WHERE email = ?</code>, not
+      <code>WHERE data-&gt;&gt;'email' = ?</code>. The document remains the source of truth.</li>
+    <li>Adding the column rewrites the table on most engines. On a large table, do it the way
+      <a href="36-migrations.html">chapter 36</a> describes rather than in a deploy window.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="shredding">Turning a document into rows</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Shredding: turning a document's array into rows you can join, filter and aggregate.</figcaption>
 <pre><code>-- PostgreSQL: expand an array into rows, then treat it as a normal table.
-SELECT e.id, t.tag
-FROM events e
-CROSS JOIN LATERAL jsonb_array_elements_text(e.data -&gt; 'tags') AS t(tag);
+SELECT e.id, t.tag                                          -- one row per (event, tag)
+FROM events e                                               -- the documents
+CROSS JOIN LATERAL                                          -- once per event row…
+  jsonb_array_elements_text(e.data -&gt; 'tags') AS t(tag);    -- …expand its tags array
 
 -- SQL Server:
-SELECT e.id, t.value AS tag
-FROM events e
-CROSS APPLY OPENJSON(e.data, '$.tags') AS t;
+SELECT e.id, t.value AS tag                                 -- OPENJSON names the column "value"
+FROM events e                                               -- the same documents
+CROSS APPLY OPENJSON(e.data, '$.tags') AS t;                -- APPLY is SQL Server's LATERAL
 
--- OPENJSON with an explicit schema is how you bulk-load a JSON payload into a table:
-INSERT INTO order_lines (order_id, sku, quantity)
-SELECT @order_id, j.sku, j.qty
-FROM OPENJSON(@payload, '$.lines')
-     WITH (sku VARCHAR(32) '$.sku', qty INT '$.quantity') AS j;</code></pre>
+-- OPENJSON WITH a schema is how you bulk-load a JSON payload into a table:
+INSERT INTO order_lines (order_id, sku, quantity)           -- always name the columns
+SELECT @order_id, j.sku, j.qty                              -- @order_id is a parameter, not text
+FROM OPENJSON(@payload, '$.lines')                          -- the array of line objects…
+     WITH (sku VARCHAR(32) '$.sku',                         -- …declared as typed columns…
+           qty INT         '$.quantity') AS j;              -- …so the insert is type-checked
+</code></pre>
+<div class="cx-conv">
+  <b>Why the <code>WITH</code> clause matters</b>
+  <ul>
+    <li>Without <code>WITH</code>, <code>OPENJSON</code> returns generic
+      <code>key</code>/<code>value</code>/<code>type</code> columns as text. With it, you declare the
+      shape once and the engine converts and validates — a bad <code>quantity</code> fails at the
+      boundary instead of becoming a wrong number three tables later.</li>
+    <li>Passing a whole payload as <strong>one parameter</strong> and shredding it server-side turns
+      a hundred round trips into one statement. It is the single most effective fix for a slow
+      import loop.</li>
+    <li><code>@payload</code> is a parameter, so nothing here is string-built and injection is not
+      possible (<a href="34-dynamic-sql-and-injection.html">chapter 34</a>).</li>
+  </ul>
+</div>
+</figure>
 
 <div class="tryit">
-  <pre><code>-- SQLite (the playground) has JSON1 built in:
-SELECT json_extract(data, '$.email')     AS email,
-       json_array_length(data, '$.tags') AS n_tags
-FROM events
-WHERE json_extract(data, '$.type') = 'signup';
+  <figure class="codex" data-lang="sql">
+<figcaption>The same idea in SQLite &mdash; and an index that turns the scan into a search.</figcaption>
+<pre><code>-- SQLite (the playground) has the JSON1 functions built in:
+SELECT json_extract(data, '$.email')     AS email,    -- returns TEXT for a string path
+       json_array_length(data, '$.tags') AS n_tags    -- returns INTEGER
+FROM events                                           -- every document is read…
+WHERE json_extract(data, '$.type') = 'signup';        -- a function on every row: full scan
 
--- Then look at the query plan and notice: full scan. Now add
-CREATE INDEX ix_ev_type ON events (json_extract(data, '$.type'));
--- and look again.</code></pre>
+-- Now look at EXPLAIN QUERY PLAN. Then create the expression index:
+CREATE INDEX ix_ev_type ON events (json_extract(data, '$.type'));  -- index the SAME expression
+-- and look again: SCAN becomes SEARCH.
+</code></pre>
+<div class="cx-conv">
+  <b>What to notice when you run it</b>
+  <ul>
+    <li>The index expression must match the predicate <strong>textually</strong>. Change
+      <code>'$.type'</code> to <code>'$.Type'</code> in one of the two places and the index is
+      silently unused — the plan is the only place that tells you.</li>
+    <li><code>json_extract</code> returns whatever the JSON held: TEXT for strings, INTEGER for
+      numbers, NULL for a missing path. A missing key and a JSON <code>null</code> both arrive as
+      SQL NULL, so &ldquo;absent&rdquo; and &ldquo;explicitly null&rdquo; are indistinguishable —
+      design around that, or use <code>json_type()</code>.</li>
+    <li>This is the whole JSON trade-off in one screen: flexibility on the way in, an index you have
+      to ask for on the way out.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="honest">The honest summary</h2>
@@ -216,7 +316,9 @@ CREATE INDEX ix_ev_type ON events (json_extract(data, '$.type'));
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

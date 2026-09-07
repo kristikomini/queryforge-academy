@@ -61,10 +61,28 @@
 </div>
 
 <div class="tryit">
-  <pre><code>-- Run this in the playground. It is not a trick; it is how binary floats work.
-SELECT 0.1 + 0.2 = 0.3        AS float_says;     -- often 0 / false
-SELECT CAST(0.1 AS DECIMAL(4,2)) + CAST(0.2 AS DECIMAL(4,2))
-     = CAST(0.3 AS DECIMAL(4,2)) AS decimal_says; -- 1 / true</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>The one demonstration that settles the money argument: the same sum, in binary floating point and in exact decimal.</figcaption>
+<pre><code>-- Run this in the playground. It is not a trick; it is how binary floats work.
+SELECT 0.1 + 0.2 = 0.3        AS float_says;      -- 0 / false: the values are not equal
+SELECT CAST(0.1 AS DECIMAL(4,2)) + CAST(0.2 AS DECIMAL(4,2))  -- exact, base-10 arithmetic
+     = CAST(0.3 AS DECIMAL(4,2)) AS decimal_says;  -- 1 / true: exactly equal, every time
+</code></pre>
+<div class="cx-conv">
+  <b>The conversion that causes the result</b>
+  <ul>
+    <li><code>0.1</code> written bare is a <strong>binary floating-point</strong> literal in most
+      engines. One tenth has no finite binary expansion, exactly as one third has no finite decimal
+      one, so <code>0.1</code> is stored as the nearest representable value. Add two of those and
+      the error survives: the sum is <em>near</em> 0.3 and not equal to it.</li>
+    <li><code>CAST(0.1 AS DECIMAL(4,2))</code> — converts to an EXACT type with four digits, two
+      after the point. DECIMAL arithmetic is done in base 10, so a tenth is a tenth and the
+      comparison is TRUE.</li>
+    <li>The rule this proves: <strong>never store money in FLOAT or REAL</strong>. Use
+      <code>DECIMAL(19,4)</code>, or integer cents as this course's reference database does.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="box trap">
@@ -241,7 +259,9 @@ SELECT CAST(0.1 AS DECIMAL(4,2)) + CAST(0.2 AS DECIMAL(4,2))
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

@@ -55,12 +55,32 @@
 <h2 id="four">The four ways people destroy an index</h2>
 
 <h3>1 · A function on the column</h3>
-<pre><code>-- Not sargable: the index stores placed_at, not YEAR(placed_at).
-WHERE YEAR(placed_at) = 2026
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Way one to destroy an index: wrap the column in a function.</figcaption>
+<pre><code>-- NOT SARGABLE: the index stores placed_at, not YEAR(placed_at).
+WHERE YEAR(placed_at) = 2026          -- the engine must compute YEAR() for every row first
 
--- Sargable: an ordinary range over stored values.
-WHERE placed_at &gt;= DATE '2026-01-01'
-  AND placed_at &lt;  DATE '2027-01-01'</code></pre>
+-- SARGABLE: an ordinary range over the values that are actually stored.
+WHERE placed_at &gt;= DATE '2026-01-01'  -- lower bound, inclusive — an index seek starts here
+  AND placed_at &lt;  DATE '2027-01-01'  -- upper bound, EXCLUSIVE — and the seek stops here
+</code></pre>
+<div class="cx-conv">
+  <b>Why the second version can use the index</b>
+  <ul>
+    <li>An index is a <em>sorted</em> copy of <code>placed_at</code>. Sorted by
+      <code>placed_at</code> — not by <code>YEAR(placed_at)</code>, which is a different value the
+      index has never seen. The engine cannot work out which stored values satisfy
+      <code>YEAR(x) = 2026</code> without computing it for each of them, and computing it for each
+      of them is a scan.</li>
+    <li><code>&lt;</code> and not <code>&lt;=</code> on the upper bound: a <strong>half-open
+      range</strong>. It is correct for every precision the column could ever have — dates,
+      milliseconds, nanoseconds — so you never have to think about
+      <code>'2026-12-31 23:59:59.997'</code> again.</li>
+    <li>This is also why <code>BETWEEN</code> is a trap on timestamps: it is inclusive at both ends,
+      so it silently drops everything after midnight on the last day.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Why half-open, not BETWEEN</div>
@@ -74,12 +94,45 @@ WHERE placed_at &gt;= DATE '2026-01-01'
 </div>
 
 <h3>2 · Arithmetic on the column</h3>
-<pre><code>WHERE total_cents / 100 &gt; 500      -- not sargable
-WHERE total_cents &gt; 50000          -- sargable: move the maths to the constant</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Way two: arithmetic on the column instead of on the constant.</figcaption>
+<pre><code>WHERE total_cents / 100 &gt; 500      -- NOT sargable: a division per row, then a comparison
+WHERE total_cents &gt; 50000          -- sargable: the same question, maths moved to the constant
+</code></pre>
+<div class="cx-conv">
+  <b>The conversion hiding in the first line</b>
+  <ul>
+    <li><code>total_cents / 100</code> is INTEGER ÷ INTEGER, so it <strong>truncates</strong>:
+      <code>50099 / 100</code> is <code>500</code>, not <code>500.99</code>. The first line therefore
+      excludes an order of €500.99 that the second line includes. It is not only slower — it is a
+      different query.</li>
+    <li>The rule generalises: keep the <em>column</em> bare on one side of the comparison and do the
+      arithmetic on the literal. The optimiser will not rearrange the algebra for you.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>3 · A leading wildcard</h3>
-<pre><code>WHERE name LIKE '%rossi%'          -- scan. An index is sorted by prefix; there is no prefix.
-WHERE name LIKE 'rossi%'           -- seek: this is a range over names starting "rossi"</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Way three: a leading wildcard, which asks the index a question it cannot answer.</figcaption>
+<pre><code>WHERE name LIKE '%rossi%'          -- scan: an index is sorted by prefix, and there is no prefix
+WHERE name LIKE 'rossi%'           -- seek: this IS a prefix, so it is a range over the index
+</code></pre>
+<div class="cx-conv">
+  <b>What the index can and cannot do here</b>
+  <ul>
+    <li>Think of a phone book. &ldquo;Surnames starting <em>rossi</em>&rdquo; is a place you can open
+      it. &ldquo;Surnames <em>containing</em> rossi&rdquo; means reading every page — and no amount of
+      indexing changes that, because the ordering is by first letter.</li>
+    <li>If you genuinely need infix search, the answer is not an index on this column: it is
+      full-text search, a trigram index, or a search engine
+      (<a href="43-nosql-and-limits.html">chapter 43</a>). Saying that in an interview is worth more
+      than saying &ldquo;add an index&rdquo;.</li>
+    <li>Both forms are also <strong>collation-sensitive</strong>: whether <code>'ROSSI'</code>
+      matches depends on the column's collation, not on the pattern.</li>
+  </ul>
+</div>
+</figure>
 <p>
   If you genuinely need infix search, an index cannot help and you need a different tool: a
   full-text index, a trigram index (<code>pg_trgm</code>), or a search engine
@@ -88,12 +141,28 @@ WHERE name LIKE 'rossi%'           -- seek: this is a range over names starting 
 </p>
 
 <h3>4 · Implicit conversion — the invisible one</h3>
-<pre><code>-- vat_number is VARCHAR. The literal is a number.
-WHERE vat_number = 12345678901
--- The engine converts the COLUMN to a number, on every row, to compare.
--- Plan shows a scan and a CONVERT_IMPLICIT warning that nobody reads.
+<figure class="codex" data-lang="sql">
+<figcaption>Way four, the invisible one: a type mismatch the engine fixes by converting your column instead of your literal.</figcaption>
+<pre><code>-- vat_number is VARCHAR. The literal below is a NUMBER.
+WHERE vat_number = 12345678901     -- the engine converts the COLUMN, on every row, to compare
+-- Plan: a scan, plus a CONVERT_IMPLICIT warning that nobody ever reads.
 
-WHERE vat_number = '12345678901'   -- sargable</code></pre>
+WHERE vat_number = '12345678901'   -- sargable: text compared to text, no conversion, index seek
+</code></pre>
+<div class="cx-conv">
+  <b>The rule that decides which side gets converted</b>
+  <ul>
+    <li>When two types meet, SQL converts the one with <strong>lower precedence</strong> — and
+      numeric types outrank string types in every major engine. So text-versus-number converts the
+      <em>text</em>, and the text is your indexed column, once per row.</li>
+    <li>The same trap appears between <code>VARCHAR</code> and <code>NVARCHAR</code> in SQL Server:
+      the <code>VARCHAR</code> column is converted to Unicode and the seek disappears. Match the
+      parameter's type to the column's type, in the application as well as in the SQL.</li>
+    <li>Nothing fails. The result is correct and the query is a hundred times slower, which is why
+      this one survives code review.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap</div>
@@ -116,13 +185,31 @@ WHERE vat_number = '12345678901'   -- sargable</code></pre>
   the engine often falls back to a scan.
 </p>
 
-<pre><code>-- Frequently a scan: no index has both columns as a leading key.
-WHERE email = ? OR phone = ?
+<figure class="codex" data-lang="sql">
+<figcaption><code>OR</code> across two different columns, and the rewrite that gives the optimiser two seeks instead of one scan.</figcaption>
+<pre><code>-- Frequently a scan: no single index has BOTH columns as its leading key.
+WHERE email = ? OR phone = ?       -- ? is a bound parameter: the driver sends the value separately
 
 -- Two seeks the optimiser can cost independently, then combine:
-SELECT ... WHERE email = ?
-UNION
-SELECT ... WHERE phone = ?</code></pre>
+SELECT ... WHERE email = ?         -- uses the index on email
+UNION                              -- stacks the two results and removes duplicates
+SELECT ... WHERE phone = ?         -- uses the index on phone
+</code></pre>
+<div class="cx-conv">
+  <b>Two things worth taking from this</b>
+  <ul>
+    <li><code>OR</code> between values of the <em>same</em> column is fine — the engine turns it into
+      a list of seeks. <code>OR</code> across <em>different</em> columns is the problem, because one
+      index cannot lead with both.</li>
+    <li><code>UNION</code> deduplicates, which is what you want when a person could match on both
+      columns. <code>UNION ALL</code> would return them twice, and is cheaper when they cannot
+      overlap.</li>
+    <li>The <code>?</code> placeholders are parameters, not string formatting. That is what makes
+      the plan reusable — and what makes injection impossible
+      (<a href="34-dynamic-sql-and-injection.html">chapter 34</a>).</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 The optional-parameter pattern, and why it is poison</div>
@@ -130,8 +217,27 @@ SELECT ... WHERE phone = ?</code></pre>
     This shape appears in every reporting screen ever built, and it is the single most common
     cause of a catastrophically bad cached plan:
   </p>
-  <pre style="margin-bottom:8px"><code>WHERE (@customer_id IS NULL OR customer_id = @customer_id)
-  AND (@status      IS NULL OR status      = @status)</code></pre>
+  <figure class="codex" data-lang="tsql">
+<figcaption>The catch-all search predicate: one query, every optional filter, and one cached plan that fits none of them.</figcaption>
+<pre><code>WHERE (@customer_id IS NULL OR customer_id = @customer_id)  -- "if the caller supplied one"
+  AND (@status      IS NULL OR status      = @status)       -- …and again, per filter
+</code></pre>
+<div class="cx-conv">
+  <b>Why this shape is poison</b>
+  <ul>
+    <li><code>@customer_id</code> is a <strong>parameter</strong>. The plan is compiled once, for
+      whatever values arrived first, and then reused for every other combination — so the plan built
+      for &ldquo;customer supplied, status empty&rdquo; is served to &ldquo;both empty&rdquo;, which
+      needed a completely different one.</li>
+    <li>The optimiser cannot fold <code>@x IS NULL OR col = @x</code> into a seek, because at compile
+      time it does not know which branch will be true. It plans for both, and gets a scan.</li>
+    <li>The fixes, in order of preference: <code>OPTION (RECOMPILE)</code> — a fresh plan per
+      execution, usually cheap next to the scan it removes; or genuinely dynamic SQL built with
+      <code>sp_executesql</code> and <em>parameters</em>
+      (<a href="34-dynamic-sql-and-injection.html">chapter 34</a>), never string concatenation.</li>
+  </ul>
+</div>
+</figure>
   <p style="margin-bottom:0">
     One plan is compiled and reused for every combination of supplied and omitted parameters, so a
     plan built for “no filters at all” gets reused when a single customer is requested, and vice
@@ -143,13 +249,33 @@ SELECT ... WHERE phone = ?</code></pre>
 </div>
 
 <div class="tryit">
-  <pre><code>-- In the playground, run both and compare the plan (EXPLAIN QUERY PLAN in SQLite,
--- EXPLAIN ANALYZE in PostgreSQL, "Include Actual Execution Plan" in SSMS).
-EXPLAIN QUERY PLAN
-SELECT * FROM orders WHERE placed_at &gt;= '2026-01-01' AND placed_at &lt; '2026-02-01';
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>See it for yourself: two ways to ask for January, and two different plans.</figcaption>
+<pre><code>-- Run both in the playground and compare. (EXPLAIN QUERY PLAN in SQLite,
+-- EXPLAIN ANALYZE in PostgreSQL, "Include Actual Execution Plan" in SSMS.)
+EXPLAIN QUERY PLAN                                      -- ask for the plan, do not run the query
+SELECT * FROM orders                                    -- the same rows either way…
+WHERE placed_at &gt;= '2026-01-01' AND placed_at &lt; '2026-02-01';  -- …asked for as a RANGE
 
-EXPLAIN QUERY PLAN
-SELECT * FROM orders WHERE strftime('%Y-%m', placed_at) = '2026-01';</code></pre>
+EXPLAIN QUERY PLAN                                      -- now the other spelling
+SELECT * FROM orders                                    -- same table, same answer
+WHERE strftime('%Y-%m', placed_at) = '2026-01';         -- a FUNCTION on the column: no seek
+</code></pre>
+<div class="cx-conv">
+  <b>How to read what comes back</b>
+  <ul>
+    <li><code>SEARCH orders USING INDEX …</code> means the engine jumped straight to the rows.
+      <code>SCAN orders</code> means it read all of them. That one word is the difference this
+      chapter exists to teach.</li>
+    <li><code>strftime('%Y-%m', placed_at)</code> returns <strong>TEXT</strong>, so the comparison is
+      a string comparison against a computed value. It is correct, it is readable, and it cannot use
+      the index — the two ideas are independent.</li>
+    <li>The range version compares TEXT to TEXT too, in SQLite, because SQLite stores these
+      timestamps as ISO-8601 strings. It still seeks, because ISO-8601 sorts chronologically as
+      text: the format was designed for exactly this.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="computed">When you cannot change the query</h2>
@@ -217,7 +343,9 @@ SELECT * FROM orders WHERE strftime('%Y-%m', placed_at) = '2026-01';</code></pre
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

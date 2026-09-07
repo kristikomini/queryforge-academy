@@ -61,77 +61,289 @@
 </p>
 
 <h3>1 · Second-highest value</h3>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>1 &middot; Second-highest value &mdash; the most-asked SQL interview question there is.</figcaption>
 <pre><code>-- DENSE_RANK, because "second highest salary" means the second DISTINCT value.
-SELECT DISTINCT salary_cents FROM (
-  SELECT salary_cents, DENSE_RANK() OVER (ORDER BY salary_cents DESC) AS r
-  FROM employees) t
-WHERE r = 2;
--- Say why not ROW_NUMBER: with a tie at the top it returns the same salary again.</code></pre>
+SELECT DISTINCT salary_cents FROM (            -- the outer query just filters…
+  SELECT salary_cents,                         -- …the inner one does the ranking
+         DENSE_RANK() OVER (ORDER BY salary_cents DESC) AS r  -- ties share, no gaps
+  FROM employees) t                            -- the derived table needs a name
+WHERE r = 2;                                   -- "the second distinct value"
+-- Say why not ROW_NUMBER: with a tie at the top it returns the same salary again.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>Whether you notice that &ldquo;second highest&rdquo; is about <strong>values</strong>, not
+      rows. With salaries 5000, 5000, 4000, <code>ROW_NUMBER()</code> makes the answer 5000 and
+      <code>DENSE_RANK()</code> makes it 4000. Only one of those is what was asked.</li>
+    <li>Whether you know why the ranking cannot be filtered in the same <code>SELECT</code>: window
+      functions are computed after <code>WHERE</code>, so the wrapper is mandatory.</li>
+    <li><code>OFFSET 1 FETCH NEXT 1 ROW ONLY</code> is a legitimate alternative answer — say it, and
+      say that it differs on ties.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>2 · Nth per group (top-N per group)</h3>
-<pre><code>WITH r AS (SELECT o.*, ROW_NUMBER() OVER (PARTITION BY customer_id
-                                          ORDER BY placed_at DESC, id DESC) rn
-           FROM orders o)
-SELECT * FROM r WHERE rn = 1;
--- The tie-breaker on id is the detail they are looking for.</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>2 &middot; Top-N per group &mdash; and the one detail they are actually listening for.</figcaption>
+<pre><code>WITH r AS (SELECT o.*,                            -- every order column…
+                  ROW_NUMBER() OVER (PARTITION BY customer_id   -- …numbered per customer…
+                                     ORDER BY placed_at DESC,   -- …newest first…
+                                              id DESC) rn       -- …tie-break on the key
+           FROM orders o)                         -- read the table once
+SELECT * FROM r WHERE rn = 1;                     -- rn is an ordinary column out here
+-- The tie-breaker on id is the detail they are looking for.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>The <strong>tie-breaker</strong>. Without <code>, id DESC</code> two orders sharing a
+      timestamp are ordered arbitrarily, so the query can return a different row on different runs.
+      Mentioning it unprompted is the strongest signal in this whole list.</li>
+    <li>Change <code>= 1</code> to <code>&lt;= 3</code> for top-three. Say that too — it shows the
+      shape is understood rather than memorised.</li>
+    <li>The alternative answer is <code>CROSS APPLY</code> / <code>LATERAL</code>, which can be much
+      faster because it stops after N rows per customer instead of ranking everything
+      (<a href="11-subqueries.html">chapter 11</a>).</li>
+  </ul>
+</div>
+</figure>
 
 <h3>3 · Find and delete duplicates</h3>
-<pre><code>WITH d AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY LOWER(email)
-                                         ORDER BY id) rn FROM customers)
-SELECT * FROM d WHERE rn &gt; 1;         -- LOOK first
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>3 &middot; Find and delete duplicates &mdash; look before you delete, then fix the cause.</figcaption>
+<pre><code>WITH d AS (SELECT id,                                          -- only the key is needed
+                  ROW_NUMBER() OVER (PARTITION BY LOWER(email) -- case-insensitive grouping
+                                     ORDER BY id) rn           -- lowest id survives
+           FROM customers)                                     -- one pass over the table
+SELECT * FROM d WHERE rn &gt; 1;         -- LOOK first: these are the rows that would go
 -- DELETE FROM customers WHERE id IN (SELECT id FROM d WHERE rn > 1);
--- Then say: "and I would add the unique constraint that should have prevented it."</code></pre>
+-- Then say: "and I would add the unique constraint that should have prevented it."
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>Whether you run the <code>SELECT</code> before the <code>DELETE</code>. Interviewers watch
+      for this, because it is the habit that separates people who have broken production from people
+      who have not — and both kinds of candidate know the SQL.</li>
+    <li><code>LOWER(email)</code>: whether you notice that duplicates are usually
+      <em>near</em>-duplicates. Trimming whitespace belongs here too.</li>
+    <li>The constraint sentence at the end. Cleaning up without adding
+      <code>UNIQUE</code> is agreeing to do it again next quarter.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>4 · Rows in A not in B</h3>
-<pre><code>SELECT c.* FROM customers c
-WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
--- Say why NOT EXISTS and not NOT IN. This is the most-tested single fact in SQL.</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>4 &middot; Rows in A not in B &mdash; the single most-tested fact in SQL.</figcaption>
+<pre><code>SELECT c.* FROM customers c                      -- one row per customer, never duplicated
+WHERE NOT EXISTS (SELECT 1 FROM orders o         -- SELECT 1: only existence matters
+                  WHERE o.customer_id = c.id);   -- correlated to the outer row
+-- Say why NOT EXISTS and not NOT IN. This is the most-tested single fact in SQL.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>That <code>NOT IN</code> over a nullable column returns <strong>nothing</strong> — not an
+      error, not fewer rows, nothing — because one NULL makes the expanded chain of
+      <code>&lt;&gt;</code> UNKNOWN for every row.</li>
+    <li>That <code>NOT EXISTS</code> asks a two-valued question and is therefore null-safe.</li>
+    <li>The third spelling, <code>LEFT JOIN … WHERE o.id IS NULL</code>, is also correct and usually
+      produces the same plan. Offer it as an alternative, and note it depends on the tested column
+      being <code>NOT NULL</code> in the table.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>5 · Running total</h3>
-<pre><code>SELECT placed_at, total_cents,
-       SUM(total_cents) OVER (PARTITION BY customer_id
-                              ORDER BY placed_at
-                              ROWS UNBOUNDED PRECEDING) AS running
-FROM orders;
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>5 &middot; Running total &mdash; and why the frame has to be written out.</figcaption>
+<pre><code>SELECT placed_at, total_cents,                   -- the raw row…
+       SUM(total_cents) OVER (PARTITION BY customer_id  -- …plus a total per customer…
+                              ORDER BY placed_at        -- …accumulated in date order…
+                              ROWS UNBOUNDED PRECEDING) -- …over physical ROWS, explicitly
+                              AS running                -- the running total column
+FROM orders;                                            -- same rows out as in
 -- The explicit ROWS is the detail: the RANGE default gives every same-day row
--- the same day-end total.</code></pre>
+-- the same day-end total.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>Whether you know the <strong>default frame</strong>. <code>ORDER BY</code> inside
+      <code>OVER</code> with no frame means <code>RANGE … CURRENT ROW</code>, which includes every
+      row tying on the sort value. Two orders on the same day both show the day's closing total.</li>
+    <li>It is not an error and the numbers look plausible, which is exactly why it is asked.</li>
+    <li><code>ROWS UNBOUNDED PRECEDING</code> is shorthand for
+      <code>ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW</code>. Knowing the long form is worth
+      a sentence.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>6 · Month-on-month change</h3>
-<pre><code>WITH m AS (SELECT strftime('%Y-%m', placed_at) mo, SUM(total_cents) t
-           FROM orders GROUP BY mo)
-SELECT mo, t, LAG(t) OVER (ORDER BY mo) AS prev,
-       ROUND(100.0 * (t - LAG(t) OVER (ORDER BY mo))
-             / NULLIF(LAG(t) OVER (ORDER BY mo), 0), 1) AS pct
-FROM m ORDER BY mo;
--- NULLIF guards the division. They will check.</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>6 &middot; Month-on-month change &mdash; where the division guard is the point.</figcaption>
+<pre><code>WITH m AS (SELECT strftime('%Y-%m', placed_at) mo,    -- '2026-03': TEXT, and it sorts right
+                  SUM(total_cents) t                  -- the month's total, in cents
+           FROM orders GROUP BY mo)                    -- one row per month
+SELECT mo, t,                                          -- this month…
+       LAG(t) OVER (ORDER BY mo) AS prev,              -- …and the previous month
+       ROUND(100.0 * (t - LAG(t) OVER (ORDER BY mo))   -- the change, as a percentage…
+             / NULLIF(LAG(t) OVER (ORDER BY mo), 0),   -- …guarded against divide-by-zero…
+             1) AS pct                                 -- …to one decimal place
+FROM m ORDER BY mo;                                    -- chronological
+-- NULLIF guards the division. They will check.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li><code>NULLIF(prev, 0)</code>. A month with no revenue makes the denominator zero, and an
+      unguarded division aborts the whole report. Interviewers check for this specifically.</li>
+    <li><code>100.0</code> and not <code>100</code>: integer division would give 0 for every month
+      under a 100% change.</li>
+    <li>The first month has no previous, so <code>LAG</code> is NULL and <code>pct</code> is NULL.
+      That is correct — say so, rather than coalescing it to 0, which would claim no change.</li>
+    <li>Repeating <code>LAG(t) OVER (ORDER BY mo)</code> three times is the readable version. Naming
+      it once with a <code>WINDOW</code> clause or a second CTE is the maintainable one.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>7 · Pivot without PIVOT</h3>
-<pre><code>SELECT strftime('%Y-%m', placed_at) mo,
-       COUNT(CASE WHEN status = 'delivered' THEN 1 END) delivered,
-       COUNT(CASE WHEN status = 'cancelled' THEN 1 END) cancelled
-FROM orders GROUP BY mo;</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>7 &middot; Pivot without <code>PIVOT</code>.</figcaption>
+<pre><code>SELECT strftime('%Y-%m', placed_at) mo,                       -- the row axis: month
+       COUNT(CASE WHEN status = 'delivered' THEN 1 END) delivered,  -- non-matches → NULL…
+       COUNT(CASE WHEN status = 'cancelled' THEN 1 END) cancelled   -- …so COUNT skips them
+FROM orders GROUP BY mo;                                      -- one row per month
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>Whether you reach for a portable idiom instead of a dialect keyword. Conditional aggregation
+      works on every engine; <code>PIVOT</code> exists on two and still needs the column list written
+      out.</li>
+    <li>The NULL mechanism: a <code>CASE</code> with no <code>ELSE</code> returns NULL, and
+      <code>COUNT(expr)</code> ignores NULLs. Adding <code>ELSE 0</code> here would count every
+      row.</li>
+    <li>One pass over the table, not one per column. Say that — it is the reason the idiom is worth
+      knowing.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>8 · Gaps and islands</h3>
-<pre><code>-- Consecutive runs: group by (value − row_number). Chapter 14.</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>8 &middot; Gaps and islands &mdash; recognise the shape, then reproduce it.</figcaption>
+<pre><code>-- Consecutive runs: group by (value − row_number). Chapter 14.
+-- Inside a run both increase by one, so the difference is constant; at a gap it
+-- jumps. Number the rows in order, subtract, GROUP BY the result, and read off
+-- MIN, MAX and COUNT per group.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>Recognition, not memory. If you can say &ldquo;this is gaps and islands, and the trick is to
+      subtract the row number&rdquo;, you can derive the rest at the whiteboard.</li>
+    <li>With dates rather than integers, the subtraction needs a date-sized unit — that caveat is
+      part of the answer.</li>
+    <li>Worked out in full in <a href="14-frames-and-islands.html">chapter 14</a>.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>9 · Hierarchy</h3>
-<pre><code>-- Recursive CTE with an anchor, UNION ALL, and a depth guard. Chapter 12.</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>9 &middot; Hierarchy &mdash; three parts, and the one everybody forgets.</figcaption>
+<pre><code>-- Recursive CTE with an anchor, UNION ALL, and a depth guard. Chapter 12.
+-- Anchor: the rows with no parent. Step: join the table to the CTE itself.
+-- Guard: WHERE depth < 20, because a cycle in the data is an infinite loop.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>The three parts, named. Most candidates produce the anchor and the recursive step and forget
+      the guard — and the guard is the one that matters in production, because cycles come from data,
+      not from SQL.</li>
+    <li><code>UNION ALL</code> and not <code>UNION</code>: deduplicating every iteration is expensive
+      and, in a graph, wrong.</li>
+    <li>Worked out in full in <a href="12-ctes-and-recursion.html">chapter 12</a>.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>10 · Customers above average</h3>
-<pre><code>SELECT customer_id, SUM(total_cents) spend FROM orders GROUP BY customer_id
-HAVING SUM(total_cents) &gt; (SELECT AVG(t) FROM
-       (SELECT SUM(total_cents) t FROM orders GROUP BY customer_id));
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>10 &middot; Customers above average &mdash; where the right answer starts with a question.</figcaption>
+<pre><code>SELECT customer_id, SUM(total_cents) spend      -- each customer's total…
+FROM orders GROUP BY customer_id                -- …one row each
+HAVING SUM(total_cents) &gt; (SELECT AVG(t) FROM   -- …compared to the average OF THOSE TOTALS
+       (SELECT SUM(total_cents) t               -- the inner grouping, again…
+        FROM orders GROUP BY customer_id));     -- …so AVG is over customers, not orders
 -- The trap: "average" of WHAT? Average order value, or average customer spend?
--- Ask. The question is deliberately ambiguous and asking is the point.</code></pre>
+-- Ask. The question is deliberately ambiguous and asking is the point.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>Whether you ask. <em>Average order value</em> and <em>average customer spend</em> are
+      different numbers, and the question is worded ambiguously on purpose. Writing confident SQL for
+      the wrong interpretation is the failure mode being probed.</li>
+    <li>The nested aggregate: you cannot write <code>AVG(SUM(x))</code>, so the inner grouping has to
+      happen in a derived table first.</li>
+    <li><code>HAVING</code> and not <code>WHERE</code>, because the comparison is on an aggregate of
+      the group.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>11 · Fill the gaps in a date series</h3>
+<figure class="codex" data-lang="sql">
+<figcaption>11 &middot; Fill the gaps in a date series &mdash; and the trap in the obvious fix.</figcaption>
 <pre><code>-- LEFT JOIN from a calendar table or a recursive date spine, with COALESCE(n, 0).
--- The trap is putting the date filter in WHERE and re-inner-joining. Chapter 06.</code></pre>
+-- The trap is putting the date filter in WHERE and re-inner-joining. Chapter 06.
+-- Drive from the CALENDAR, filter the FACTS in the ON clause, and COALESCE the
+-- count so an empty day reads as 0 rather than blank.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>That grouping the facts alone can only ever produce days that <em>have</em> facts — so a
+      chart of it silently omits the quiet days.</li>
+    <li>The <code>ON</code>-versus-<code>WHERE</code> trap: a date filter in <code>WHERE</code> kills
+      the NULL-padded rows and turns the outer join back into an inner one
+      (<a href="06-how-select-is-evaluated.html">chapter 06</a>).</li>
+    <li><code>COALESCE(n, 0)</code>, because &ldquo;no orders&rdquo; is zero, and NULL is not
+      zero.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>12 · “Optimise this query”</h3>
+<figure class="codex" data-lang="sql">
+<figcaption>12 &middot; &ldquo;Optimise this query&rdquo; &mdash; where the method is the answer.</figcaption>
 <pre><code>-- Almost always one of: a function on the filtered column, a correlated subquery
 -- repeated three times, a fan-out hidden by DISTINCT, or SELECT *. Chapter 29.
--- SAY WHAT YOU ARE LOOKING FOR as you scan it. That is the answer they want.</code></pre>
+-- SAY WHAT YOU ARE LOOKING FOR as you scan it. That is the answer they want.
+</code></pre>
+<div class="cx-conv">
+  <b>What is being tested</b>
+  <ul>
+    <li>Your <em>method</em>, not your memory. Narrating the scan — &ldquo;first I look at the
+      <code>WHERE</code> clause for a function on an indexed column…&rdquo; — is the answer, because
+      it is what you would actually do at work.</li>
+    <li>Asking for the plan is a correct and strong response. So is asking how many rows the table
+      has, and whether the query is slow always or only sometimes
+      (<a href="28-statistics-and-sniffing.html">chapter 28</a>).</li>
+    <li>The full checklist is <a href="29-slow-query-patterns.html">chapter 29</a>. Ten patterns
+      cover almost everything you will be shown.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="edges">The edge cases that separate candidates</h2>
 
@@ -258,7 +470,9 @@ HAVING SUM(total_cents) &gt; (SELECT AVG(t) FROM
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

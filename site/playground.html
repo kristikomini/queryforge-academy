@@ -154,6 +154,26 @@
   });
   editor.value = RECIPES[0][1];
 
+  /*  #q=<encoded SQL> — how the "Run this in the playground" link under every
+      annotated example in the chapters arrives here. The hash and not a query
+      string, deliberately: a hash is never sent to a server, so the same link
+      works identically from file://, from GitHub Pages and from a host that
+      logs every URL it serves. Nothing about what you run leaves the tab.     */
+  function fromHash() {
+    var m = /[#&]q=([^&]*)/.exec(location.hash || "");
+    if (!m) return false;
+    try { editor.value = decodeURIComponent(m[1].replace(/\+/g, " ")); }
+    catch (e) { return false; }          /* a truncated or mangled link */
+    return true;
+  }
+  var CAME_FROM_LINK = fromHash();
+
+  /* Landing on the page again with a different link should reload the query,
+     not silently keep the old one. */
+  window.addEventListener("hashchange", function () {
+    if (fromHash()) { editor.focus(); run(); }
+  });
+
   function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 
   function showTables(res, ms, label) {
@@ -299,6 +319,13 @@
       load();
       boot.remove();
       document.getElementById("pg").hidden = false;
+      if (CAME_FROM_LINK) {
+        var note = document.createElement("div");
+        note.className = "msg ok";
+        note.textContent = "Loaded from the chapter you came from. Edit it, break it, " +
+          "run it again — the database is rebuilt from the schema on every reload.";
+        document.getElementById("pg").insertBefore(note, document.getElementById("recipes"));
+      }
       run();
       document.getElementById("timing").textContent =
         "engine + " + (self.FORGE_DB_SQL.length / 1024 | 0) + " KB of SQL loaded in " +

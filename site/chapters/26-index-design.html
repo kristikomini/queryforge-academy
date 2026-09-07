@@ -81,11 +81,30 @@
   </p>
 </div>
 
-<pre><code>-- SELECT ... WHERE status = 'shipped' AND placed_at &gt;= ? ORDER BY placed_at
-CREATE INDEX ix ON orders (status, placed_at);
---                          ^equality  ^range and sort. Correct order.
+<figure class="codex" data-lang="sql">
+<figcaption>Column order: equality first, then the range or the sort. One sentence answers most index-design questions.</figcaption>
+<pre><code>-- For: SELECT ... WHERE status = 'shipped' AND placed_at >= ? ORDER BY placed_at
+CREATE INDEX ix ON orders (status, placed_at);   -- equality column first, range column second
+--                          ^equality  ^range and sort. This order, not the other one.
 
--- Reverse it and the seek becomes a scan of every shipped-or-not row in the range.</code></pre>
+-- Reverse it and the seek becomes a scan of every row in the date range, shipped or not.
+</code></pre>
+<div class="cx-conv">
+  <b>Why equality has to come first</b>
+  <ul>
+    <li>An index is sorted by its first column, then within that by its second. With
+      <code>(status, placed_at)</code> all the shipped rows sit together and are ordered by date, so
+      the engine seeks once and reads a contiguous run — which also satisfies the
+      <code>ORDER BY</code> for free.</li>
+    <li>With <code>(placed_at, status)</code> the rows in the date range are contiguous, but shipped
+      and unshipped are interleaved throughout it. The engine must read all of them and discard
+      most.</li>
+    <li>The rule generalises: <strong>equality predicates first, then one range or sort
+      column</strong>. Columns after a range column cannot narrow the seek — they only avoid a
+      lookup.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="covering">Covering indexes</h2>
 
@@ -100,17 +119,33 @@ CREATE INDEX ix ON orders (status, placed_at);
   </p>
 </div>
 
-<pre><code>-- SQL Server: INCLUDE puts columns in the LEAF only — not in the key.
--- They do not affect ordering or seekability, they cost nothing in the upper
--- levels, and they remove the lookup.
-CREATE INDEX ix_orders_status_cov
-  ON orders (status, placed_at)      -- key: used for seeking and ordering
-  INCLUDE (customer_id, total_cents); -- payload: available without a lookup
+<figure class="codex" data-lang="sql">
+<figcaption><code>INCLUDE</code>: payload columns that remove the lookup without widening the key.</figcaption>
+<pre><code>-- SQL Server: INCLUDE puts columns in the LEAF level only, not in the key.
+CREATE INDEX ix_orders_status_cov        -- name it after what it serves
+  ON orders (status, placed_at)          -- KEY: used for seeking, ordering, and the tree
+  INCLUDE (customer_id, total_cents);    -- PAYLOAD: available without going to the table
 
 -- PostgreSQL 11+ has the same thing:
-CREATE INDEX ix ON orders (status, placed_at) INCLUDE (customer_id, total_cents);
+CREATE INDEX ix ON orders (status, placed_at)  -- the same key…
+  INCLUDE (customer_id, total_cents);    -- identical meaning, identical trade
 
--- MySQL has no INCLUDE: extra columns must go in the key.</code></pre>
+-- MySQL has no INCLUDE: extra columns must go in the key, and pay for it there.
+</code></pre>
+<div class="cx-conv">
+  <b>Key versus payload, and why the distinction earns its keep</b>
+  <ul>
+    <li>Key columns are stored at <em>every</em> level of the B-tree and define the ordering. Adding
+      a wide column to the key makes the whole tree taller and every seek slower.</li>
+    <li><code>INCLUDE</code> columns exist only in the leaf pages, so they cost leaf space and
+      nothing else. They cannot be seeked on or sorted by — that is the trade.</li>
+    <li>Making an index covering is often a 10–100× improvement on a wide table, because it removes
+      one random read per matching row.</li>
+    <li>In MySQL/InnoDB every secondary index already carries the primary key, and a covering index
+      is built by putting the extra columns in the key. Same idea, more cost.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — the covering index that covers everything</div>
@@ -139,13 +174,35 @@ CREATE INDEX ix ON orders (status, placed_at) INCLUDE (customer_id, total_cents)
   </p>
 </div>
 
-<pre><code>CREATE INDEX ix_orders_failed ON orders (placed_at) WHERE status = 'failed';
--- 1% of the size, seeks straight to the rows anyone actually queries for,
--- and rows leave the index entirely when they stop being failed.
+<figure class="codex" data-lang="sql">
+<figcaption>Partial indexes: index the 1% of rows anybody actually queries for.</figcaption>
+<pre><code>CREATE INDEX ix_orders_failed ON orders (placed_at)   -- the column queries sort and filter on…
+  WHERE status = 'failed';                            -- …over only the rows that are failed
+-- 1% of the size, seeks straight to the rows anyone queries for, and a row LEAVES
+-- the index entirely when it stops being failed.
 
 -- The reference database uses the same idea for the outbox worker:
-CREATE INDEX ix_outbox_pending ON outbox (created_at) WHERE published_at IS NULL;
--- stays tiny however large the outbox grows.</code></pre>
+CREATE INDEX ix_outbox_pending ON outbox (created_at) -- oldest-first claiming…
+  WHERE published_at IS NULL;                         -- …over unpublished rows only
+-- The index stays tiny however large the outbox table grows.
+</code></pre>
+<div class="cx-conv">
+  <b>Why this is the right shape for a queue</b>
+  <ul>
+    <li>A queue table is mostly finished work. A full index on <code>created_at</code> grows
+      forever; a partial index contains only the rows still to do, so it stays the size of the
+      backlog.</li>
+    <li>Rows are removed from the index when they no longer match the predicate. Publishing a
+      message deletes an index entry rather than updating one — that is why the worker's claim query
+      stays fast at ten million historical rows.</li>
+    <li>The query's <code>WHERE</code> must <em>imply</em> the index's predicate, or the index cannot
+      be used. <code>WHERE published_at IS NULL AND created_at &lt; ?</code> qualifies; a query
+      without the <code>IS NULL</code> does not.</li>
+    <li>PostgreSQL calls it a partial index, SQL Server a filtered index. MySQL and SQLite have
+      neither.</li>
+  </ul>
+</div>
+</figure>
 
 <p class="small muted">
   PostgreSQL calls them partial indexes, SQL Server calls them filtered indexes, Oracle achieves the
@@ -168,18 +225,42 @@ CREATE INDEX ix_outbox_pending ON outbox (created_at) WHERE published_at IS NULL
   </ol>
 </div>
 
-<pre><code>-- Which indexes are you paying for and not using?
--- SQL Server
-SELECT OBJECT_NAME(s.object_id) AS tbl, i.name, s.user_seeks, s.user_scans,
-       s.user_lookups, s.user_updates
-FROM sys.dm_db_index_usage_stats s
-JOIN sys.indexes i ON i.object_id = s.object_id AND i.index_id = s.index_id
-WHERE s.database_id = DB_ID() AND s.user_seeks + s.user_scans + s.user_lookups = 0
-ORDER BY s.user_updates DESC;      -- pure cost, no benefit
+<figure class="codex" data-lang="sql">
+<figcaption>Finding the indexes you are paying for and not using.</figcaption>
+<pre><code>-- SQL Server: indexes that are written to and never read.
+SELECT OBJECT_NAME(s.object_id) AS tbl,           -- id → readable table name
+       i.name,                                    -- the index name
+       s.user_seeks, s.user_scans, s.user_lookups,-- the three ways it could be USED…
+       s.user_updates                             -- …and how often writers maintained it
+FROM sys.dm_db_index_usage_stats s                -- usage since the last restart
+JOIN sys.indexes i ON i.object_id = s.object_id   -- join to get the name…
+                  AND i.index_id  = s.index_id    -- …matching on both key columns
+WHERE s.database_id = DB_ID()                     -- this database only
+  AND s.user_seeks + s.user_scans + s.user_lookups = 0   -- never read…
+ORDER BY s.user_updates DESC;                     -- …most expensively maintained first
 
--- PostgreSQL
-SELECT relname, indexrelname, idx_scan, pg_size_pretty(pg_relation_size(indexrelid))
-FROM pg_stat_user_indexes WHERE idx_scan = 0 ORDER BY pg_relation_size(indexrelid) DESC;</code></pre>
+-- PostgreSQL: the same question, one view.
+SELECT relname, indexrelname, idx_scan,                        -- table, index, times used
+       pg_size_pretty(pg_relation_size(indexrelid))            -- and how much disk it costs
+FROM pg_stat_user_indexes WHERE idx_scan = 0                   -- never scanned…
+ORDER BY pg_relation_size(indexrelid) DESC;                    -- …largest first
+</code></pre>
+<div class="cx-conv">
+  <b>How to read the result, and one warning</b>
+  <ul>
+    <li>An index with zero reads and many writes is <strong>pure cost</strong>: disk, write
+      amplification, longer maintenance windows, and one more plan for the optimiser to get
+      wrong.</li>
+    <li>The counters reset on restart (SQL Server) or on
+      <code>pg_stat_reset()</code> (PostgreSQL). An index that only serves the quarterly report will
+      look unused for eleven weeks — check the uptime before you drop anything.</li>
+    <li>Never drop the index behind a unique or primary key constraint: it is the constraint. The
+      query above will happily list it if nobody queries that column.</li>
+    <li>Disable before dropping where the engine supports it, so restoring is one statement rather
+      than a schema archaeology exercise.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — the stats reset on restart</div>
@@ -241,7 +322,9 @@ FROM pg_stat_user_indexes WHERE idx_scan = 0 ORDER BY pg_relation_size(indexreli
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

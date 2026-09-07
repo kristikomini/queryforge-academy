@@ -66,10 +66,32 @@
 
 <h2 id="syntax">Beginning, committing, and the thing about autocommit</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The transfer that must not half-happen: two statements, one unit of work.</figcaption>
 <pre><code>BEGIN;                          -- BEGIN TRANSACTION in T-SQL; implicit in Oracle
-  UPDATE accounts SET balance_cents = balance_cents - 5000 WHERE id = 1;
-  UPDATE accounts SET balance_cents = balance_cents + 5000 WHERE id = 2;
-COMMIT;                         -- or ROLLBACK</code></pre>
+  UPDATE accounts SET balance_cents = balance_cents - 5000  -- take it from one account…
+  WHERE id = 1;                                             -- …identified by key
+  UPDATE accounts SET balance_cents = balance_cents + 5000  -- …and give it to the other
+  WHERE id = 2;                                             -- both, or neither
+COMMIT;                         -- or ROLLBACK, and it is as if nothing happened
+</code></pre>
+<div class="cx-conv">
+  <b>What each line guarantees</b>
+  <ul>
+    <li><code>balance_cents - 5000</code> is read-modify-write <em>inside the engine</em>, on the
+      current value of the row, under a lock. Reading the balance into the application and writing
+      back a computed number is a different, broken program.</li>
+    <li>Between <code>BEGIN</code> and <code>COMMIT</code>, no other session sees a world in which
+      the money has left one account and not arrived at the other. That is atomicity, and it is the
+      only reason this is safe.</li>
+    <li><code>COMMIT</code> returns only once the log record is durable on disk. That is why commit
+      latency is disk latency, and why committing once per row in a loop is slow.</li>
+    <li>Most clients run in <strong>autocommit</strong>: without the explicit <code>BEGIN</code>,
+      each <code>UPDATE</code> is its own transaction and the failure mode above is live in
+      production. Know which mode your driver uses.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — you are probably in autocommit right now</div>
@@ -84,15 +106,35 @@ COMMIT;                         -- or ROLLBACK</code></pre>
 
 <h2 id="savepoints">Savepoints: a partial rollback</h2>
 
-<pre><code>BEGIN;
-  INSERT INTO orders (customer_id) VALUES (?);
+<figure class="codex" data-lang="sql">
+<figcaption>Savepoints: undo part of a transaction without losing the rest of it.</figcaption>
+<pre><code>BEGIN;                                          -- the outer unit of work
+  INSERT INTO orders (customer_id) VALUES (?);  -- the order header: we want to keep this
 
-  SAVEPOINT before_lines;
-  INSERT INTO order_lines (...) VALUES (...);   -- this one violates a constraint
+  SAVEPOINT before_lines;                       -- a named point we can return to
+  INSERT INTO order_lines (...) VALUES (...);   -- …this one violates a constraint
   ROLLBACK TO SAVEPOINT before_lines;           -- undo the line, KEEP the order
 
-  INSERT INTO order_lines (...) VALUES (...);   -- corrected
-COMMIT;</code></pre>
+  INSERT INTO order_lines (...) VALUES (...);   -- the corrected line
+COMMIT;                                         -- header and good line, together
+</code></pre>
+<div class="cx-conv">
+  <b>When this is worth reaching for, and when it is not</b>
+  <ul>
+    <li><code>ROLLBACK TO SAVEPOINT</code> undoes work back to the marker and leaves the transaction
+      <em>open</em>. A plain <code>ROLLBACK</code> ends everything.</li>
+    <li>In PostgreSQL a failed statement poisons the whole transaction — every subsequent statement
+      errors with &ldquo;current transaction is aborted&rdquo; — so a savepoint is the only way to
+      continue after a caught error. Many drivers issue them automatically for exactly this.</li>
+    <li>Savepoints are not free: each one holds resources until commit, and a loop that creates one
+      per row is a performance bug. Use them for genuine &ldquo;try this optional step&rdquo;
+      moments.</li>
+    <li>Nested <code>BEGIN</code> in T-SQL does <strong>not</strong> nest: only the outermost
+      <code>COMMIT</code> commits, and any <code>ROLLBACK</code> undoes everything.
+      <code>SAVE TRANSACTION</code> is T-SQL's savepoint.</li>
+  </ul>
+</div>
+</figure>
 
 <p>
   Savepoints are what an ORM uses to implement nested transactions — there is no such thing as a
@@ -159,14 +201,30 @@ COMMIT;</code></pre>
 </p>
 
 <div class="tryit">
-  <pre><code>-- In the playground: atomicity, demonstrated in six lines.
-SELECT COUNT(*) FROM orders;                  -- 1800
-BEGIN;
-  DELETE FROM order_events;
-  DELETE FROM payments;
-  SELECT COUNT(*) FROM payments;              -- 0, inside the transaction
-ROLLBACK;
-SELECT COUNT(*) FROM payments;                -- 1440. Nothing happened.</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Atomicity, demonstrated in six lines you can run right now.</figcaption>
+<pre><code>SELECT COUNT(*) FROM orders;                  -- 1800 — the starting point
+BEGIN;                                        -- open the transaction
+  DELETE FROM order_events;                   -- delete a whole table's rows…
+  DELETE FROM payments;                       -- …and another
+  SELECT COUNT(*) FROM payments;              -- 0 — INSIDE the transaction, it happened
+ROLLBACK;                                     -- change our mind
+SELECT COUNT(*) FROM payments;                -- 1440 — outside, nothing ever happened
+</code></pre>
+<div class="cx-conv">
+  <b>What the two counts prove</b>
+  <ul>
+    <li>Inside the transaction your own changes are visible to you and to nobody else. That is
+      isolation, and <a href="22-isolation-levels.html">chapter 22</a> is about exactly how much of
+      other people's work you can see.</li>
+    <li><code>ROLLBACK</code> restores the rows because the engine wrote the <em>old</em> values to
+      its log before changing the pages. Undo is not magic; it is the write-ahead log.</li>
+    <li>Try it with the order reversed — delete <code>payments</code> before
+      <code>order_events</code> — and note whether a foreign key refuses. Constraint checking
+      happens inside the transaction too.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -220,7 +278,9 @@ SELECT COUNT(*) FROM payments;                -- 1440. Nothing happened.</code><
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

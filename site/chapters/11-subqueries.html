@@ -55,17 +55,37 @@
 
 <h2 id="three">EXISTS, IN and JOIN: the same question, three ways</h2>
 
-<pre><code>-- 1. Semi-join with EXISTS — no duplicates, stops at the first match.
-SELECT c.* FROM customers c
-WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>&ldquo;Customers who have ordered&rdquo;, three ways &mdash; two of which are the same question and one of which is not.</figcaption>
+<pre><code>-- 1. SEMI-JOIN with EXISTS. No duplicates, and it stops at the first match found.
+SELECT c.* FROM customers c                          -- only customer columns come back
+WHERE EXISTS (SELECT 1 FROM orders o                 -- SELECT 1: the value is never read
+              WHERE o.customer_id = c.id);           -- correlated to the outer row
 
--- 2. IN — equivalent HERE, and dangerous with NULLs in the negative form.
-SELECT c.* FROM customers c
-WHERE c.id IN (SELECT customer_id FROM orders);
+-- 2. IN. Equivalent HERE, and dangerous in its negative form (see chapter 09).
+SELECT c.* FROM customers c                          -- same output as version 1…
+WHERE c.id IN (SELECT customer_id FROM orders);      -- …one value tested against a set
 
--- 3. JOIN — DIFFERENT: a customer with 3 orders appears 3 times.
-SELECT c.* FROM customers c
-JOIN orders o ON o.customer_id = c.id;              -- needs DISTINCT to match the others</code></pre>
+-- 3. JOIN. DIFFERENT: a customer with three orders comes back three times.
+SELECT c.* FROM customers c                          -- the rows are MULTIPLIED by matches
+JOIN orders o ON o.customer_id = c.id;               -- needs DISTINCT to match the others
+</code></pre>
+<div class="cx-conv">
+  <b>Why version 3 is not the same query</b>
+  <ul>
+    <li>A join <em>pairs</em> rows, so the customer is repeated once per matching order. A semi-join
+      <em>tests</em> for a partner and returns the left row once. Adding <code>DISTINCT</code> makes
+      the results match, and makes the engine sort or hash the whole thing to do it.</li>
+    <li><code>EXISTS</code> can short-circuit: the engine may stop reading a customer's orders at the
+      first one. <code>IN</code> with a subquery is usually optimised into the same semi-join, but
+      the negative forms are <strong>not</strong> equivalent — <code>NOT IN</code> collapses on a
+      single NULL.</li>
+    <li><code>SELECT *</code> here is fine because it means &ldquo;the customer row&rdquo; in an
+      example. In production code name the columns: <code>*</code> changes meaning when the table
+      does.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 Which one, and the honest answer about performance</div>
@@ -92,10 +112,29 @@ JOIN orders o ON o.customer_id = c.id;              -- needs DISTINCT to match t
 
 <h2 id="correlated">Correlated subqueries, and when they hurt</h2>
 
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>A correlated scalar subquery: one value, computed once per outer row.</figcaption>
 <pre><code>-- The most recent order date per customer, as a correlated scalar subquery.
-SELECT c.name,
-       (SELECT MAX(o.placed_at) FROM orders o WHERE o.customer_id = c.id) AS last_order
-FROM customers c;</code></pre>
+SELECT c.name,                                        -- one row per customer
+       (SELECT MAX(o.placed_at)                       -- a SCALAR subquery: exactly one value
+        FROM orders o                          -- the child table, read per outer row
+        WHERE o.customer_id = c.id) AS last_order     -- c.id makes it CORRELATED
+FROM customers c;                                     -- the outer query drives the loop
+</code></pre>
+<div class="cx-conv">
+  <b>What &ldquo;correlated&rdquo; costs, and what it returns</b>
+  <ul>
+    <li>Correlated means the subquery mentions a column from the outer query, so it cannot be
+      evaluated once — logically it runs per outer row. A good optimiser rewrites it into a join or
+      an index seek; a bad plan runs it a hundred thousand times.</li>
+    <li>A scalar subquery must return <strong>at most one row and one column</strong>. More rows is a
+      runtime error; <em>no</em> rows is NULL, not an error — which is why a customer with no orders
+      shows an empty <code>last_order</code> rather than breaking the query.</li>
+    <li><code>MAX(placed_at)</code> over no rows is NULL for the same reason. Every aggregate except
+      <code>COUNT</code> behaves this way.</li>
+  </ul>
+</div>
+</figure>
 
 <p>
   Logically that runs once per customer. In practice a good optimiser will often decorrelate it
@@ -107,11 +146,28 @@ FROM customers c;</code></pre>
 <div class="box trap">
   <div class="box-title">⚠ Trap — the same subquery three times</div>
   <p>This shape is extremely common and is three correlated executions per row:</p>
-  <pre style="margin-bottom:8px"><code>SELECT c.name,
-  (SELECT COUNT(*)         FROM orders o WHERE o.customer_id = c.id) AS n,
-  (SELECT SUM(total_cents) FROM orders o WHERE o.customer_id = c.id) AS spend,
-  (SELECT MAX(placed_at)   FROM orders o WHERE o.customer_id = c.id) AS last
-FROM customers c;</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>The anti-pattern this chapter is really about: the same subquery, three times, per row.</figcaption>
+<pre><code>SELECT c.name,                                                          -- one row per customer
+  (SELECT COUNT(*)         FROM orders o WHERE o.customer_id = c.id) AS n,      -- pass 1
+  (SELECT SUM(total_cents) FROM orders o WHERE o.customer_id = c.id) AS spend,  -- pass 2
+  (SELECT MAX(placed_at)   FROM orders o WHERE o.customer_id = c.id) AS last    -- pass 3
+FROM customers c;                                                       -- × every customer
+</code></pre>
+<div class="cx-conv">
+  <b>Why this is the classic &ldquo;optimise this query&rdquo; exercise</b>
+  <ul>
+    <li>Three correlated subqueries over the <em>same rows</em> means the engine visits a customer's
+      orders three times. Ten thousand customers, three lookups each: thirty thousand index seeks
+      where one grouped pass would do.</li>
+    <li>It is also fragile: the three <code>WHERE</code> clauses must stay identical. Add
+      <code>AND status &lt;&gt; 'cancelled'</code> to two of them and the report silently reports
+      three different populations in three columns.</li>
+    <li>The fix is mechanical — aggregate once in a derived table and join to it — which is the next
+      example.</li>
+  </ul>
+</div>
+</figure>
   <p style="margin-bottom:0">
     Rewrite as one pre-aggregated join — one pass over <code>orders</code> instead of three per
     customer. This is a favourite “optimise this query” exercise in screening tests precisely
@@ -119,12 +175,33 @@ FROM customers c;</code></pre>
   </p>
 </div>
 
-<pre><code>SELECT c.name, COALESCE(o.n, 0) AS n, COALESCE(o.spend, 0) AS spend, o.last
-FROM customers c
-LEFT JOIN (
-  SELECT customer_id, COUNT(*) AS n, SUM(total_cents) AS spend, MAX(placed_at) AS last
-  FROM orders GROUP BY customer_id
-) o ON o.customer_id = c.id;</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The same report, aggregated once: three columns, one pass over <code>orders</code>.</figcaption>
+<pre><code>SELECT c.name,                                    -- still one row per customer
+       COALESCE(o.n, 0)     AS n,                 -- no orders → NULL from the LEFT JOIN → 0
+       COALESCE(o.spend, 0) AS spend,             -- same treatment for the money column
+       o.last                                     -- left as NULL: "never ordered" is not a date
+FROM customers c                                  -- the driving table: one row each
+LEFT JOIN (                                       -- a derived table, evaluated ONCE
+  SELECT customer_id,                             -- the join key
+         COUNT(*)         AS n,                   -- all three aggregates…
+         SUM(total_cents) AS spend,               -- …computed in the same pass…
+         MAX(placed_at)   AS last                 -- …over the same grouped rows
+  FROM orders GROUP BY customer_id                -- one row per customer, by construction
+) o ON o.customer_id = c.id;                      -- so the join cannot multiply rows
+</code></pre>
+<div class="cx-conv">
+  <b>What changed, in one sentence each</b>
+  <ul>
+    <li>Three correlated executions per row became <strong>one grouped scan</strong> plus a join.
+      On the reference database it is the difference between thousands of seeks and one pass.</li>
+    <li><code>LEFT JOIN</code> and not <code>JOIN</code>: a customer with no orders must still
+      appear. That choice is what makes the <code>COALESCE</code> calls necessary.</li>
+    <li><code>COALESCE(o.n, 0)</code> — the padded side is NULL, and a count of nothing should read
+      as 0. <code>o.last</code> keeps its NULL deliberately: there is no honest date to show.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="lateral">LATERAL and APPLY: a join that can see the left row</h2>
 
@@ -140,20 +217,39 @@ LEFT JOIN (
   </p>
 </div>
 
+<figure class="codex" data-lang="sql">
+<figcaption><code>LATERAL</code> and <code>CROSS APPLY</code>: a subquery that runs once per row and can return several.</figcaption>
 <pre><code>-- PostgreSQL / MySQL 8 / Oracle
-SELECT c.name, o.id, o.placed_at
-FROM customers c
-CROSS JOIN LATERAL (
-  SELECT id, placed_at FROM orders
-  WHERE customer_id = c.id                -- ← sees the outer row
-  ORDER BY placed_at DESC LIMIT 3
-) o;
+SELECT c.name, o.id, o.placed_at            -- columns from BOTH sides, unlike a scalar subquery
+FROM customers c                            -- the driving table
+CROSS JOIN LATERAL (                        -- LATERAL: this subquery may see c                        -- LATERAL: this subquery may see c
+  SELECT id, placed_at FROM orders          -- an ordinary query, run once per customer
+  WHERE customer_id = c.id                  -- ← sees the outer row; illegal without LATERAL
+  ORDER BY placed_at DESC LIMIT 3           -- three per customer, newest first
+) o;                                        -- the alias is required
 
 -- SQL Server: CROSS APPLY, and OUTER APPLY to keep customers with no orders.
-SELECT c.name, o.id, o.placed_at
-FROM customers c
-CROSS APPLY (SELECT TOP (3) id, placed_at FROM orders
-             WHERE customer_id = c.id ORDER BY placed_at DESC) o;</code></pre>
+SELECT c.name, o.id, o.placed_at            -- same shape, same meaning
+FROM customers c                            -- again the driving table
+CROSS APPLY (SELECT TOP (3) id, placed_at   -- TOP goes before the columns in T-SQL
+             FROM orders                    -- the correlated side
+             WHERE customer_id = c.id       -- the correlation, again
+             ORDER BY placed_at DESC) o;    -- and the ordering that makes TOP meaningful
+</code></pre>
+<div class="cx-conv">
+  <b>The two things worth remembering</b>
+  <ul>
+    <li>A plain subquery in <code>FROM</code> is evaluated independently and <em>cannot</em> mention
+      the tables beside it. <code>LATERAL</code> (standard, PostgreSQL) and <code>APPLY</code>
+      (SQL Server) lift that restriction.</li>
+    <li><code>CROSS</code> drops customers whose subquery returned nothing; <code>OUTER</code> keeps
+      them with NULLs. It is exactly the inner/left distinction, with different keywords — and the
+      same bug when you pick the wrong one.</li>
+    <li>For top-N per group this often beats a window function, because it can stop after three rows
+      per customer instead of ranking every order and throwing most of them away.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">CROSS vs OUTER</div>
@@ -166,15 +262,34 @@ CROSS APPLY (SELECT TOP (3) id, placed_at FROM orders
 </div>
 
 <div class="tryit">
-  <pre><code>-- Compare the two ways to get "the latest order per customer".
--- Window function: ranks everything, then filters.
-SELECT * FROM (
-  SELECT o.*, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY placed_at DESC) rn
-  FROM orders o
-) t WHERE rn = 1;
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>The same &ldquo;latest order per customer&rdquo;, ranked rather than sought &mdash; run both and compare the plans.</figcaption>
+<pre><code>-- Window function: rank EVERYTHING, then filter.
+SELECT * FROM (                                          -- the wrapper exists only to filter rn
+  SELECT o.*,                                            -- every order column, plus…
+         ROW_NUMBER() OVER (PARTITION BY customer_id     -- …a number restarting per customer
+                            ORDER BY placed_at DESC) rn  -- newest first, so rn = 1 is the latest
+  FROM orders o                                          -- every order is read and ranked
+) t WHERE rn = 1;                                        -- WHERE cannot see rn one level up
 
--- LATERAL: seeks the top row per customer. Usually faster when customers are few
--- and orders are many, and there is an index on (customer_id, placed_at DESC).</code></pre>
+-- LATERAL seeks the top row per customer instead. Usually faster when customers
+-- are few and orders are many, and there is an index on (customer_id, placed_at).
+</code></pre>
+<div class="cx-conv">
+  <b>Why the wrapper is not optional</b>
+  <ul>
+    <li>Window functions are computed in step 5, with <code>SELECT</code>. <code>WHERE</code> ran in
+      step 2, so <code>WHERE rn = 1</code> in the same query is a syntax error — the column does not
+      exist yet. The derived table or CTE gives it somewhere to exist.</li>
+    <li><code>ORDER BY placed_at DESC</code> with no tie-breaker makes the result
+      <strong>non-deterministic</strong> when two orders share a timestamp: either could be numbered
+      1. Adding <code>, id DESC</code> settles it — and interviewers listen for that.</li>
+    <li>Ranking reads every order. <code>LATERAL</code>/<code>APPLY</code> with a matching index
+      reads three. Same answer, different cost, and the right choice depends on the shape of the
+      data.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -226,7 +341,9 @@ SELECT * FROM (
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

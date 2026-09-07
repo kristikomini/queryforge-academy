@@ -42,6 +42,8 @@
   </p>
 </div>
 
+<figure class="codex" data-lang="text">
+<figcaption>The vulnerable pattern, and the two inputs everybody is shown once and then never forgets.</figcaption>
 <pre><code>-- The vulnerable pattern, in any language:
 sql = "SELECT * FROM users WHERE email = '" + input + "'"
 
@@ -49,7 +51,23 @@ sql = "SELECT * FROM users WHERE email = '" + input + "'"
 -- becomes: SELECT * FROM users WHERE email = 'x' OR '1'='1'    ← every row
 
 -- input:  x'; DROP TABLE users; --
--- becomes: SELECT * FROM users WHERE email = 'x'; DROP TABLE users; --'</code></pre>
+-- becomes: SELECT * FROM users WHERE email = 'x'; DROP TABLE users; --'
+</code></pre>
+<div class="cx-conv">
+  <b>What is actually going wrong here</b>
+  <ul>
+    <li>This is pseudocode showing string building, then the two inputs and the statement each one
+      produces.</li>
+    <li>The bug is not &ldquo;the quote was not escaped&rdquo;. It is that <strong>data and
+      instructions travel in the same channel</strong>, so the parser cannot tell which characters
+      were meant as SQL and which were meant as a value. Escaping is an attempt to patch that with
+      cleverness, and cleverness loses to a character set you did not think about.</li>
+    <li>The trailing <code>--</code> in the second input comments out the rest of the original
+      statement, including the closing quote. That is why it parses at all.</li>
+    <li>The fix is in the next example, and it is not a better escape function.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 The root cause, stated precisely</div>
@@ -76,12 +94,29 @@ sql = "SELECT * FROM users WHERE email = '" + input + "'"
   </p>
 </div>
 
+<figure class="codex" data-lang="sql">
+<figcaption>The fix: a separate channel for values, which is also faster.</figcaption>
 <pre><code>-- Correct, everywhere:
-SELECT * FROM users WHERE email = ?      -- or $1, @email, :email
--- The driver sends the SQL and the values in separate protocol fields.
+SELECT * FROM users WHERE email = ?      -- or $1, @email, :email — the driver decides
+-- The driver sends the SQL text and the VALUES in separate protocol fields, so a
+-- value can never be parsed as SQL. There is nothing to escape.
 
 -- And it is FASTER: the same statement text means the same cached plan, instead
--- of a new plan for every distinct literal filling the cache.</code></pre>
+-- of a new plan for every distinct literal, filling the cache with single-use plans.
+</code></pre>
+<div class="cx-conv">
+  <b>The sentence to say in an interview</b>
+  <ul>
+    <li><em>&ldquo;Parameters are a different channel, not better escaping.&rdquo;</em> That is the
+      answer that lands, because it explains why the defence is total rather than probabilistic.</li>
+    <li>The performance argument is real and often forgotten: with literals, every distinct value
+      produces a distinct statement text and therefore a distinct plan. A cache full of single-use
+      plans is a documented SQL Server pathology.</li>
+    <li>Parameters cover <strong>values</strong> only. Identifiers and the shape of the statement
+      are a separate problem — the next example.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — an ORM does not make you safe</div>
@@ -101,8 +136,25 @@ SELECT * FROM users WHERE email = ?      -- or $1, @email, :email
   must be fixed before parsing. So this does not work:
 </p>
 
-<pre><code>ORDER BY ?          -- binds a STRING; it sorts by a constant, silently doing nothing
-SELECT * FROM ?     -- syntax error</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>What a parameter cannot do, and why it fails so quietly in one of the two cases.</figcaption>
+<pre><code>ORDER BY ?          -- binds a STRING: it sorts by a constant and silently does nothing
+SELECT * FROM ?     -- a syntax error, because the shape must be known before parsing
+</code></pre>
+<div class="cx-conv">
+  <b>Why identifiers cannot be parameters</b>
+  <ul>
+    <li>A parameter supplies a <em>value</em> after the statement has been parsed and planned. A
+      table or column name changes the <em>shape</em> of the statement, which has to be known before
+      either can happen.</li>
+    <li><code>ORDER BY ?</code> is the dangerous half: it is valid SQL. Every row gets the same
+      constant sort key, so the result comes back in an arbitrary order and nothing reports an
+      error.</li>
+    <li>The answer is never to escape an identifier by hand. It is to <em>choose</em> one from a
+      list you wrote — the next example.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 So how do you build a sortable, filterable report?</div>
@@ -113,35 +165,75 @@ SELECT * FROM ?     -- syntax error</code></pre>
   </p>
 </div>
 
-<pre><code>// The only correct shape. Note there is no escaping anywhere.
-const SORTABLE = { date: "o.placed_at", total: "o.total_cents", customer: "c.name" };
-const col = SORTABLE[req.query.sort];
-if (!col) return badRequest("unknown sort column");
-const dir = req.query.dir === "asc" ? "ASC" : "DESC";     // also an allow-list
+<figure class="codex" data-lang="js">
+<figcaption>The only correct shape for a dynamic sort: an allow-list, with no escaping anywhere.</figcaption>
+<pre><code>// The only correct shape. Note there is no escaping anywhere in it.
+const SORTABLE = { date: "o.placed_at",              // the map IS the security boundary…
+                   total: "o.total_cents",           // …because a key that is not here…
+                   customer: "c.name" };             // …cannot produce a column name
+const col = SORTABLE[req.query.sort];                // look the user's choice up
+if (!col) return badRequest("unknown sort column");  // not in the map → reject the request
 
-const sql = `SELECT ... ORDER BY ${col} ${dir} LIMIT ?`;  // identifiers from the map
-db.query(sql, [pageSize]);                                // VALUES still parameterised</code></pre>
+const dir = req.query.dir === "asc" ? "ASC" : "DESC";     // also an allow-list, of two values
+
+const sql = `SELECT ... ORDER BY ${col} ${dir} LIMIT ?`;  // identifiers come from the map…
+db.query(sql, [pageSize]);                                // …and VALUES are still parameters
+</code></pre>
+<div class="cx-conv">
+  <b>Why this is safe when string-building normally is not</b>
+  <ul>
+    <li>The user's input is never interpolated. It is used as a <em>key</em>, and the value that goes
+      into the SQL is a constant you wrote. An attacker can choose between three columns, which is
+      exactly the freedom the feature needed.</li>
+    <li><strong>Never sanitise, choose.</strong> A sanitiser is a guess about what is dangerous; an
+      allow-list is a statement about what is permitted, and it fails closed.</li>
+    <li><code>dir</code> is an allow-list too, written as a ternary. Interpolating
+      <code>req.query.dir</code> directly would reopen the hole for the sake of four characters.</li>
+    <li>The page size stays a parameter, because it is a value. Mixing the two — identifiers from a
+      map, values from parameters — is the shape to remember.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="safe-dynamic">Safe dynamic SQL inside the database</h2>
 
-<pre><code>-- SQL Server: sp_executesql takes parameters. EXEC(@sql) does not — that is the
--- entire difference, and it is why one is safe and the other is not.
-DECLARE @sql NVARCHAR(MAX) = N'
-  SELECT id, total_cents FROM orders
-  WHERE customer_id = @cid AND placed_at &gt;= @from';
+<figure class="codex" data-lang="tsql">
+<figcaption>Safe dynamic SQL inside the database: <code>sp_executesql</code> takes parameters, <code>EXEC</code> does not.</figcaption>
+<pre><code>-- sp_executesql takes parameters. EXEC(@sql) does not — that is the entire
+-- difference, and it is why one is safe and the other is not.
+DECLARE @sql NVARCHAR(MAX) = N'                     -- N'' is a Unicode literal
+  SELECT id, total_cents FROM orders                -- the fixed part of the statement
+  WHERE customer_id = @cid AND placed_at &gt;= @from'; -- parameter NAMES in the text, not values
 
-IF @status IS NOT NULL
-  SET @sql += N' AND status = @status';   -- SHAPE varies; VALUES never concatenated
+IF @status IS NOT NULL                              -- the SHAPE varies…
+  SET @sql += N' AND status = @status';             -- …but no value is ever concatenated
 
-EXEC sp_executesql @sql,
-     N'@cid INT, @from DATE, @status VARCHAR(12)',
-     @cid = @customer_id, @from = @from_date, @status = @status;
+EXEC sp_executesql @sql,                            -- the statement…
+     N'@cid INT, @from DATE, @status VARCHAR(12)',  -- …its parameter DECLARATIONS…
+     @cid = @customer_id, @from = @from_date, @status = @status;  -- …and the values, separately
 
 -- If an IDENTIFIER genuinely must be dynamic, quote it with the engine's own
 -- quoting function — never with your own string manipulation:
 SET @sql = N'SELECT * FROM ' + QUOTENAME(@table_name);   -- SQL Server
--- PostgreSQL: format('SELECT * FROM %I', tbl)   -- %I quotes an identifier
--- and %L quotes a literal, for the rare case that is genuinely needed.</code></pre>
+-- PostgreSQL: format('SELECT * FROM %I', tbl)  -- %I quotes an identifier,
+-- and %L quotes a literal, for the rare case that is genuinely needed.
+</code></pre>
+<div class="cx-conv">
+  <b>The three rules this example encodes</b>
+  <ul>
+    <li>Vary the <strong>shape</strong> dynamically; never the <strong>values</strong>. Adding
+      <code>AND status = @status</code> to the text is safe because <code>@status</code> is a name,
+      not a value.</li>
+    <li><code>sp_executesql</code> takes a parameter declaration string and the values separately, so
+      the plan can also be cached and reused. <code>EXEC(@sql)</code> takes a string and executes it,
+      with no way to pass values apart from concatenation.</li>
+    <li>Identifiers that genuinely must vary go through the engine's own quoting —
+      <code>QUOTENAME</code> in SQL Server, <code>format(..., %I)</code> in PostgreSQL,
+      <code>quote_ident</code> in PL/pgSQL. These know the rules for the identifiers that engine
+      accepts; a hand-rolled quote does not.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">This is also the fix for the optional-parameter plan problem</div>
@@ -230,7 +322,9 @@ SET @sql = N'SELECT * FROM ' + QUOTENAME(@table_name);   -- SQL Server
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

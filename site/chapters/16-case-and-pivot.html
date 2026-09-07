@@ -31,16 +31,38 @@
 
 <h2 id="case">CASE: the only conditional you need</h2>
 
-<pre><code>-- Searched CASE: any predicate, evaluated top to bottom, FIRST match wins.
-SELECT id,
-       CASE WHEN total_cents &gt;= 100000 THEN 'large'
-            WHEN total_cents &gt;=  20000 THEN 'medium'
-            ELSE 'small'                                   -- omit ELSE and you get NULL
-       END AS bucket
-FROM orders;
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Both spellings of <code>CASE</code>, and the one thing the short form cannot do.</figcaption>
+<pre><code>-- SEARCHED CASE: any predicate, evaluated top to bottom, FIRST match wins.
+SELECT id,                                                 -- the row's key
+       CASE WHEN total_cents &gt;= 100000 THEN 'large'        -- ≥ €1000 → 'large'
+            WHEN total_cents &gt;=  20000 THEN 'medium'       -- order matters: this is reached
+            ELSE 'small'                                   -- …only when the first test failed
+       END AS bucket                                       -- omit ELSE and non-matches are NULL
+FROM orders;                                               -- one bucket per order
 
--- Simple CASE: equality against one expression. Cannot test NULL (nothing equals NULL).
-CASE status WHEN 'draft' THEN 'Bozza' WHEN 'shipped' THEN 'Spedito' ELSE status END</code></pre>
+-- SIMPLE CASE: equality against ONE expression. Compact, and cannot test NULL.
+CASE status WHEN 'draft'   THEN 'Bozza'                    -- status = 'draft'
+            WHEN 'shipped' THEN 'Spedito'                  -- status = 'shipped'
+            ELSE status END                                -- anything else, untranslated
+</code></pre>
+<div class="cx-conv">
+  <b>Types, order and the NULL limitation</b>
+  <ul>
+    <li><code>CASE</code> is an <strong>expression</strong>: it produces a value, so it can sit in
+      <code>SELECT</code>, <code>WHERE</code>, <code>ORDER BY</code>, inside an aggregate, or in a
+      <code>CHECK</code> constraint. It is not an <code>IF</code> statement.</li>
+    <li>Every branch must return a compatible type and the result takes the widest of them. A
+      <code>CASE</code> with a numeric branch and a text branch either converts silently or fails,
+      depending on the engine — decide the output type yourself with a <code>CAST</code>.</li>
+    <li>Branch order is significant. Swap the two <code>WHEN</code>s above and every large order is
+      labelled &ldquo;medium&rdquo;, because 100000 is also ≥ 20000.</li>
+    <li><code>CASE status WHEN NULL THEN …</code> can never match: the simple form compares with
+      <code>=</code>, and nothing equals NULL. Use the searched form with
+      <code>WHEN status IS NULL</code>.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap</div>
@@ -64,17 +86,38 @@ CASE status WHEN 'draft' THEN 'Bozza' WHEN 'shipped' THEN 'Spedito' ELSE status 
   </p>
 </div>
 
+<figure class="codex" data-lang="sql">
+<figcaption>A pivot with no <code>PIVOT</code> keyword: one column per city, each summing only its own rows.</figcaption>
 <pre><code>-- Portable everywhere, readable, and the answer to give in an interview.
-SELECT
-  DATE_TRUNC('month', o.placed_at)                                    AS month,
-  SUM(CASE WHEN c.city = 'Modena'  THEN o.total_cents ELSE 0 END)/100 AS modena,
-  SUM(CASE WHEN c.city = 'Parma'   THEN o.total_cents ELSE 0 END)/100 AS parma,
-  SUM(CASE WHEN c.city = 'Bologna' THEN o.total_cents ELSE 0 END)/100 AS bologna,
-  SUM(o.total_cents)/100                                              AS total
-FROM orders o
-JOIN customers c ON c.id = o.customer_id
-GROUP BY DATE_TRUNC('month', o.placed_at)
-ORDER BY month;</code></pre>
+SELECT                                                           -- the report columns follow
+  DATE_TRUNC('month', o.placed_at)                                    AS month,   -- the row axis
+  SUM(CASE WHEN c.city = 'Modena'  THEN o.total_cents ELSE 0 END)/100 AS modena,  -- column 1
+  SUM(CASE WHEN c.city = 'Parma'   THEN o.total_cents ELSE 0 END)/100 AS parma,   -- column 2
+  SUM(CASE WHEN c.city = 'Bologna' THEN o.total_cents ELSE 0 END)/100 AS bologna, -- column 3
+  SUM(o.total_cents)/100                                              AS total    -- the row total
+FROM orders o                                                                     -- the facts
+JOIN customers c ON c.id = o.customer_id                                          -- for the city
+GROUP BY DATE_TRUNC('month', o.placed_at)                                         -- one row per month
+ORDER BY month;                                                                   -- chronological
+</code></pre>
+<div class="cx-conv">
+  <b>The mechanism, and the integer division to notice</b>
+  <ul>
+    <li>Each column is an aggregate over a <code>CASE</code> that returns the amount for its own city
+      and 0 for everything else. Summing that gives the city's total — a pivot, built from parts you
+      already know.</li>
+    <li><code>ELSE 0</code> is right inside <code>SUM</code> here: a month with no Modena orders
+      should read 0, not blank. Inside <code>COUNT</code> the opposite holds — there,
+      <code>ELSE NULL</code> is what makes the count skip non-matches.</li>
+    <li><code>/100</code> is <strong>integer division</strong>: €89.99 arrives as 89. Write
+      <code>/100.0</code> when the cents matter — this example rounds down deliberately, and that is
+      exactly the kind of decision worth stating out loud in a review.</li>
+    <li>The column list is fixed at write time. A new city needs a new line, which is the honest
+      limitation of pivoting in SQL: genuinely dynamic columns need dynamic SQL
+      (<a href="34-dynamic-sql-and-injection.html">chapter 34</a>) or a client that can do it.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 Why not the <code>PIVOT</code> operator?</div>
@@ -106,26 +149,71 @@ ORDER BY month;</code></pre>
   <code>jan, feb, mar…</code>:
 </p>
 
-<pre><code>-- Portable: one branch per source column, stapled with UNION ALL.
-SELECT product_id, 1 AS month, jan AS qty FROM sales_wide WHERE jan IS NOT NULL
-UNION ALL SELECT product_id, 2, feb FROM sales_wide WHERE feb IS NOT NULL
-UNION ALL SELECT product_id, 3, mar FROM sales_wide WHERE mar IS NOT NULL;
+<figure class="codex" data-lang="sql">
+<figcaption>Unpivot: turning twelve month columns back into twelve rows.</figcaption>
+<pre><code>-- Portable: one branch per source column, stapled together with UNION ALL.
+SELECT product_id, 1 AS month, jan AS qty FROM sales_wide WHERE jan IS NOT NULL  -- January
+UNION ALL SELECT product_id, 2, feb FROM sales_wide WHERE feb IS NOT NULL        -- February
+UNION ALL SELECT product_id, 3, mar FROM sales_wide WHERE mar IS NOT NULL;       -- March, …
 
--- PostgreSQL, more compact and one pass over the table:
-SELECT product_id, m.month, m.qty
-FROM sales_wide
-CROSS JOIN LATERAL (VALUES (1, jan), (2, feb), (3, mar)) AS m(month, qty)
-WHERE m.qty IS NOT NULL;</code></pre>
+-- PostgreSQL: more compact, and ONE pass over the table instead of twelve.
+SELECT product_id, m.month, m.qty                                  -- the long-format columns
+FROM sales_wide                                                    -- read the wide table once…
+CROSS JOIN LATERAL (VALUES (1, jan), (2, feb), (3, mar))           -- …and expand each row…
+     AS m(month, qty)                                              -- …naming the two new columns
+WHERE m.qty IS NOT NULL;                                           -- drop the empty months
+</code></pre>
+<div class="cx-conv">
+  <b>Why the second form is worth learning</b>
+  <ul>
+    <li>The <code>UNION ALL</code> version reads <code>sales_wide</code> once <em>per month</em> —
+      twelve scans for a twelve-column table. The <code>LATERAL (VALUES …)</code> version reads it
+      once and expands each row in place.</li>
+    <li><code>VALUES</code> here is an inline table: rows written literally. The alias
+      <code>m(month, qty)</code> names both the table and its columns, which is required.</li>
+    <li>SQL Server has <code>UNPIVOT</code>, and also supports
+      <code>CROSS APPLY (VALUES …)</code>, which is the same idea with different keywords.</li>
+    <li>Every branch must produce the same column types. If <code>jan</code> is INTEGER and
+      <code>feb</code> is DECIMAL, the result takes the wider type — check it, rather than
+      discovering it in a report.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="coalesce">COALESCE and NULLIF in reports</h2>
 
-<pre><code>SELECT
-  COALESCE(c.company_name, c.first_name || ' ' || c.last_name, 'Unknown') AS display_name,
+<figure class="codex" data-lang="sql">
+<figcaption><code>COALESCE</code> and <code>NULLIF</code> doing the three jobs they exist for in reports.</figcaption>
+<pre><code>SELECT                                                       -- the report columns follow
+  -- A display name, from the first source that has one:
+  COALESCE(c.company_name,                                   -- prefer the company…
+           c.first_name || ' ' || c.last_name,               -- …then the person's full name…
+           'Unknown')                        AS display_name, -- …then admit we do not know
   -- Division that cannot fail, and returns NULL rather than a fake zero:
-  ROUND(100.0 * o.delivered / NULLIF(o.total, 0), 1)                      AS delivery_pct,
-  -- Treat empty string as missing (the classic import artefact):
-  COALESCE(NULLIF(TRIM(c.vat_number), ''), '—')                           AS vat
-FROM customers c ...</code></pre>
+  ROUND(100.0 * o.delivered                                  -- 100.0 → REAL, so no truncation
+        / NULLIF(o.total, 0), 1)             AS delivery_pct, -- 0 → NULL → the division is NULL
+  -- Treat the empty string as missing (the classic import artefact):
+  COALESCE(NULLIF(TRIM(c.vat_number), ''), '—') AS vat        -- trim, blank→NULL, NULL→a dash
+FROM customers c ...                                          -- (joined to the counts above)
+</code></pre>
+<div class="cx-conv">
+  <b>Three idioms worth memorising</b>
+  <ul>
+    <li><code>COALESCE(a, b, c)</code> — first non-NULL wins, and it short-circuits. Note the second
+      argument: if <code>first_name</code> is NULL, <code>||</code> makes the whole concatenation
+      NULL and <code>COALESCE</code> falls through to <code>'Unknown'</code>. That is the behaviour
+      you want here, and it is worth knowing it is happening.</li>
+    <li><code>NULLIF(x, 0)</code> — the division guard. No <code>CASE</code>, no exception, and the
+      report says &ldquo;undefined&rdquo; instead of lying with a zero.</li>
+    <li><code>NULLIF(TRIM(x), '')</code> — the import cleaner. Whitespace-only becomes empty becomes
+      NULL, and then <code>COALESCE</code> supplies the placeholder. Three functions, one honest
+      column.</li>
+    <li>Beware SQL Server's <code>ISNULL</code> as a substitute: its result takes the
+      <em>first</em> argument's type, so <code>ISNULL(varchar5_col, 'unknown')</code> silently
+      returns <code>'unkno'</code>. <code>COALESCE</code> is standard and takes the widest type.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — COALESCE vs ISNULL in T-SQL</div>
@@ -140,19 +228,39 @@ FROM customers c ...</code></pre>
 <h2 id="reporting">The reporting shape you will be asked for</h2>
 
 <div class="tryit">
-  <pre><code>-- "Monthly order status breakdown with percentages" — the archetypal SSRS/Power BI
--- backing query. Conditional aggregation, one scan, no subqueries.
-SELECT
-  strftime('%Y-%m', placed_at)                                 AS month,
-  COUNT(*)                                                     AS orders,
-  COUNT(CASE WHEN status = 'delivered' THEN 1 END)             AS delivered,
-  COUNT(CASE WHEN status = 'cancelled' THEN 1 END)             AS cancelled,
-  ROUND(100.0 * COUNT(CASE WHEN status = 'cancelled' THEN 1 END)
-        / NULLIF(COUNT(*), 0), 1)                              AS cancel_pct,
-  SUM(CASE WHEN status &lt;&gt; 'cancelled' THEN total_cents ELSE 0 END)/100.0 AS revenue_eur
-FROM orders
-GROUP BY month
-ORDER BY month;</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>The archetypal reporting query: counts, a percentage and revenue, in one scan.</figcaption>
+<pre><code>-- "Monthly order status breakdown with percentages" — the query behind half the
+-- dashboards you will ever be asked to write. One scan, no subqueries.
+SELECT                                                           -- the report columns follow
+  strftime('%Y-%m', placed_at)                             AS month,      -- '2026-03', TEXT
+  COUNT(*)                                                 AS orders,     -- rows in the month
+  COUNT(CASE WHEN status = 'delivered' THEN 1 END)         AS delivered,  -- non-matches → NULL
+  COUNT(CASE WHEN status = 'cancelled' THEN 1 END)         AS cancelled,  -- …so they are skipped
+  ROUND(100.0 * COUNT(CASE WHEN status = 'cancelled' THEN 1 END)         -- the same count again…
+        / NULLIF(COUNT(*), 0), 1)                          AS cancel_pct, -- …over the total, guarded
+  SUM(CASE WHEN status &lt;&gt; 'cancelled'                                     -- revenue excludes…
+           THEN total_cents ELSE 0 END) / 100.0            AS revenue_eur -- …cancellations
+FROM orders                                                               -- one table
+GROUP BY month                                                            -- one row per month
+ORDER BY month;                                                           -- chronological
+</code></pre>
+<div class="cx-conv">
+  <b>Everything that could go wrong here, and does not</b>
+  <ul>
+    <li><code>NULLIF(COUNT(*), 0)</code> — <code>COUNT(*)</code> cannot be zero inside a group that
+      exists, so this guard is defensive rather than necessary. Leave it: the day this query grows a
+      <code>HAVING</code> or a filtered count in the denominator, it stops being unnecessary.</li>
+    <li><code>100.0 *</code> before the division, not after — with integers,
+      <code>COUNT(…) / COUNT(*)</code> is 0 for everything, and multiplying 0 by 100 is still 0.</li>
+    <li><code>/ 100.0</code> on the revenue keeps the cents; <code>/ 100</code> would truncate every
+      month's total to whole euros.</li>
+    <li><code>&lt;&gt; 'cancelled'</code> would drop rows whose status is NULL — safe here only
+      because the column is <code>NOT NULL</code> by constraint. That is the constraint paying for
+      itself.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -203,7 +311,9 @@ ORDER BY month;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

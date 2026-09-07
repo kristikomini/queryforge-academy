@@ -156,25 +156,48 @@
 
 <h2 id="finding">Finding them</h2>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Finding out who is blocking whom, in the three engines you are most likely to be asked about.</figcaption>
 <pre><code>-- SQL Server: who is blocking whom, right now
-SELECT r.session_id, r.blocking_session_id, r.wait_type, r.wait_time,
-       DB_NAME(r.database_id) AS db, t.text
-FROM sys.dm_exec_requests r
-CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t
-WHERE r.blocking_session_id &lt;&gt; 0;
--- Deadlock history lives in the system_health extended event session — it is on
--- by default and nobody knows, which is why "we have no deadlock information" is
+SELECT r.session_id,                                  -- the waiting session
+       r.blocking_session_id,                         -- the one it is waiting for
+       r.wait_type, r.wait_time,                      -- what kind of wait, and how long
+       DB_NAME(r.database_id) AS db,                  -- id → readable name
+       t.text                                         -- the statement itself
+FROM sys.dm_exec_requests r                           -- what is running right now
+CROSS APPLY sys.dm_exec_sql_text(r.sql_handle) t      -- APPLY: one call per row
+WHERE r.blocking_session_id &lt;&gt; 0;                     -- 0 means "not blocked"
+-- Deadlock HISTORY lives in the system_health extended event session. It is on by
+-- default and nobody knows, which is why "we have no deadlock information" is
 -- almost always wrong.
 
 -- PostgreSQL: the blocking chain
-SELECT pid, state, wait_event_type, wait_event,
-       pg_blocking_pids(pid) AS blocked_by, left(query, 80) AS query
-FROM pg_stat_activity
-WHERE cardinality(pg_blocking_pids(pid)) &gt; 0;
+SELECT pid, state, wait_event_type, wait_event,       -- what this backend is doing
+       pg_blocking_pids(pid) AS blocked_by,           -- an ARRAY of blocking pids
+       left(query, 80) AS query                       -- the first 80 characters of the SQL
+FROM pg_stat_activity                                 -- one row per connection
+WHERE cardinality(pg_blocking_pids(pid)) &gt; 0;         -- keep only those actually blocked
 -- log_lock_waits = on writes the details to the log after deadlock_timeout.
 
 -- MySQL
-SHOW ENGINE INNODB STATUS;         -- LATEST DETECTED DEADLOCK section</code></pre>
+SHOW ENGINE INNODB STATUS;         -- read the LATEST DETECTED DEADLOCK section
+</code></pre>
+<div class="cx-conv">
+  <b>How to read the answers</b>
+  <ul>
+    <li><code>blocking_session_id</code> is a <em>chain</em>, not a pair: A waits for B, which waits
+      for C. Follow it to the end — the session at the head is usually the one to look at, and it is
+      often idle inside an open transaction.</li>
+    <li><code>pg_blocking_pids()</code> returns an array, so <code>cardinality(...) &gt; 0</code> is
+      the way to say &ldquo;blocked by at least one&rdquo;. Calling it twice per row is fine here and
+      wasteful in a monitoring query — compute it once in a subquery.</li>
+    <li><code>CROSS APPLY sys.dm_exec_sql_text(...)</code> is a function called once per row with
+      that row's handle — SQL Server's <code>LATERAL</code>. A plain join cannot do it.</li>
+    <li>These are all <strong>right now</strong> views. A deadlock is already over by the time you
+      look, which is why the history sources in the comments matter more than the live queries.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — the retry that makes it worse</div>
@@ -238,7 +261,9 @@ SHOW ENGINE INNODB STATUS;         -- LATEST DETECTED DEADLOCK section</code></p
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

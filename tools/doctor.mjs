@@ -8,7 +8,7 @@
    at all, to anybody, ever — and the reader who follows it concludes the
    repository is sloppy rather than that one line is.
 
-   Eleven checks. Deliberately zero dependencies and deliberately outside the
+   Twelve checks. Deliberately zero dependencies and deliberately outside the
    product's own build, so it runs on a machine with no database and no npm
    install.
 
@@ -28,6 +28,10 @@ import { createHash } from "node:crypto";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SITE = join(ROOT, "site");
 const FIX_LOCK = process.argv.includes("--fix-lock");
+/* --all prints every finding rather than the first dozen per check. With 180
+   code blocks under the anatomy check, a truncated list hides the one you are
+   working on. */
+const SHOW_ALL = process.argv.includes("--all");
 
 /* --------------------------------------------------------------- report --- */
 
@@ -572,12 +576,197 @@ async function checkCounts(man, quizzes) {
   }
 }
 
+/* ==================================================== 12 · site/code-anatomy */
+/*  THE PROMISE THIS COURSE MAKES ABOUT ITS CODE.
+
+    Every example is annotated twice: a comment on every line, written by hand,
+    and a generated syntax-anatomy table under it. Both halves rot in the same
+    silent way — somebody adds a line without a comment, or uses a function the
+    dictionary has never heard of, and the example still renders perfectly while
+    quietly being less than it claims. Neither failure produces a symptom.
+
+    So: this check reads every code block in every chapter and requires
+
+      (a) the block to be wrapped in <figure class="codex"> with a data-lang and
+          a <figcaption>, because a code block with no stated purpose is a
+          puzzle rather than an example;
+      (b) EVERY non-blank line of a SQL, C# or shell block to carry a comment;
+      (c) every keyword, function, operator and type in a SQL block to exist in
+          site/assets/syntax.js, so the generated table is complete.
+
+    (c) is the interesting one. It means the anatomy table cannot be partially
+    right: a token the dictionary does not know fails the build rather than
+    silently being left out of the explanation.                              */
+
+/*  Blocks that are OUTPUT rather than input — a plan, a result set, an error
+    message — cannot carry SQL comments, and pretending otherwise would mean
+    editing the output. They are marked data-lang="output" and must instead
+    carry a <div class="cx-conv"> explaining how to read them, which the check
+    below enforces.                                                           */
+const PROSE_LANGS = new Set(["output", "text"]);
+const COMMENT_MARK = {
+  sql: ["--"], tsql: ["--"], plsql: ["--"], plpgsql: ["--"],
+  csharp: ["//", "--"], js: ["//"], java: ["//"],
+  bash: ["#"], yaml: ["#"], ini: ["#"], python: ["#"],
+};
+
+/*  All-caps words inside SQL that are NOT SQL. Each entry needs a reason, for
+    the same reason the counts allowlist does: an allowlist without reasons is
+    just a way of turning a check off.                                        */
+const TOKEN_ALLOW = new Set([
+  "EUR",          // the currency, in an alias like revenue_eur
+  "UTC",          // the timezone, in prose inside an alias
+  "ID",           // occasionally an alias, e.g. AS ID
+  "N",            // the T-SQL Unicode literal prefix, N'text'
+  "OK", "FAIL", "PASS",   // assertion output strings in the test examples
+  "TODO",         // appears inside a deliberately-unfinished example
+  "CTE",          // named in comments-as-code in the interview chapters
+]);
+
+function decodeEntities(s) {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+          .replace(/&mdash;/g, "—").replace(/&ndash;/g, "–")
+          .replace(/&rarr;/g, "→").replace(/&hellip;/g, "…")
+          .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+}
+
+/* The same stripping codex.js does, so the two agree about what a token is. */
+function stripNoise(code) {
+  return code
+    .replace(/--[^\n]*/g, " ")
+    .replace(/\/\/[^\n]*/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/'(?:[^'\\\n]|\\.|'')*'/g, " ")
+    .replace(/"(?:[^"\\\n]|\\.)*"/g, " ");
+}
+
+/* The dictionary's multi-word keys, longest first — the same order codex.js
+   matches them in, so "IS NOT NULL" wins over "NOT NULL" wins over "NULL". */
+let PHRASE_CACHE = null;
+function phraseKeys(dict) {
+  if (PHRASE_CACHE) return PHRASE_CACHE;
+  PHRASE_CACHE = Object.keys(dict).filter((k) => k.includes(" "))
+    .sort((a, b) => b.length - a.length);
+  return PHRASE_CACHE;
+}
+
+async function loadSyntax() {
+  const p = join(SITE, "assets/syntax.js");
+  if (!existsSync(p)) return null;
+  const scope = {};
+  new Function("self", await read(p))(scope);
+  return scope.SYNTAX || null;
+}
+
+async function checkCodeAnatomy(dict) {
+  checksRun.push("site/code-anatomy");
+  const CHECK = "site/code-anatomy";
+  if (!dict) {
+    err(CHECK, "site/assets/syntax.js is missing — every code block depends on it");
+    return;
+  }
+
+  const pages = await walk(join(SITE, "chapters"), (p) => p.endsWith(".html"));
+  let blocks = 0, lines = 0;
+  const unknown = new Map();     // token -> where it was first seen
+
+  for (const page of pages) {
+    const html = await read(page);
+
+    /* Every <pre> must live inside a codex figure. Counting is enough: the
+       figures are extracted below, and a mismatch means one is loose. */
+    const figures = [...html.matchAll(/<figure class="codex"([^>]*)>([\s\S]*?)<\/figure>/g)];
+    const allPre = (html.match(/<pre\b/g) || []).length;
+    const inFigures = figures.reduce(
+      (n, f) => n + (f[2].match(/<pre\b/g) || []).length, 0);
+    if (allPre !== inFigures)
+      err(CHECK, `${rel(page)} has ${allPre - inFigures} code block(s) outside a <figure class="codex"> — every example needs a caption, a language and an anatomy`);
+
+    for (const f of figures) {
+      const attrs = f[1], body = f[2];
+      blocks++;
+      const langM = attrs.match(/data-lang="([^"]+)"/);
+      if (!langM) { err(CHECK, `${rel(page)}: a codex figure has no data-lang`); continue; }
+      const lang = langM[1];
+
+      if (!/<figcaption>/.test(body))
+        err(CHECK, `${rel(page)}: a ${lang} example has no <figcaption> saying what it is for`);
+
+      const preM = body.match(/<pre\b[^>]*>([\s\S]*?)<\/pre>/);
+      if (!preM) { err(CHECK, `${rel(page)}: a codex figure contains no <pre>`); continue; }
+      const code = decodeEntities(preM[1].replace(/<\/?code[^>]*>/g, ""));
+      const codeLines = code.split("\n").filter((l) => l.trim());
+      lines += codeLines.length;
+
+      /* (a) output blocks explain themselves in prose instead */
+      if (PROSE_LANGS.has(lang)) {
+        if (!/<div class="cx-conv">/.test(body))
+          err(CHECK, `${rel(page)}: a data-lang="${lang}" block has no <div class="cx-conv"> — output that is not explained is not an example`);
+        continue;
+      }
+
+      /* (b) a comment on every line */
+      const marks = COMMENT_MARK[lang];
+      if (!marks) { err(CHECK, `${rel(page)}: unknown data-lang="${lang}"`); continue; }
+      let inBlockComment = false;
+      codeLines.forEach((raw) => {
+        const line = raw.trim();
+        const opens = (line.match(/\/\*/g) || []).length;
+        const closes = (line.match(/\*\//g) || []).length;
+        const commented = inBlockComment || marks.some((m) => line.includes(m)) || opens > 0;
+        if (!commented)
+          err(CHECK, `${rel(page)}: uncommented line in a ${lang} example — "${line.slice(0, 62)}"`);
+        if (inBlockComment) { if (closes > 0) inBlockComment = false; }
+        else if (opens > closes) inBlockComment = true;
+      });
+
+      /* (c) every token is in the dictionary */
+      if (!/^(sql|tsql|plsql|plpgsql)$/.test(lang)) continue;
+      /*  Multi-word entries are consumed FIRST, exactly as codex.js does, or
+          "GROUP BY" is reported as two unknown words called GROUP and BY. The
+          two tokenisers have to agree about what a token is, or this check
+          fails on things the reader will never see a problem with. */
+      let bare = stripNoise(code);
+      for (const p of phraseKeys(dict))
+        bare = bare.replace(new RegExp("\\b" + p.replace(/ /g, "\\s+") + "\\b", "gi"), " ");
+      const seen = new Set();
+      for (const m of bare.matchAll(/\b[A-Z][A-Z_0-9]*\b/g)) seen.add(m[0]);
+      /*  Function CALLS, but only where the name is written the way SQL writes
+          its own: all upper or all lower. A MixedCase name is somebody's
+          user-defined function — dbo.fn_CalculateTax, MyHelper.IsInteresting —
+          and demanding a dictionary entry for every example UDF would make the
+          check about naming rather than about SQL. */
+      for (const m of bare.matchAll(/\b([A-Za-z_][A-Za-z_0-9]*)\s*\(/g))
+        if (/^[A-Z_0-9]+$/.test(m[1]) || /^[a-z_0-9]+$/.test(m[1])) seen.add(m[1].toUpperCase());
+      for (const tok of seen) {
+        if (tok.length < 2) continue;
+        if (/^[0-9_]+$/.test(tok)) continue;
+        if (TOKEN_ALLOW.has(tok)) continue;
+        if (dict[tok] || dict[tok + "_FN"]) continue;
+        /* An identifier written in caps — a table, a column, an alias — is not
+           a keyword. Only complain about words the SQL grammar could own: a
+           word that also appears lowercase somewhere in the same block is an
+           identifier, and a word containing a dot is qualified. */
+        if (new RegExp("\\b" + tok.toLowerCase() + "\\b").test(bare)) continue;
+        if (!unknown.has(tok)) unknown.set(tok, rel(page));
+      }
+    }
+  }
+
+  for (const [tok, where] of unknown)
+    err(CHECK, `"${tok}" appears in a code block (${where}) but is not in site/assets/syntax.js — the anatomy table would leave it unexplained`);
+
+  console.log(`  · ${blocks} annotated code blocks, ${lines} commented lines`);
+}
+
 /* ================================================================== main */
 
 console.log("\n  QueryForge doctor\n  " + "─".repeat(60));
 
 const man = await loadManifest();
 const quizzes = await loadQuizzes();
+const dict = await loadSyntax();
 
 await checkManifest(man);
 await checkSiteLinks();
@@ -590,6 +779,7 @@ await checkGenerated();
 await checkCoveredIn();
 await checkLabs();
 await checkCounts(man, quizzes);
+await checkCodeAnatomy(dict);
 
 const errors = findings.filter((f) => f.level === "ERROR");
 const warns = findings.filter((f) => f.level === "WARN");
@@ -603,9 +793,10 @@ for (const check of checksRun) {
   const w = list.filter((f) => f.level === "WARN").length;
   const mark = e ? "✗" : w ? "!" : "✓";
   console.log(`  ${mark} ${check.padEnd(22)} ${e ? e + " error(s) " : ""}${w ? w + " warning(s)" : e ? "" : "ok"}`);
-  for (const f of list.slice(0, 12))
+  const shown = SHOW_ALL ? list : list.slice(0, 12);
+  for (const f of shown)
     console.log(`      ${f.level === "ERROR" ? "ERROR" : "warn "}  ${f.msg}`);
-  if (list.length > 12) console.log(`      … and ${list.length - 12} more`);
+  if (list.length > shown.length) console.log(`      … and ${list.length - shown.length} more (run with --all)`);
 }
 
 console.log("  " + "─".repeat(60));

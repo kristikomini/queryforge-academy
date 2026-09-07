@@ -91,18 +91,39 @@
   </p>
 </div>
 
-<pre><code>-- Customers who have ordered (semi-join). One row each, however many orders.
-SELECT c.* FROM customers c
-WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The two joins with no keyword: &ldquo;has at least one&rdquo; and &ldquo;has none&rdquo;, written three ways.</figcaption>
+<pre><code>-- SEMI-JOIN: customers who have ordered. One row each, however many orders.
+SELECT c.* FROM customers c                 -- only the LEFT table's columns come back
+WHERE EXISTS (SELECT 1 FROM orders o        -- SELECT 1 is never evaluated: only existence matters
+              WHERE o.customer_id = c.id);  -- correlated: c.id comes from the outer query
 
--- Customers who have never ordered (anti-join).
-SELECT c.* FROM customers c
-WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+-- ANTI-JOIN: customers who have never ordered.
+SELECT c.* FROM customers c                 -- same shape…
+WHERE NOT EXISTS (SELECT 1 FROM orders o    -- …with the existence test inverted
+                  WHERE o.customer_id = c.id);   -- null-safe, unlike NOT IN
 
 -- The same anti-join, the older way. Identical plan in most engines.
-SELECT c.* FROM customers c
-LEFT JOIN orders o ON o.customer_id = c.id
-WHERE o.id IS NULL;</code></pre>
+SELECT c.* FROM customers c                 -- the same question, no subquery this time
+LEFT JOIN orders o ON o.customer_id = c.id  -- pad unmatched customers with NULLs…
+WHERE o.id IS NULL;                         -- …then keep only the padded ones
+</code></pre>
+<div class="cx-conv">
+  <b>Why <code>NOT EXISTS</code> and not <code>NOT IN</code></b>
+  <ul>
+    <li><code>NOT IN (…)</code> expands to a chain of <code>&lt;&gt;</code> joined by
+      <code>AND</code>. One NULL in the subquery makes the last term UNKNOWN, so the whole chain can
+      never be TRUE and the result is <strong>empty</strong> — not an error, not a warning, just no
+      rows.</li>
+    <li><code>NOT EXISTS</code> asks a two-valued question — does a row exist — so NULLs cannot make
+      it UNKNOWN. This is the single most-tested fact in SQL interviews, and it has caused silent
+      data loss in reports that &ldquo;worked yesterday&rdquo;.</li>
+    <li>The <code>LEFT JOIN … IS NULL</code> spelling relies on <code>o.id</code> being
+      <code>NOT NULL</code> in the table: the only way it can be NULL in the result is if the padding
+      put it there. Test a nullable column instead and the anti-join is wrong.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — <code>NOT IN</code> and a single NULL</div>
@@ -170,15 +191,39 @@ WHERE o.id IS NULL;</code></pre>
   </p>
 </div>
 
-<pre><code>-- Correct: pre-aggregate, then join one-to-one.
-SELECT o.id,
-       l.line_total_cents,
-       COALESCE(p.paid_cents, 0) AS paid_cents
-FROM orders o
-LEFT JOIN (SELECT order_id, SUM(quantity * unit_price_cents) AS line_total_cents
-           FROM order_lines GROUP BY order_id) l ON l.order_id = o.id
-LEFT JOIN (SELECT order_id, SUM(amount_cents) AS paid_cents
-           FROM payments GROUP BY order_id)    p ON p.order_id = o.id;</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The fix for fan-out: aggregate each child branch first, then join one row to one row.</figcaption>
+<pre><code>-- Correct: pre-aggregate each branch, then join one-to-one.
+SELECT o.id,                                              -- one row per order, guaranteed
+       l.line_total_cents,                                -- already summed, cannot be doubled
+       COALESCE(p.paid_cents, 0) AS paid_cents            -- no payments → NULL → show 0
+FROM orders o                                             -- the parent: read once
+LEFT JOIN (SELECT order_id, SUM(quantity * unit_price_cents) AS line_total_cents  -- branch 1
+           FROM order_lines GROUP BY order_id) l          -- ONE row per order_id, by construction
+       ON l.order_id = o.id                               -- so this join cannot multiply rows
+LEFT JOIN (SELECT order_id, SUM(amount_cents) AS paid_cents  -- branch 2, aggregated the same way
+           FROM payments GROUP BY order_id)    p          -- likewise: one row per order_id
+       ON p.order_id = o.id;                              -- two one-to-one joins, no fan-out
+</code></pre>
+<div class="cx-conv">
+  <b>The arithmetic that goes wrong without this</b>
+  <ul>
+    <li>Joining <code>orders</code> to two one-to-many children at once produces
+      <em>lines × payments</em> rows per order. Two lines and three payments give six rows, so
+      <code>SUM(line_total)</code> counts each line three times and <code>SUM(amount)</code> counts
+      each payment twice. Both totals are wrong, in different directions, and the query returns
+      cheerfully.</li>
+    <li><code>SUM(quantity * unit_price_cents)</code> — INTEGER × INTEGER, so INTEGER cents. Watch
+      the width: in SQL Server this sum is an <code>INT</code> and can overflow, and
+      <code>SUM(CAST(… AS BIGINT))</code> is the fix.</li>
+    <li><code>COALESCE(p.paid_cents, 0)</code> — the padded side of a <code>LEFT JOIN</code> is NULL,
+      and NULL is not zero. Without the <code>COALESCE</code>, &ldquo;unpaid&rdquo; renders as an
+      empty cell and any arithmetic on it produces NULL.</li>
+    <li><code>DISTINCT</code> would remove the duplicate <em>rows</em> and leave the sums wrong. It
+      is the fix that hides the bug.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="algorithms">The three join algorithms</h2>
 
@@ -210,13 +255,31 @@ LEFT JOIN (SELECT order_id, SUM(amount_cents) AS paid_cents
 </div>
 
 <div class="tryit">
-  <pre><code>-- Every customer and their order count, INCLUDING those with none.
--- COUNT(o.id) not COUNT(*): COUNT(*) counts the null-padded row as 1.
-SELECT c.name, COUNT(o.id) AS n
-FROM customers c
-LEFT JOIN orders o ON o.customer_id = c.id
-GROUP BY c.name
-ORDER BY n DESC;</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Counting through an outer join &mdash; and the one-character difference that decides whether &ldquo;none&rdquo; comes back as 0 or 1.</figcaption>
+<pre><code>-- Every customer and their order count, INCLUDING those with none.
+SELECT c.name,                              -- the preserved side: every customer appears
+       COUNT(o.id) AS n                     -- counts non-NULL ids, so no orders → 0
+FROM customers c                            -- every customer, matched or not
+LEFT JOIN orders o ON o.customer_id = c.id  -- unmatched customers get a NULL-padded order
+GROUP BY c.name                             -- one row per customer name
+ORDER BY n DESC;                            -- busiest first; n is the SELECT alias
+</code></pre>
+<div class="cx-conv">
+  <b><code>COUNT(o.id)</code> versus <code>COUNT(*)</code></b>
+  <ul>
+    <li><code>COUNT(*)</code> counts <strong>rows</strong>, and a customer with no orders still has
+      one row — the padded one. It would report <strong>1</strong>. This is the most common outer-join
+      bug there is.</li>
+    <li><code>COUNT(o.id)</code> counts <strong>non-NULL values</strong> of that column, and the
+      padding is NULL, so it reports <strong>0</strong>. Both return BIGINT, and neither is ever
+      itself NULL.</li>
+    <li><code>GROUP BY c.name</code> groups by the <em>name</em>, so two different customers with the
+      same name would merge into one row. <code>GROUP BY c.id, c.name</code> is the honest version —
+      a small thing, and exactly the kind of detail an interviewer is listening for.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -268,7 +331,9 @@ ORDER BY n DESC;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

@@ -202,17 +202,38 @@
   </p>
 </div>
 
-<pre><code>-- Portable: works everywhere
-SELECT customer_id, SUM(total_cents) AS spend
-FROM orders
-WHERE placed_at &gt;= DATE '2026-01-01'
-GROUP BY customer_id;
+<figure class="codex" data-lang="sql">
+<figcaption>The same question written twice: once in SQL every engine understands, and once in the four spellings of &ldquo;give me the first ten rows&rdquo;.</figcaption>
+<pre><code>-- PORTABLE HALF. These five lines run unchanged on SQL Server, PostgreSQL,
+-- MySQL, Oracle and SQLite. About 85% of what you write is like this.
+SELECT customer_id,                     -- the grouping key: one output row per customer
+       SUM(total_cents) AS spend        -- adds the cents of every order in that group
+FROM orders                             -- the one table this query reads
+WHERE placed_at &gt;= DATE '2026-01-01'    -- typed literal: DATE '…' is a date, not text
+GROUP BY customer_id;                   -- collapses the rows; SUM() runs once per group
 
--- Top-N, and the four spellings you will meet
-SELECT ... FETCH FIRST 10 ROWS ONLY;   -- standard, Oracle 12c+, PostgreSQL, DB2
-SELECT ... LIMIT 10;                   -- PostgreSQL, MySQL, MariaDB, SQLite
-SELECT TOP (10) ...;                   -- SQL Server
-WHERE ROWNUM &lt;= 10;                    -- Oracle, legacy, and NOT the same thing</code></pre>
+-- DIALECT HALF. One question — "the first ten" — and four keyword spellings.
+SELECT ... FETCH FIRST 10 ROWS ONLY;    -- the standard: Oracle 12c+, PostgreSQL, DB2
+SELECT ... LIMIT 10;                    -- PostgreSQL, MySQL, MariaDB, SQLite
+SELECT TOP (10) ...;                    -- SQL Server, and it goes BEFORE the column list
+WHERE ROWNUM &lt;= 10;                     -- Oracle legacy, and NOT equivalent — see below
+</code></pre>
+<div class="cx-conv">
+  <b>Types and conversions in this example</b>
+  <ul>
+    <li><code>DATE '2026-01-01'</code> — a <em>typed literal</em>. Without the <code>DATE</code>
+      prefix this is the string <code>'2026-01-01'</code>, and the engine converts it to a date
+      because the column is one. That conversion is usually right and occasionally not: it depends
+      on the session's date format, which is why the explicit spelling exists.</li>
+    <li><code>SUM(total_cents)</code> — INTEGER in, INTEGER out. Cents stay cents; nothing here can
+      produce a fraction, which is exactly why money is stored this way (<a href="03-data-types.html">chapter 03</a>).</li>
+    <li><code>WHERE ROWNUM &lt;= 10</code> — the trap. Oracle assigns <code>ROWNUM</code> as rows
+      are produced, <strong>before</strong> <code>ORDER BY</code> sorts them, so this returns ten
+      arbitrary rows and then sorts those ten. <code>FETCH FIRST</code> sorts first. They only agree
+      when there is no <code>ORDER BY</code>, and then neither is meaningful.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="tryit">
   <p>
@@ -220,10 +241,29 @@ WHERE ROWNUM &lt;= 10;                    -- Oracle, legacy, and NOT the same th
     the reference order-fulfilment database loaded. Run this and read the shape of the answer
     before you read the rest of this course:
   </p>
-  <pre><code>SELECT status, COUNT(*) AS n, SUM(total_cents) / 100.0 AS eur
-FROM orders
-GROUP BY status
-ORDER BY n DESC;</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Your first query of the course: how many orders sit in each status, and what they are worth.</figcaption>
+<pre><code>SELECT status,                          -- one output row per distinct status value
+       COUNT(*)          AS n,          -- COUNT(*) counts ROWS, and is never NULL
+       SUM(total_cents) / 100.0 AS eur  -- cents → euros: /100.0 keeps the fraction
+FROM orders                             -- the table; read first, before anything else
+GROUP BY status                         -- what "each" means: collapse rows by status
+ORDER BY n DESC;                        -- biggest group first; n is the SELECT alias
+</code></pre>
+<div class="cx-conv">
+  <b>Types and conversions in this example</b>
+  <ul>
+    <li><code>SUM(total_cents) / 100.0</code> — the whole reason for the <code>.0</code>. The sum is
+      an INTEGER; dividing it by the INTEGER <code>100</code> would truncate (<code>1250 / 100</code>
+      is <code>12</code>, not <code>12.5</code>). The literal <code>100.0</code> is a REAL, so the
+      engine widens the whole expression to REAL and keeps the cents.</li>
+    <li><code>ORDER BY n</code> — legal, and worth noticing: <code>ORDER BY</code> runs
+      <em>after</em> <code>SELECT</code>, so it can see the alias <code>n</code>. Writing
+      <code>WHERE n &gt; 5</code> instead would be an error, because <code>WHERE</code> runs before
+      the alias exists (<a href="06-how-select-is-evaluated.html">chapter 06</a>).</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="use">How to use this course</h2>
@@ -290,7 +330,9 @@ ORDER BY n DESC;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

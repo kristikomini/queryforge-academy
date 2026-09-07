@@ -37,12 +37,31 @@
   repeating because date filtering is where it happens most:
 </p>
 
-<pre><code>WHERE YEAR(placed_at) = 2026                              -- scan
-WHERE CAST(placed_at AS DATE) = '2026-03-14'              -- scan
-WHERE DATE_TRUNC('day', placed_at) = '2026-03-14'         -- scan
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Four ways to ask for one day. Three of them read the whole table.</figcaption>
+<pre><code>WHERE YEAR(placed_at) = 2026                        -- scan: a function on the indexed column
+WHERE CAST(placed_at AS DATE) = '2026-03-14'        -- scan: CAST is a function too
+WHERE DATE_TRUNC('day', placed_at) = '2026-03-14'   -- scan: so is truncation
 
-WHERE placed_at &gt;= DATE '2026-03-14'
-  AND placed_at &lt;  DATE '2026-03-15'                      -- seek</code></pre>
+WHERE placed_at &gt;= DATE '2026-03-14'                -- seek: a plain lower bound…
+  AND placed_at &lt;  DATE '2026-03-15'                -- …and an EXCLUSIVE upper bound
+</code></pre>
+<div class="cx-conv">
+  <b>Why the last one is the only sargable spelling</b>
+  <ul>
+    <li>The index stores <code>placed_at</code>. It does not store <code>YEAR(placed_at)</code>,
+      <code>CAST(placed_at AS DATE)</code> or the truncation — each of those is a different value the
+      engine has to compute per row before it can compare.</li>
+    <li>The half-open range works at any precision. <code>&lt;= '2026-03-14 23:59:59'</code> loses
+      rows in the last second of the day the moment the column gains milliseconds — and columns gain
+      precision in migrations.</li>
+    <li>Some engines can use an <em>expression index</em> to rescue the first three
+      (<code>CREATE INDEX … ON orders (CAST(placed_at AS DATE))</code>). That is a deliberate
+      decision to pay for a second index, not an excuse to write the predicate this way by
+      accident.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ The half-open habit</div>
@@ -89,13 +108,34 @@ WHERE placed_at &gt;= DATE '2026-03-14'
   </p>
 </div>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Converting a stored UTC instant into local time, in the two dialects you are most likely to meet.</figcaption>
 <pre><code>-- PostgreSQL: the conversion is a first-class operation.
-SELECT placed_at AT TIME ZONE 'Europe/Rome' AS local_time FROM orders;
+SELECT placed_at AT TIME ZONE 'Europe/Rome'   -- IANA name: knows about daylight saving…
+       AS local_time                          -- …so it is right in both halves of the year
+FROM orders;                                  -- placed_at is stored as UTC
 
--- SQL Server 2016+:
-SELECT placed_at AT TIME ZONE 'UTC' AT TIME ZONE 'W. Europe Standard Time' FROM orders;
---     ^ tell it what the stored value IS, then what you want.
---     Note the Windows zone names differ from the IANA ones. Of course they do.</code></pre>
+-- SQL Server 2016+: two conversions, and you must state the starting point.
+SELECT placed_at AT TIME ZONE 'UTC'                        -- 1. "what is stored IS UTC"…
+                 AT TIME ZONE 'W. Europe Standard Time'    -- 2. "…now show it in Rome"
+FROM orders;                                               -- Windows zone names, not IANA
+</code></pre>
+<div class="cx-conv">
+  <b>The rule, and the trap in zone names</b>
+  <ul>
+    <li><strong>Store UTC, convert at the edges.</strong> A timestamp column holds an instant; a
+      timezone is a presentation concern. The moment two services disagree about what the stored
+      value means, every report is wrong by an hour for half the year.</li>
+    <li>Store the zone as an IANA <em>name</em> (<code>Europe/Rome</code>), never as a fixed offset
+      (<code>+02:00</code>). An offset is a fact about one instant; a name is a fact about a place,
+      and it survives the next change to the daylight-saving rules.</li>
+    <li>SQL Server needs the first <code>AT TIME ZONE 'UTC'</code> because a plain
+      <code>DATETIME2</code> carries no zone: without it, the server assumes the value is already in
+      the target zone and shifts it twice.</li>
+    <li>Windows and IANA use different zone names. There is no way round it but a lookup table.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="dialects">The date functions, four ways</h2>
 
@@ -124,11 +164,29 @@ SELECT placed_at AT TIME ZONE 'UTC' AT TIME ZONE 'W. Europe Standard Time' FROM 
 
 <h2 id="strings">Strings: the functions and the two real traps</h2>
 
-<pre><code>-- Portable-ish
-UPPER(s) LOWER(s) LENGTH(s) TRIM(s) REPLACE(s, a, b)
-SUBSTRING(s FROM 2 FOR 5)          -- standard; SUBSTR / SUBSTRING(s, 2, 5) elsewhere
-s || t                             -- standard concat; SQL Server uses +, MySQL CONCAT()
-POSITION('x' IN s)                 -- CHARINDEX in T-SQL, INSTR in Oracle/MySQL</code></pre>
+<figure class="codex" data-lang="text">
+<figcaption>The string functions worth knowing by heart, with the dialect spellings beside them.</figcaption>
+<pre><code>-- Portable-ish. The idea is universal; the spelling is not.
+UPPER(s) LOWER(s) LENGTH(s) TRIM(s) REPLACE(s, a, b)  -- LEN(s) in T-SQL, and it ignores trailing spaces
+SUBSTRING(s FROM 2 FOR 5)          -- standard; SUBSTR(s, 2, 5) or SUBSTRING(s, 2, 5) elsewhere
+s || t                             -- standard concatenation; T-SQL uses +, MySQL needs CONCAT()
+POSITION('x' IN s)                 -- CHARINDEX('x', s) in T-SQL, INSTR(s, 'x') in Oracle/MySQL
+</code></pre>
+<div class="cx-conv">
+  <b>How to read this, and the two things that will bite you</b>
+  <ul>
+    <li>A reference list, not a runnable statement: each line is one operation with its portable
+      spelling first.</li>
+    <li><strong>SQL strings are 1-indexed.</strong> <code>SUBSTRING(s, 1, 5)</code> is the first five
+      characters — unlike every application language you will call it from.</li>
+    <li><code>LENGTH</code> counts <em>characters</em>, not bytes: <code>LENGTH('è')</code> is 1 while
+      its UTF-8 encoding is 2 bytes. SQL Server's <code>LEN</code> additionally ignores trailing
+      spaces, and <code>DATALENGTH</code> is the byte count.</li>
+    <li><code>||</code> propagates NULL — one NULL part erases the whole string — while
+      <code>CONCAT()</code> treats NULL as empty by definition. Choose deliberately.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap 1 — <code>LEN</code> vs <code>DATALENGTH</code></div>
@@ -153,12 +211,31 @@ POSITION('x' IN s)                 -- CHARINDEX in T-SQL, INSTR in Oracle/MySQL<
 </div>
 
 <div class="tryit">
-  <pre><code>-- Normalising a messy imported column, the pattern you will use constantly:
-SELECT
-  NULLIF(TRIM(LOWER(email)), '')                      AS email_norm,
-  REPLACE(REPLACE(TRIM(vat_number), ' ', ''), '.', '') AS vat_norm
-FROM staging_customers;
--- Then dedupe on email_norm, not on email. See chapter 15.</code></pre>
+  <figure class="codex" data-lang="sql">
+<figcaption>Normalising a messy imported column: the pattern you will use in every data-loading job.</figcaption>
+<pre><code>SELECT                                                                 -- the cleaned columns
+  NULLIF(TRIM(LOWER(email)), '')                       AS email_norm,  -- lower, trim, blank→NULL
+  REPLACE(REPLACE(TRIM(vat_number), ' ', ''), '.', '') AS vat_norm     -- strip spaces, then dots
+FROM staging_customers;                                                -- the raw import table
+-- Then deduplicate on email_norm, never on the raw email. See chapter 15.
+</code></pre>
+<div class="cx-conv">
+  <b>Reading it inside out</b>
+  <ul>
+    <li>Function calls nest, so the innermost runs first: <code>LOWER</code>, then
+      <code>TRIM</code>, then <code>NULLIF</code>. Written outside in, it reads backwards — which is
+      why this idiom is worth recognising as a whole rather than parsing each time.</li>
+    <li><code>NULLIF(x, '')</code> turns the empty string into NULL. That matters because
+      <code>''</code> and NULL are different values everywhere except Oracle, and an import that
+      produces both means two spellings of &ldquo;missing&rdquo; in one column.</li>
+    <li>Nested <code>REPLACE</code> is the portable way to strip several characters. It is also
+      <strong>O(n) passes over the string</strong> — fine in a load job, not something to put in a
+      <code>WHERE</code> clause on a hot query.</li>
+    <li>Normalise on the way <em>in</em> and store the normalised form. Normalising on the way out
+      means every query pays for it and no index can help.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="calendar">The calendar table</h2>
@@ -224,7 +301,9 @@ FROM staging_customers;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

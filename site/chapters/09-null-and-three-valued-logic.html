@@ -74,20 +74,74 @@
 <h2 id="six">Six places NULL changes the answer</h2>
 
 <h3>1 · <code>= NULL</code> never matches</h3>
-<pre><code>WHERE shipped_at = NULL      -- always empty, even for unshipped orders
-WHERE shipped_at IS NULL     -- correct</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The first place NULL changes the answer: equality cannot test it.</figcaption>
+<pre><code>WHERE shipped_at = NULL      -- ALWAYS empty — even for rows where shipped_at really is NULL
+WHERE shipped_at IS NULL     -- correct: IS NULL is the only operator that can see a NULL
+</code></pre>
+<div class="cx-conv">
+  <b>Why the first line matches nothing</b>
+  <ul>
+    <li>NULL means <em>unknown</em>, so <code>unknown = unknown</code> is not TRUE — it is UNKNOWN.
+      <code>WHERE</code> keeps only TRUE, so the row is discarded.</li>
+    <li>It is not an error and no engine warns you. The query returns zero rows and looks like a
+      correct answer to a question about a table that happens to be empty.</li>
+    <li>The same applies to <code>&lt;&gt; NULL</code>, <code>&gt; NULL</code> and every other
+      comparison. Only <code>IS NULL</code>, <code>IS NOT NULL</code> and
+      <code>IS DISTINCT FROM</code> can see through it.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>2 · <code>NOT IN</code> collapses</h3>
-<pre><code>-- If ANY row of the subquery is NULL, this returns zero rows.
-WHERE id NOT IN (SELECT customer_id FROM orders)   -- customer_id nullable? empty result.
-WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id)   -- correct</code></pre>
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The second place: one NULL anywhere in the subquery empties the whole result.</figcaption>
+<pre><code>-- If ANY row of the subquery is NULL, this returns ZERO rows. Silently.
+WHERE id NOT IN (SELECT customer_id FROM orders)  -- customer_id nullable? empty result.
+WHERE NOT EXISTS (SELECT 1 FROM orders o          -- correct, and null-safe
+                  WHERE o.customer_id = c.id);    -- the correlation, again
+</code></pre>
+<div class="cx-conv">
+  <b>The expansion that causes it</b>
+  <ul>
+    <li><code>x NOT IN (1, 2, NULL)</code> is shorthand for
+      <code>x &lt;&gt; 1 AND x &lt;&gt; 2 AND x &lt;&gt; NULL</code>. The last term is UNKNOWN for
+      every possible <code>x</code>, and <code>TRUE AND UNKNOWN</code> is UNKNOWN — so the whole
+      conjunction is never TRUE and no row survives.</li>
+    <li><code>NOT EXISTS</code> asks whether a row <em>exists</em>. That is a two-valued question,
+      so there is no UNKNOWN to swallow the result.</li>
+    <li>If you must keep <code>NOT IN</code>, add <code>WHERE customer_id IS NOT NULL</code> to the
+      subquery. It works — and it is one edit away from being wrong again the day somebody removes
+      it.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>3 · Aggregates ignore NULL — except <code>COUNT(*)</code></h3>
-<pre><code>-- 4 rows: 10, 20, NULL, 30
-COUNT(*)        -- 4   counts ROWS
-COUNT(amount)   -- 3   counts NON-NULL VALUES
-SUM(amount)     -- 60  ignores the null
-AVG(amount)     -- 20  = 60/3, NOT 60/4  ← the one that produces wrong reports</code></pre>
+<figure class="codex" data-lang="text">
+<figcaption>The third place, and the one that quietly produces wrong reports: what each aggregate does with a NULL.</figcaption>
+<pre><code>-- Four rows in the column `amount`: 10, 20, NULL, 30
+COUNT(*)        -- 4    counts ROWS. Never NULL, never affected by the values.
+COUNT(amount)   -- 3    counts NON-NULL VALUES of that column
+SUM(amount)     -- 60   ignores the null. NULL over an empty set, though — not 0.
+AVG(amount)     -- 20   = 60/3, NOT 60/4  ← the one that produces wrong reports
+</code></pre>
+<div class="cx-conv">
+  <b>How to read this, and what to do about it</b>
+  <ul>
+    <li>This is a reference list, not a runnable statement: four expressions over the same four
+      rows, with the answer each one gives.</li>
+    <li><code>AVG</code> divides by the count of <strong>non-null</strong> values. If NULL means
+      &ldquo;nothing happened&rdquo; — no discount, no refund — then the honest average is over four
+      rows, and you must write <code>AVG(COALESCE(amount, 0))</code> to get it.</li>
+    <li>If NULL means &ldquo;we do not know&rdquo;, then skipping it is right and the default is what
+      you want. The bug is never in the function; it is in not deciding which of the two your NULL
+      means.</li>
+    <li><code>SUM</code> over <em>no rows at all</em> returns NULL rather than 0. A total on a
+      dashboard should therefore be <code>COALESCE(SUM(x), 0)</code>.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap</div>
@@ -107,8 +161,27 @@ AVG(amount)     -- 20  = 60/3, NOT 60/4  ← the one that produces wrong reports
   SQL Server behaviour. If you need "at most one active row per customer", use a
   <strong>filtered/partial unique index</strong> instead of relying on null semantics:
 </p>
-<pre><code>CREATE UNIQUE INDEX uq_one_active_cart
-  ON carts (customer_id) WHERE status = 'active';   -- PostgreSQL, SQL Server</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>&ldquo;At most one active cart per customer&rdquo; &mdash; enforced by a partial index rather than by hoping about NULLs.</figcaption>
+<pre><code>CREATE UNIQUE INDEX uq_one_active_cart      -- a UNIQUE index is a constraint that is also fast
+  ON carts (customer_id)                    -- the key: one entry per customer…
+  WHERE status = 'active';                  -- …but only over the rows that match. PostgreSQL, SQL Server.
+</code></pre>
+<div class="cx-conv">
+  <b>Why not just rely on NULL</b>
+  <ul>
+    <li>Most engines allow <em>many</em> NULLs in a unique column, because two NULLs are not equal.
+      SQL Server allows exactly one. So &ldquo;make the closed carts NULL and let UNIQUE sort it
+      out&rdquo; behaves differently on two engines — and one of the behaviours is a production
+      incident.</li>
+    <li>A <strong>partial</strong> (PostgreSQL) or <strong>filtered</strong> (SQL Server) index states
+      the rule directly: unique <em>among active rows</em>. It is smaller than a full index, and it
+      is checked by the engine on every write, which no application code can bypass.</li>
+    <li>MySQL and SQLite have no filtered index. There the portable trick is a generated column that
+      is <code>customer_id</code> when active and NULL otherwise, with a unique index on it.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>5 · <code>ORDER BY</code> disagrees across engines</h3>
 <p>
@@ -118,10 +191,26 @@ AVG(amount)     -- 20  = 60/3, NOT 60/4  ← the one that produces wrong reports
 </p>
 
 <h3>6 · Concatenation and arithmetic propagate</h3>
-<pre><code>'Rossi' || NULL      -- NULL in PostgreSQL, SQL Server, SQLite
-                     -- (Oracle treats '' as NULL and concatenation ignores it)
-100 + NULL           -- NULL, everywhere
-CONCAT('Rossi', NULL) -- 'Rossi' — CONCAT() deliberately ignores nulls</code></pre>
+<figure class="codex" data-lang="text">
+<figcaption>The sixth place: NULL propagates through arithmetic and concatenation &mdash; except where a function is defined not to.</figcaption>
+<pre><code>'Rossi' || NULL       -- NULL in PostgreSQL, SQL Server, SQLite: one unknown poisons the whole
+                      -- (Oracle treats '' as NULL and concatenation ignores it — a real difference)
+100 + NULL            -- NULL, everywhere. Unknown plus a hundred is still unknown.
+CONCAT('Rossi', NULL) -- 'Rossi' — CONCAT() is DEFINED to treat NULL as an empty string
+</code></pre>
+<div class="cx-conv">
+  <b>How to read this, and the practical consequence</b>
+  <ul>
+    <li>Four expressions with the value each produces — not a statement to run.</li>
+    <li>The classic symptom: an address label built as
+      <code>street || ' ' || suite || ' ' || city</code> comes out completely blank for everybody
+      with no suite number. One NULL in the middle erases the entire string.</li>
+    <li>Two fixes: <code>CONCAT(…)</code>, which ignores NULLs by definition, or
+      <code>COALESCE(suite, '')</code> around each nullable part. Prefer the first — it says the
+      intention rather than patching each hole.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="tools">The tools for handling it</h2>
 
@@ -138,10 +227,29 @@ CONCAT('Rossi', NULL) -- 'Rossi' — CONCAT() deliberately ignores nulls</code><
 </div>
 
 <div class="tryit">
-  <pre><code>-- NULLIF as a division guard: no CASE, no error.
-SELECT delivered_count * 1.0 / NULLIF(total_count, 0) AS delivery_rate
-FROM daily_stats;
--- total_count = 0 gives NULL ("undefined"), which is honest, rather than an error.</code></pre>
+  <figure class="codex" data-lang="sql">
+<figcaption><code>NULLIF</code> as a division guard: no <code>CASE</code>, no error, and an honest answer.</figcaption>
+<pre><code>-- Divide-by-zero without a CASE, and without an exception.
+SELECT delivered_count * 1.0                 -- * 1.0 forces REAL: integer division would truncate
+       / NULLIF(total_count, 0) AS delivery_rate  -- 0 becomes NULL, and x / NULL is NULL
+FROM daily_stats;                            -- one row per day, already aggregated
+-- total_count = 0 now gives NULL ("undefined"), which is honest, rather than an error.
+</code></pre>
+<div class="cx-conv">
+  <b>Two conversions doing the work</b>
+  <ul>
+    <li><code>* 1.0</code> — without it, <code>delivered_count / total_count</code> is INTEGER ÷
+      INTEGER, so a rate of 0.83 arrives as <strong>0</strong>. This is the single most common
+      silent arithmetic bug in SQL reports.</li>
+    <li><code>NULLIF(total_count, 0)</code> — returns NULL when the two arguments are equal.
+      Dividing by NULL yields NULL instead of raising, so one row with no data cannot abort a report
+      over a million rows.</li>
+    <li>Render the NULL deliberately at the edge: <code>COALESCE(rate, 0)</code> if a dash is
+      unacceptable in the UI. The point is that the database says &ldquo;undefined&rdquo; and the
+      presentation layer decides how to draw it.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="design">Designing so it comes up less</h2>
@@ -220,7 +328,9 @@ FROM daily_stats;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

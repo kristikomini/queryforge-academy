@@ -90,47 +90,144 @@
     tool.</li>
 </ul>
 
-<pre><code>-- Reconciliation: exactly what differs between two tables, nulls included.
-SELECT * FROM staging_customers
-EXCEPT
-SELECT * FROM customers;          -- rows arriving or changed
+<figure class="codex" data-lang="sql">
+<figcaption><code>EXCEPT</code> as a table diff &mdash; the fastest reconciliation query you will ever write.</figcaption>
+<pre><code>-- Reconciliation: exactly what differs between two tables, NULLs included.
+SELECT * FROM staging_customers   -- everything that arrived…
+EXCEPT                            -- …minus…
+SELECT * FROM customers;          -- …everything we already have = new or changed rows
 
-SELECT * FROM customers
-EXCEPT
-SELECT * FROM staging_customers;  -- rows that vanished
+SELECT * FROM customers           -- and the other direction…
+EXCEPT                            -- …same operator…
+SELECT * FROM staging_customers;  -- …= rows that have vanished from the feed
 
--- One query, labelled, and it is the fastest schema-diff you will ever write:
-SELECT 'only in staging' AS side, * FROM (SELECT * FROM staging_customers EXCEPT SELECT * FROM customers) a
-UNION ALL
-SELECT 'only in live',      * FROM (SELECT * FROM customers EXCEPT SELECT * FROM staging_customers) b;</code></pre>
+-- One query, labelled, and it is the whole diff in a single result set:
+SELECT 'only in staging' AS side, *                                    -- label the side…
+FROM (SELECT * FROM staging_customers EXCEPT SELECT * FROM customers) a  -- …around diff 1
+UNION ALL                                                              -- stack, keep duplicates
+SELECT 'only in live', *                                               -- the other label…
+FROM (SELECT * FROM customers EXCEPT SELECT * FROM staging_customers) b; -- …around diff 2
+</code></pre>
+<div class="cx-conv">
+  <b>The NULL rule that makes this work</b>
+  <ul>
+    <li>Set operators compare rows with <strong>NULL treated as equal to NULL</strong> — the exact
+      opposite of <code>=</code>. So two rows that are identical, NULLs and all, cancel out, and a
+      join-based diff on nullable columns cannot do that without <code>IS NOT DISTINCT FROM</code> on
+      every column.</li>
+    <li><code>EXCEPT</code> also deduplicates. If <code>staging_customers</code> contains the same
+      row twice, the diff shows it once — which is usually what you want from a reconciliation and
+      occasionally not.</li>
+    <li>Both sides must have the same number of columns with compatible types, so
+      <code>SELECT *</code> here quietly asserts that the two tables have the same shape. When they
+      diverge, this query fails loudly — which is a feature.</li>
+    <li>Oracle spells it <code>MINUS</code>; MySQL had no <code>EXCEPT</code> before 8.0.31.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="dedupe">Four ways to delete duplicate rows</h2>
 
 <p>A staple of screening tests. Know at least two, and know which is portable.</p>
 
 <h3>1 · <code>ROW_NUMBER</code> — portable, and the one to give first</h3>
-<pre><code>WITH d AS (
-  SELECT id, ROW_NUMBER() OVER (PARTITION BY email ORDER BY updated_at DESC, id DESC) AS rn
-  FROM customers
-)
-DELETE FROM customers WHERE id IN (SELECT id FROM d WHERE rn &gt; 1);</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>De-duplication, method one: <code>ROW_NUMBER</code>. Portable, and the answer to give first.</figcaption>
+<pre><code>WITH d AS (                                          -- name the duplicates before deleting anything
+  SELECT id,                                         -- the key is all the delete needs
+         ROW_NUMBER() OVER (PARTITION BY email       -- one counter per email address…
+                            ORDER BY updated_at DESC,-- …newest first…
+                                     id DESC) AS rn  -- …with a deterministic tie-breaker
+  FROM customers                                     -- read every row once
+)                                                    -- end of the CTE
+DELETE FROM customers                                -- now the write
+WHERE id IN (SELECT id FROM d WHERE rn &gt; 1);         -- everything that is not the survivor
+</code></pre>
+<div class="cx-conv">
+  <b>Why this one first</b>
+  <ul>
+    <li>It works on every engine that has window functions — SQL Server 2005+, PostgreSQL, Oracle,
+      MySQL 8, SQLite 3.25+ — and it lets you say <em>which</em> duplicate survives, which
+      <code>MIN(id)</code> cannot.</li>
+    <li>Run it as a <code>SELECT</code> first. Every time.</li>
+    <li>Finish the job with the unique index that should have existed:
+      <code>CREATE UNIQUE INDEX … ON customers (email)</code>. A clean-up without a constraint is a
+      chore you have agreed to repeat.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>2 · <code>MIN(id)</code> per group — works on any engine, including ancient ones</h3>
-<pre><code>DELETE FROM customers
-WHERE id NOT IN (SELECT MIN(id) FROM customers GROUP BY email);
--- MySQL needs the subquery wrapped in another derived table: it will not read
--- from the table it is deleting from. Wrap it: (SELECT * FROM (…) x)</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Method two: <code>MIN(id)</code> per group &mdash; works on engines too old for window functions.</figcaption>
+<pre><code>DELETE FROM customers                                       -- the write…
+WHERE id NOT IN (SELECT MIN(id) FROM customers              -- …of every row that is not…
+                 GROUP BY email);                           -- …the lowest id for its email
+-- MySQL will not read from the table it is deleting from. Wrap the subquery in
+-- another derived table to get round it:  (SELECT * FROM (…) x)
+</code></pre>
+<div class="cx-conv">
+  <b>Two things to check before running it</b>
+  <ul>
+    <li><code>NOT IN</code> — and this time it is safe only because <code>MIN(id)</code> over a
+      non-empty group cannot be NULL, and <code>id</code> is <code>NOT NULL</code>. Change either
+      assumption and this statement deletes nothing, silently
+      (<a href="09-null-and-three-valued-logic.html">chapter 09</a>).</li>
+    <li>&ldquo;Lowest id survives&rdquo; means &ldquo;oldest row survives&rdquo;, which is often the
+      opposite of what the business wants: the newest record usually holds the corrected data.</li>
+    <li>On a large table this is one scan per group evaluation and can be far slower than the window
+      version. It is the compatibility answer, not the fast one.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>3 · A physical row identifier — when there is no key at all</h3>
-<pre><code>-- PostgreSQL. The rows are IDENTICAL, so nothing distinguishes them but their location.
-DELETE FROM t a USING t b WHERE a.ctid &gt; b.ctid AND a.email = b.email;
--- Oracle: ROWID. SQL Server: no equivalent, so use ROW_NUMBER.</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Method three: when the rows are identical and there is no key at all, delete by physical location.</figcaption>
+<pre><code>-- PostgreSQL. The rows are IDENTICAL, so nothing tells them apart but where they sit.
+DELETE FROM t a                                  -- alias the table being deleted from
+USING t b                                        -- …and join it to ITSELF
+WHERE a.ctid &gt; b.ctid                            -- ctid is the physical row address
+  AND a.email = b.email;                         -- keep the lowest address per email
+-- Oracle: the same trick with ROWID. SQL Server: no equivalent — use ROW_NUMBER.
+</code></pre>
+<div class="cx-conv">
+  <b>What <code>ctid</code> is, and why it is a last resort</b>
+  <ul>
+    <li><code>ctid</code> is not data: it is the (page, slot) address of the row inside the table
+      file. It <strong>changes</strong> when the row is updated or the table is vacuumed, so it is
+      valid only inside the statement that reads it.</li>
+    <li>Never store it, never return it to an application, and never build a foreign key on it. It
+      exists for exactly this situation: a table with genuinely no key, being cleaned up once.</li>
+    <li>Then add the key. A table with no unique constraint will fill up with duplicates again, and
+      the next clean-up will be larger.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>4 · Rebuild the table — for very large clean-ups</h3>
-<pre><code>CREATE TABLE customers_new AS SELECT DISTINCT * FROM customers;
--- then swap names in a transaction. Faster than deleting 40M rows one by one,
--- and it leaves no bloat behind. It also drops your indexes and constraints —
--- script them first, or you will find out in production.</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Method four: for very large clean-ups, rebuild the table instead of deleting from it.</figcaption>
+<pre><code>CREATE TABLE customers_new AS                    -- a brand-new table…
+  SELECT DISTINCT * FROM customers;              -- …containing each distinct row once
+-- Then swap the names inside a transaction. Faster than deleting 40M rows one at
+-- a time, and it leaves no dead space behind. But it copies DATA ONLY: indexes,
+-- constraints, defaults, triggers and grants do NOT come with it. Script them
+-- first, or you will find out in production.
+</code></pre>
+<div class="cx-conv">
+  <b>Why this is sometimes the only workable option</b>
+  <ul>
+    <li>A <code>DELETE</code> is fully logged and row-by-row: forty million deletions is a very large
+      transaction, a very large log, and a very long lock. Rebuilding writes the survivors once.</li>
+    <li>The swap must be transactional — <code>ALTER TABLE … RENAME</code> both ways inside one
+      transaction — or there is a window in which the application sees no table at all.</li>
+    <li><code>CREATE TABLE … AS SELECT</code> is CTAS. SQL Server spells it
+      <code>SELECT … INTO customers_new FROM …</code>. Both copy column names and types and nothing
+      else.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box good">
   <div class="box-title">✔ Say this before you run any of them</div>
@@ -152,12 +249,34 @@ DELETE FROM t a USING t b WHERE a.ctid &gt; b.ctid AND a.email = b.email;
   while leaving every <code>SUM</code> and <code>COUNT</code> wrong.
 </p>
 
-<pre><code>-- Symptom:
-SELECT DISTINCT c.id, c.name FROM customers c JOIN orders o ON o.customer_id = c.id;
+<figure class="codex" data-lang="sql" data-run>
+<figcaption><code>DISTINCT</code> as a symptom: the same question, once with the plaster and once with the diagnosis.</figcaption>
+<pre><code>-- SYMPTOM: DISTINCT here is hiding a fan-out, not expressing a requirement.
+SELECT DISTINCT c.id, c.name                     -- deduplicates AFTER the damage is done
+FROM customers c JOIN orders o                   -- the join multiplies: one row per order…
+  ON o.customer_id = c.id;                       -- …then DISTINCT collapses them again
 
--- Cause named, and cheaper: this is a semi-join.
-SELECT c.id, c.name FROM customers c
-WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);</code></pre>
+-- CAUSE NAMED, and cheaper: what was actually wanted is a semi-join.
+SELECT c.id, c.name FROM customers c             -- one row per customer, by construction
+WHERE EXISTS (SELECT 1 FROM orders o             -- "has at least one order"…
+              WHERE o.customer_id = c.id);       -- …and nothing from the order is returned
+</code></pre>
+<div class="cx-conv">
+  <b>Why the second version is better on both counts</b>
+  <ul>
+    <li>The first reads every matching order, builds a wide intermediate result, then sorts or
+      hashes it to throw the duplicates away. The second can stop at the first matching order per
+      customer.</li>
+    <li>More importantly, <code>DISTINCT</code> fixes the <em>row list</em> and leaves every
+      <code>SUM</code> and <code>COUNT</code> in the query wrong. If this query later grows a
+      <code>SUM(o.total_cents)</code>, the first version starts producing inflated numbers and still
+      returns one row per customer, so it still looks right.</li>
+    <li>Rule of thumb: when you reach for <code>DISTINCT</code>, first ask which join is duplicating
+      rows. If the answer is &ldquo;none — the data really has duplicates&rdquo;, then
+      <code>DISTINCT</code> is the right tool.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="rules">
   <ol>
@@ -206,7 +325,9 @@ WHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

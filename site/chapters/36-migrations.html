@@ -106,18 +106,40 @@
 
 <p>Renaming <code>customers.name</code> to <code>full_name</code>, safely — four deploys:</p>
 
-<pre><code>-- 1 · EXPAND. Add the new column. Old code is unaffected.
-ALTER TABLE customers ADD COLUMN full_name VARCHAR(200) NULL;
+<figure class="codex" data-lang="sql">
+<figcaption>Renaming a column without downtime: expand, backfill, migrate, contract &mdash; four deploys, never one.</figcaption>
+<pre><code>-- 1 · EXPAND. Add the new column. Old code is completely unaffected by it.
+ALTER TABLE customers ADD COLUMN full_name VARCHAR(200) NULL;  -- NULLable: metadata-only, instant
 
--- 2 · BACKFILL, in batches so nothing locks for long. Idempotent, resumable.
-UPDATE customers SET full_name = name
-WHERE full_name IS NULL AND id BETWEEN :lo AND :hi;
+-- 2 · BACKFILL, in batches so nothing locks for long. Idempotent and resumable.
+UPDATE customers SET full_name = name              -- copy the value across…
+WHERE full_name IS NULL                            -- …only where it has not been copied yet…
+  AND id BETWEEN :lo AND :hi;                      -- …one key range at a time
 
--- 3 · MIGRATE. Deploy code that WRITES BOTH and READS the new one.
---    Both columns are now correct; either version of the app works.
+-- 3 · MIGRATE. Deploy code that WRITES BOTH columns and READS the new one.
+--    Both are now correct, so either version of the application works. This is
+--    the step that makes a rollback safe, and it is the one people skip.
 
 -- 4 · CONTRACT. Once every instance is on the new code, and only then:
-ALTER TABLE customers DROP COLUMN name;</code></pre>
+ALTER TABLE customers DROP COLUMN name;            -- the point of no return
+</code></pre>
+<div class="cx-conv">
+  <b>Why a rename cannot be one step</b>
+  <ul>
+    <li>During any deploy, old and new code run <strong>at the same time</strong>. A single
+      <code>ALTER TABLE … RENAME</code> breaks every instance still running the old version, and it
+      breaks them between the migration and the last pod restarting.</li>
+    <li><code>ADD COLUMN … NULL</code> with no default is metadata-only on modern PostgreSQL and SQL
+      Server — instant, whatever the table size. Add <code>NOT NULL DEFAULT</code> and older versions
+      rewrite every page while holding a lock.</li>
+    <li>The backfill is written to be re-runnable: <code>WHERE full_name IS NULL</code> means an
+      interrupted run simply continues. Batching by key range keeps each transaction short
+      (<a href="31-big-tables.html">chapter 31</a>).</li>
+    <li>Every step but the last is <strong>reversible</strong>. That is the property being bought,
+      and it is worth four deploys.</li>
+  </ul>
+</div>
+</figure>
 
 <figure class="diagram">
   <svg viewBox="0 0 840 170" role="img" aria-labelledby="d36t d36d">
@@ -222,7 +244,9 @@ ALTER TABLE customers DROP COLUMN name;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

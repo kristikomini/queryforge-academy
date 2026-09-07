@@ -152,11 +152,29 @@
 
 <div class="tryit">
   <p>In the <a href="../playground.html">playground</a>, compare what the engine has to touch:</p>
-  <pre><code>-- Both answer the same business question.
-SELECT * FROM order_lines WHERE order_id = 42;
-SELECT sku, quantity FROM order_lines WHERE order_id = 42;
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Two queries with the same <code>WHERE</code> clause and the same rows, moving very different numbers of bytes.</figcaption>
+<pre><code>-- Both answer the same business question: "what is on order 42?"
+SELECT * FROM order_lines WHERE order_id = 42;          -- every column of every matching row
+SELECT sku, quantity FROM order_lines WHERE order_id = 42;  -- only the two columns needed
 
--- Same rows, very different number of bytes moved off disk and over the wire.</code></pre>
+-- Same rows. Very different bytes read off disk, held in the buffer pool, and
+-- pushed over the network — and only the second one can ever be answered from
+-- an index alone, without visiting the table at all.
+</code></pre>
+<div class="cx-conv">
+  <b>What the engine actually does differently</b>
+  <ul>
+    <li><code>SELECT *</code> — expands to every column <em>at parse time</em>, so adding a
+      <code>VARCHAR(4000)</code> column next year silently makes this query heavier. It also
+      guarantees a trip to the table: no narrow index can cover &ldquo;all columns&rdquo;.</li>
+    <li><code>order_id = 42</code> — an INTEGER compared to an INTEGER literal, so there is no
+      conversion and the index on <code>order_id</code> can be searched directly. Quote it as
+      <code>'42'</code> and some engines convert every stored value instead, which is
+      <a href="07-predicates-and-sargability.html">chapter 07</a>'s whole subject.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="mvcc">Two families: locking readers, and MVCC</h2>
@@ -285,7 +303,9 @@ SELECT sku, quantity FROM order_lines WHERE order_id = 42;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

@@ -181,15 +181,44 @@
 </p>
 
 <div class="tryit">
-  <pre><code>-- Two psql windows against the same PostgreSQL database:
+  <figure class="codex" data-lang="sql">
+<figcaption>Two windows, one row: seeing a non-repeatable read happen, and then seeing it not happen.</figcaption>
+<pre><code>-- Two psql windows against the same PostgreSQL database. SQLite cannot show this:
+-- it has one writer, so there is no concurrency to observe.
+
 -- window 1
-BEGIN; SELECT on_hand FROM stock WHERE product_id = 1;    -- 19
+BEGIN;                                                     -- start a transaction and keep it open
+SELECT on_hand FROM stock WHERE product_id = 1;            -- 19
+
 -- window 2
-BEGIN; UPDATE stock SET on_hand = 5 WHERE product_id = 1; COMMIT;
--- window 1 again
-SELECT on_hand FROM stock WHERE product_id = 1;           -- 5 at READ COMMITTED
-COMMIT;
--- Now repeat with BEGIN ISOLATION LEVEL REPEATABLE READ. It still says 19.</code></pre>
+BEGIN;                                                     -- a second, independent transaction
+UPDATE stock SET on_hand = 5 WHERE product_id = 1;         -- change the same row…
+COMMIT;                                                    -- …and make it permanent
+
+-- window 1 again, in the SAME transaction as before
+SELECT on_hand FROM stock WHERE product_id = 1;            -- 5 at READ COMMITTED
+COMMIT;                                                    -- the value changed under us
+
+-- Now repeat the whole thing with:  BEGIN ISOLATION LEVEL REPEATABLE READ;
+-- Window 1 still says 19 the second time. Same data, different guarantee.
+</code></pre>
+<div class="cx-conv">
+  <b>What you have just seen</b>
+  <ul>
+    <li>At <strong>READ COMMITTED</strong> — the default in PostgreSQL, SQL Server and Oracle — each
+      <em>statement</em> sees a fresh snapshot. Reading the same row twice in one transaction can
+      legitimately give two answers.</li>
+    <li>At <strong>REPEATABLE READ</strong> the snapshot is taken once per <em>transaction</em>, so
+      the second read matches the first. The row has still changed; you are simply not being shown
+      it.</li>
+    <li>This is not a bug being fixed. It is a trade: the stronger level costs concurrency, and in
+      PostgreSQL a <code>SERIALIZABLE</code> transaction can be aborted outright and must be retried
+      by the application.</li>
+    <li>Isolation is a property of the <em>transaction</em>, so it is set at <code>BEGIN</code> —
+      and it cannot be changed after the first statement has run.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -242,7 +271,9 @@ COMMIT;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

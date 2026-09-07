@@ -66,14 +66,35 @@
   </p>
 </div>
 
-<pre><code>-- Bisection in practice: where exactly do the two sources disagree?
-SELECT month, a.total AS report_says, b.total AS source_says,
-       a.total - b.total AS diff
-FROM report_monthly a
-FULL OUTER JOIN source_monthly b USING (month)
-WHERE a.total IS DISTINCT FROM b.total          -- null-safe; see chapter 09
-ORDER BY ABS(a.total - b.total) DESC;
--- Then repeat one level down inside the worst month. Five queries, not five hours.</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Bisection as a query: find exactly where two sources disagree, then repeat one level down.</figcaption>
+<pre><code>-- Where exactly do the two sources disagree?
+SELECT month,                                   -- the shared grain
+       a.total AS report_says,                  -- what one side thinks…
+       b.total AS source_says,                  -- …what the other thinks…
+       a.total - b.total AS diff                -- …and by how much
+FROM report_monthly a                            -- one side of the comparison
+FULL OUTER JOIN source_monthly b USING (month)  -- FULL: keep months missing from EITHER side
+WHERE a.total IS DISTINCT FROM b.total          -- null-safe inequality; see chapter 09
+ORDER BY ABS(a.total - b.total) DESC;           -- biggest discrepancy first
+-- Then repeat one level down, inside the worst month. Five queries, not five hours.
+</code></pre>
+<div class="cx-conv">
+  <b>Why each choice here matters</b>
+  <ul>
+    <li><code>FULL OUTER JOIN</code> and not <code>JOIN</code>: a month present in one source and
+      missing from the other is the <em>most</em> interesting case, and an inner join hides exactly
+      that.</li>
+    <li><code>IS DISTINCT FROM</code> and not <code>&lt;&gt;</code>: with a missing month one side is
+      NULL, and <code>NULL &lt;&gt; 4200</code> is UNKNOWN, so <code>WHERE</code> would discard the
+      row. The null-safe operator keeps it.</li>
+    <li><code>USING (month)</code> merges the two <code>month</code> columns into one, so the result
+      has a single month column even where one side contributed nothing.</li>
+    <li>Sorting by <code>ABS(diff)</code> puts the largest discrepancy first, in either direction —
+      which is where to start, because a single large difference usually has a single cause.</li>
+  </ul>
+</div>
+</figure>
 
 <h2 id="asking">Asking for help without looking lost</h2>
 
@@ -90,13 +111,32 @@ ORDER BY ABS(a.total - b.total) DESC;
 
 <div class="box good">
   <div class="box-title">✔ The four-line ask</div>
-  <pre style="margin-bottom:0"><code>1. What I am trying to do:  make the stock reconciliation match the ledger.
+  <figure class="codex" data-lang="text">
+<figcaption>The four-line ask: how to be interrupted once instead of three times.</figcaption>
+<pre><code>1. What I am trying to do:  make the stock reconciliation match the ledger.
 2. What I have tried:       compared by month (matches) and by warehouse
                             (WH-03 is out by 412 units, consistently, since March).
 3. Where I am stuck:        I cannot find a movement type that would explain a
                             one-directional difference.
 4. What I am asking:        is there a transfer type that bypasses the movements
-                            table? Ten minutes of your time, or a pointer.</code></pre>
+                            table? Ten minutes of your time, or a pointer.
+</code></pre>
+<div class="cx-conv">
+  <b>Why this gets answered and &ldquo;can I ask you something?&rdquo; does not</b>
+  <ul>
+    <li>Line 2 is the one that earns the answer. It proves you did the work and, incidentally, tells
+      the expert which hypotheses are already eliminated — often enough for them to answer
+      immediately.</li>
+    <li>Line 3 is specific enough to be wrong. &ldquo;I am stuck&rdquo; cannot be corrected;
+      &ldquo;I cannot find a movement type that explains a one-directional difference&rdquo;
+      can.</li>
+    <li>Line 4 bounds the request. Asking for ten minutes or a pointer is much easier to say yes to
+      than an open-ended &ldquo;help&rdquo;.</li>
+    <li>Writing it also solves the problem about a third of the time before you send it, which is
+      the cheapest possible outcome.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <p class="small muted">
@@ -235,7 +275,9 @@ ORDER BY ABS(a.total - b.total) DESC;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

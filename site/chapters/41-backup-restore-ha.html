@@ -73,15 +73,34 @@
 </table>
 </div>
 
+<figure class="codex" data-lang="text">
+<figcaption>A backup schedule, read as the recovery it buys you.</figcaption>
 <pre><code>-- A typical schedule and what it costs you
-Sunday 02:00   FULL
-Daily  02:00   DIFFERENTIAL
-Every  15 min  LOG                 -> RPO = 15 minutes
+Sunday 02:00   FULL                 -- the base: everything, once a week
+Daily  02:00   DIFFERENTIAL         -- everything changed since the FULL, not since yesterday
+Every  15 min  LOG                  -> RPO = 15 minutes worst case
 
 -- Restoring to Wednesday 14:23 needs:
 --   Sunday's full  +  Wednesday's differential  +  every log from 02:00 to 14:23
--- One missing log in that chain and you stop at the gap. Which is why the chain
--- matters more than any individual file.</code></pre>
+-- One missing log in that chain and you stop at the gap. Which is why the CHAIN
+-- matters more than any individual file.
+</code></pre>
+<div class="cx-conv">
+  <b>How to read a schedule</b>
+  <ul>
+    <li>This is a plan, not SQL. Each line is a job; the arrow is what the schedule guarantees.</li>
+    <li>A <strong>differential</strong> is measured from the last <em>full</em>, not from the last
+      differential. So they grow through the week, and taking an unscheduled full backup silently
+      resets the base every later differential depends on — which is why an ad-hoc backup must use
+      <code>COPY_ONLY</code>.</li>
+    <li><strong>RPO</strong> — how much data you accept losing — is set by the log interval.
+      <strong>RTO</strong> — how long you accept being down — is set by how long the restore takes,
+      which is a different problem with different answers.</li>
+    <li>The log chain is a chain: one missing file and recovery stops there. Copying backups to a
+      second location is protecting the chain, not the files.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — the log backup that breaks the chain</div>
@@ -97,17 +116,39 @@ Every  15 min  LOG                 -> RPO = 15 minutes
 
 <h2 id="pitr">Point-in-time recovery</h2>
 
-<pre><code>-- SQL Server: restore the chain, leaving the database recovering until the end.
-RESTORE DATABASE forge FROM DISK = 'full.bak'   WITH NORECOVERY;
-RESTORE DATABASE forge FROM DISK = 'diff.bak'   WITH NORECOVERY;
-RESTORE LOG      forge FROM DISK = 'log1.trn'   WITH NORECOVERY;
-RESTORE LOG      forge FROM DISK = 'log2.trn'
-       WITH STOPAT = '2026-09-03T14:23:00', RECOVERY;
+<figure class="codex" data-lang="sql">
+<figcaption>Point-in-time recovery: restoring to the moment before somebody ran a <code>DELETE</code> without a <code>WHERE</code>.</figcaption>
+<pre><code>-- SQL Server: restore the chain, leaving the database RECOVERING until the last step.
+RESTORE DATABASE forge FROM DISK = 'full.bak'   WITH NORECOVERY;  -- the base…
+RESTORE DATABASE forge FROM DISK = 'diff.bak'   WITH NORECOVERY;  -- …changes since it…
+RESTORE LOG      forge FROM DISK = 'log1.trn'   WITH NORECOVERY;  -- …then every log…
+RESTORE LOG      forge FROM DISK = 'log2.trn'                     -- …in order…
+       WITH STOPAT = '2026-09-03T14:23:00', RECOVERY;             -- …stopping HERE, and opening
 --          ^ the moment BEFORE somebody ran the DELETE without a WHERE clause
 
 -- PostgreSQL: a base backup plus archived WAL, with a recovery target.
--- postgresql.conf:  restore_command = 'cp /archive/%f %p'
---                   recovery_target_time = '2026-09-03 14:23:00'</code></pre>
+-- postgresql.conf:  restore_command = 'cp /archive/%f %p'         -- where to find the WAL…
+--                   recovery_target_time = '2026-09-03 14:23:00'  -- …and when to stop
+</code></pre>
+<div class="cx-conv">
+  <b>The one keyword that ruins the restore</b>
+  <ul>
+    <li><code>WITH NORECOVERY</code> leaves the database in a restoring state so more backups can be
+      applied. Forget it on an intermediate step and the database opens — and the chain is broken.
+      You start again from the full backup.</li>
+    <li><code>RECOVERY</code> (the default) is the last step: it rolls back uncommitted transactions
+      and opens the database. Once done, no further log can be applied.</li>
+    <li><code>STOPAT</code> is <em>exclusive</em> of the transaction you are avoiding, so pick a
+      timestamp just before it. Finding that timestamp is what the transaction log or the audit table
+      is for.</li>
+    <li>Restore to a <strong>different database name</strong> first, check the data, then swap. Point
+      in-time recovery over the live database is how a recoverable incident becomes an
+      unrecoverable one.</li>
+    <li>A backup you have never restored is a hypothesis. Schedule the rehearsal, not just the
+      backup.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Restore to a copy, not over the original</div>
@@ -232,7 +273,9 @@ RESTORE LOG      forge FROM DISK = 'log2.trn'
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

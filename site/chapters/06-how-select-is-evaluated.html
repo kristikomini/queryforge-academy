@@ -98,21 +98,39 @@
   </p>
 </div>
 
-<pre><code>-- Fails: `spend` does not exist yet when WHERE runs.
-SELECT customer_id, SUM(total_cents) AS spend
-FROM orders GROUP BY customer_id
-WHERE spend &gt; 100000;
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>The same question three times: the version that cannot work, the version that does, and the version that scales to three conditions.</figcaption>
+<pre><code>-- FAILS: `spend` does not exist yet when WHERE runs. WHERE is step 2, SELECT is step 5.
+SELECT customer_id, SUM(total_cents) AS spend   -- the alias is created HERE…
+FROM orders GROUP BY customer_id                -- …after the rows are read and grouped…
+WHERE spend &gt; 100000;                           -- …but WHERE ran before either of them
 
--- Works: HAVING runs AFTER grouping, so the aggregate is available.
-SELECT customer_id, SUM(total_cents) AS spend
-FROM orders GROUP BY customer_id
-HAVING SUM(total_cents) &gt; 100000;
+-- WORKS: HAVING runs AFTER grouping, so the aggregate is available to it.
+SELECT customer_id, SUM(total_cents) AS spend   -- same columns, same aggregate
+FROM orders GROUP BY customer_id                -- same grouping
+HAVING SUM(total_cents) &gt; 100000;               -- filters GROUPS, not rows: repeat the expression
 
--- Also works, and reads better when there are three of these:
-SELECT * FROM (
-  SELECT customer_id, SUM(total_cents) AS spend
-  FROM orders GROUP BY customer_id
-) t WHERE t.spend &gt; 100000;</code></pre>
+-- ALSO WORKS, and reads better when there are three of these:
+SELECT * FROM (                                 -- the outer query sees a finished result
+  SELECT customer_id, SUM(total_cents) AS spend -- the inner query does the work…
+  FROM orders GROUP BY customer_id              -- …and its aliases DO exist outside it
+) t WHERE t.spend &gt; 100000;                     -- so a plain WHERE on the alias is legal here
+</code></pre>
+<div class="cx-conv">
+  <b>The rule underneath all three</b>
+  <ul>
+    <li>Names become visible in the step that creates them. <code>WHERE</code> (step 2) cannot see a
+      <code>SELECT</code> alias (step 5); <code>ORDER BY</code> (step 6) can. The error message —
+      <em>&ldquo;invalid column name&rdquo;</em> — reads like a typo, which is why this costs beginners
+      an afternoon rather than a minute.</li>
+    <li>A derived table <code>( … ) t</code> is a completed query, so its output columns are real
+      columns to the query outside it. That is the general escape hatch, and a CTE
+      (<a href="12-ctes-and-recursion.html">chapter 12</a>) is the same trick with a name at the top.</li>
+    <li><code>t</code> is an <strong>alias, and it is mandatory</strong> in most engines: a derived
+      table with no name cannot be referred to, and PostgreSQL and MySQL reject it outright.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 2 · ORDER BY <em>can</em> use an alias</div>
@@ -148,16 +166,35 @@ SELECT * FROM (
 </div>
 
 <div class="tryit">
-  <pre><code>-- Every customer, with their 2026 orders. Zero-order customers included.
-SELECT c.name, COUNT(o.id) AS orders_2026
-FROM customers c
-LEFT JOIN orders o
-       ON o.customer_id = c.id
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Where a date filter goes decides which question you asked &mdash; and neither version is an error.</figcaption>
+<pre><code>-- Every customer, with their 2026 orders. Zero-order customers INCLUDED.
+SELECT c.name, COUNT(o.id) AS orders_2026    -- COUNT(o.id) counts non-NULL ids: 0 for no match
+FROM customers c                             -- the preserved side: every customer survives
+LEFT JOIN orders o                           -- unmatched customers get NULL-padded order columns
+       ON o.customer_id = c.id               -- the pairing rule
       AND o.placed_at &gt;= DATE '2026-01-01'   -- part of the MATCH: stays in ON
-GROUP BY c.name;
+GROUP BY c.name;                             -- one row per customer name
 
--- Move that line to WHERE and the customers with no 2026 orders vanish.
--- Same intent, different question, no error message.</code></pre>
+-- Move that line to WHERE and the customers with no 2026 orders vanish:
+-- the NULL-padded rows fail `NULL >= DATE '2026-01-01'` (UNKNOWN), so they are
+-- discarded and the outer join has silently become an inner one. No error.
+</code></pre>
+<div class="cx-conv">
+  <b>Why the two versions differ</b>
+  <ul>
+    <li><code>ON</code> is evaluated <em>while</em> the join runs, before the padding is added.
+      <code>WHERE</code> is evaluated on the finished join, when the padded rows already exist and
+      are full of NULLs.</li>
+    <li><code>COUNT(o.id)</code> versus <code>COUNT(*)</code> is the second half of the trick.
+      <code>COUNT(*)</code> counts the padded row too and would report <strong>1</strong> for a
+      customer with no orders; <code>COUNT(o.id)</code> skips the NULL and reports
+      <strong>0</strong>.</li>
+    <li>The rule to carry away: if it is part of <em>what counts as a match</em>, it belongs in
+      <code>ON</code>; if it is a filter on the result, it belongs in <code>WHERE</code>.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <h2 id="logical">"Logical" order, not physical order</h2>
@@ -234,7 +271,9 @@ GROUP BY c.name;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

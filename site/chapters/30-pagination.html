@@ -39,8 +39,25 @@
   </p>
 </div>
 
-<pre><code>SELECT * FROM orders ORDER BY placed_at DESC
-OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;   -- reads 100 020, returns 20</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Offset pagination, and the arithmetic that makes page 5001 slow.</figcaption>
+<pre><code>SELECT * FROM orders ORDER BY placed_at DESC    -- sort the whole table…
+OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;     -- …then discard the first 100 000
+-- Reads 100 020 rows to return 20. Page 1 is instant; page 5001 is not.
+</code></pre>
+<div class="cx-conv">
+  <b>Why the cost grows with the page number</b>
+  <ul>
+    <li><code>OFFSET</code> is not a seek. The engine has no way to jump to the hundred-thousandth
+      row of a sorted result without producing the hundred thousand rows before it.</li>
+    <li>So the cost is proportional to <em>how deep the page is</em>, and everything counted is
+      thrown away. Page 500 costs five hundred times page 1.</li>
+    <li>There is a correctness problem too: if a row is inserted while the user reads page 3,
+      everything shifts by one and page 4 shows a row they already saw — or hides one they never
+      did.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 Professional</div>
@@ -63,17 +80,38 @@ OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;   -- reads 100 020, returns 20</code
   </p>
 </div>
 
-<pre><code>-- Page 1
-SELECT id, placed_at, total_cents FROM orders
-ORDER BY placed_at DESC, id DESC
-LIMIT 20;
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>Keyset pagination: &ldquo;carry on from where I left off&rdquo;, at the same cost for every page.</figcaption>
+<pre><code>-- Page 1: no bookmark yet, so just take the first twenty.
+SELECT id, placed_at, total_cents FROM orders   -- the columns the list needs
+ORDER BY placed_at DESC, id DESC                -- the sort, with a tie-breaker
+LIMIT 20;                                       -- one page
 
 -- Every subsequent page: remember the LAST ROW of the page you just showed
 -- (placed_at = :last_at, id = :last_id) and ask for what comes after it.
-SELECT id, placed_at, total_cents FROM orders
-WHERE (placed_at, id) &lt; (:last_at, :last_id)     -- row-value comparison
-ORDER BY placed_at DESC, id DESC
-LIMIT 20;</code></pre>
+SELECT id, placed_at, total_cents FROM orders   -- the same columns…
+WHERE (placed_at, id) &lt; (:last_at, :last_id)    -- ROW-VALUE comparison: the bookmark
+ORDER BY placed_at DESC, id DESC                -- the SAME sort — it must match exactly
+LIMIT 20;                                       -- the next page, at constant cost
+</code></pre>
+<div class="cx-conv">
+  <b>The row-value comparison, and why the tie-breaker is mandatory</b>
+  <ul>
+    <li><code>(placed_at, id) &lt; (:last_at, :last_id)</code> compares the pair
+      <em>lexicographically</em>: earlier <code>placed_at</code>, or the same
+      <code>placed_at</code> and a lower <code>id</code>. Writing it as
+      <code>placed_at &lt;= :last_at AND id &lt; :last_id</code> is a different, wrong
+      condition.</li>
+    <li>Without <code>id</code> in both the sort and the bookmark, two orders sharing a timestamp
+      straddle a page boundary: one is shown twice and one never. The tie-breaker must be
+      <strong>unique</strong>, which is why it is the primary key.</li>
+    <li>PostgreSQL, MySQL and SQLite support the row-value form. SQL Server does not — write the
+      expanded equivalent there, and check the plan, because the expansion is easy to get subtly
+      wrong.</li>
+    <li>Inserts no longer disturb the paging: the bookmark refers to a row, not to a position.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 Two things make this work</div>
@@ -90,9 +128,25 @@ LIMIT 20;</code></pre>
   </ol>
 </div>
 
-<pre><code>CREATE INDEX ix_orders_page ON orders (placed_at DESC, id DESC);
--- Now every page is one seek plus twenty sequential rows. Page 5 000 costs
--- exactly what page 1 costs.</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>The index that makes keyset pagination constant-cost.</figcaption>
+<pre><code>CREATE INDEX ix_orders_page ON orders (placed_at DESC, id DESC);  -- the sort, materialised
+-- Now every page is ONE seek plus twenty sequential index entries.
+-- Page 5 000 costs exactly what page 1 costs.
+</code></pre>
+<div class="cx-conv">
+  <b>Why the index must match the ORDER BY</b>
+  <ul>
+    <li>The index stores the rows in exactly the order the query asks for, so the engine seeks to the
+      bookmark and walks forward. No sort step appears in the plan — check for its absence.</li>
+    <li>The declared <code>DESC</code> is mostly cosmetic for a single-column index, since a B-tree
+      can be read backwards. For a <em>mixed</em> sort — <code>placed_at DESC, id ASC</code> — the
+      directions in the index must match, or the engine sorts anyway.</li>
+    <li>This is the same index that serves &ldquo;most recent orders&rdquo; on the dashboard. One
+      index, two features, which is what good index design looks like.</li>
+  </ul>
+</div>
+</figure>
 
 <figure class="diagram">
   <svg viewBox="0 0 840 200" role="img" aria-labelledby="d30t d30d">
@@ -139,11 +193,29 @@ LIMIT 20;</code></pre>
 
 <h2 id="cursor">API cursors are keyset pagination with a wrapper</h2>
 
-<pre><code>-- Encode the bookmark opaquely so clients cannot construct one, and so you can
--- change the sort later without breaking them.
+<figure class="codex" data-lang="text">
+<figcaption>An API cursor is a keyset bookmark with a wrapper around it.</figcaption>
+<pre><code>-- Encode the bookmark opaquely, so clients cannot construct one and so you can
+-- change the sort order later without breaking them.
 { "items": [...],
   "nextCursor": "eyJhdCI6IjIwMjYtMDMtMTRUMDk6MTIiLCJpZCI6ODgxfQ" }
--- base64 of {"at":"2026-03-14T09:12","id":881}</code></pre>
+-- base64 of {"at":"2026-03-14T09:12","id":881}
+</code></pre>
+<div class="cx-conv">
+  <b>How to read this, and the security note that comes with it</b>
+  <ul>
+    <li>A JSON response, not SQL. <code>nextCursor</code> is the last row's sort key, base64-encoded
+      so it reads as an opaque token.</li>
+    <li>Opaque is an API-design win: clients treat it as a token rather than as
+      <code>?page=37</code>, so you can change the sort or add a tie-breaker without a breaking
+      change.</li>
+    <li>Opaque is <strong>not</strong> a security boundary. Base64 is encoding, not encryption:
+      anyone can decode it, edit the values and re-encode. If the cursor carries anything a client
+      should not choose — a tenant id, a permission scope — sign it or encrypt it, or they can page
+      through data they should not see.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Sign it, or at least treat it as untrusted</div>
@@ -157,14 +229,32 @@ LIMIT 20;</code></pre>
 </div>
 
 <div class="tryit">
-  <pre><code>-- In the playground, compare what each has to read.
-EXPLAIN QUERY PLAN
-SELECT * FROM orders ORDER BY placed_at DESC, id DESC LIMIT 20 OFFSET 1500;
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Compare what each has to read, in the playground.</figcaption>
+<pre><code>-- Offset: the engine produces everything up to the offset and discards it.
+EXPLAIN QUERY PLAN                                              -- ask for the plan…
+SELECT * FROM orders ORDER BY placed_at DESC, id DESC           -- …of the offset version…
+LIMIT 20 OFFSET 1500;                                           -- …fifteen hundred rows in
 
-EXPLAIN QUERY PLAN
-SELECT * FROM orders
-WHERE (placed_at, id) &lt; ('2025-06-01T00:00:00Z', 0)
-ORDER BY placed_at DESC, id DESC LIMIT 20;</code></pre>
+-- Keyset: the engine seeks straight to the bookmark.
+EXPLAIN QUERY PLAN                                              -- the same request…
+SELECT * FROM orders                                            -- …for the keyset version
+WHERE (placed_at, id) &lt; ('2025-06-01T00:00:00Z', 0)             -- the bookmark…
+ORDER BY placed_at DESC, id DESC LIMIT 20;                      -- …same sort, same page size
+</code></pre>
+<div class="cx-conv">
+  <b>What to look for in the two plans</b>
+  <ul>
+    <li>The offset version shows a full <code>SCAN</code> and a temporary sort; the keyset version
+      shows a <code>SEARCH</code> using the index. That difference is the entire chapter.</li>
+    <li>On 1800 rows both are instant. The point is the <em>shape</em> of the plan: one grows with
+      the offset, the other does not.</li>
+    <li><code>'2025-06-01T00:00:00Z'</code> is a text literal compared to a text column — SQLite
+      stores these timestamps as ISO-8601 strings, and ISO-8601 sorts chronologically as text. In
+      PostgreSQL or SQL Server the same comparison would be against a real timestamp type.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -217,7 +307,9 @@ ORDER BY placed_at DESC, id DESC LIMIT 20;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

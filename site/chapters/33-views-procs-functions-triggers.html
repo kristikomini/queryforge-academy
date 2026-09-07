@@ -117,20 +117,40 @@
 
 <h2 id="functions">Functions: the one that matters</h2>
 
+<figure class="codex" data-lang="tsql">
+<figcaption>Two kinds of function with the same keyword: one is a per-row disaster, the other is a parameterised view.</figcaption>
 <pre><code>-- SCALAR — avoid in a SELECT list or a WHERE clause over many rows.
-CREATE FUNCTION dbo.fn_OrderTotal(@id INT) RETURNS BIGINT AS
-BEGIN ... END
+CREATE FUNCTION dbo.fn_OrderTotal(@id INT) RETURNS BIGINT AS  -- returns ONE value
+BEGIN ... END                                                 -- a procedural body
 SELECT id, dbo.fn_OrderTotal(id) FROM orders;   -- once per row, no estimate, serial plan
 
--- INLINE TABLE-VALUED — a parameterised view. Expanded into the query and
+-- INLINE TABLE-VALUED — a parameterised view. Expanded into the calling query and
 -- optimised WITH it. This one is genuinely good.
-CREATE FUNCTION dbo.fn_OrderTotals() RETURNS TABLE AS
-RETURN (SELECT order_id, SUM(quantity * unit_price_cents) AS total_cents
-        FROM order_lines GROUP BY order_id);
+CREATE FUNCTION dbo.fn_OrderTotals() RETURNS TABLE AS         -- returns a ROW SET
+RETURN (SELECT order_id,                                      -- a single SELECT, no BEGIN/END
+               SUM(quantity * unit_price_cents) AS total_cents  -- the aggregate itself
+        FROM order_lines GROUP BY order_id);                  -- one row per order
 
-SELECT o.id, t.total_cents
-FROM orders o
-CROSS APPLY dbo.fn_OrderTotals() t WHERE t.order_id = o.id;</code></pre>
+SELECT o.id, t.total_cents                                    -- read it like a table…
+FROM orders o                                                 -- the driving table
+CROSS APPLY dbo.fn_OrderTotals() t WHERE t.order_id = o.id;   -- …called once per order row
+</code></pre>
+<div class="cx-conv">
+  <b>Why the difference is so large</b>
+  <ul>
+    <li>A <strong>scalar</strong> function is a black box to the optimiser: no row estimate, no
+      parallelism for the whole query, and one invocation per row. Before SQL Server 2019 it did not
+      even appear in the plan, so the query looked cheap and ran for minutes.</li>
+    <li>An <strong>inline table-valued</strong> function has a single <code>SELECT</code> as its
+      body — no <code>BEGIN</code>/<code>END</code>. That lets the engine paste it into the outer
+      query and optimise the whole thing together. It is a view that takes parameters.</li>
+    <li><code>RETURNS TABLE AS RETURN (…)</code> is the inline form.
+      <code>RETURNS @t TABLE (…) AS BEGIN … END</code> is the <em>multi-statement</em> form, which is
+      a black box again with a fixed row estimate. The keywords are nearly identical and the
+      performance is not.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ The three-way distinction to remember</div>
@@ -182,21 +202,62 @@ CROSS APPLY dbo.fn_OrderTotals() t WHERE t.order_id = o.id;</code></pre>
   </p>
 </div>
 
-<pre><code>-- Set-based, so it is correct for a multi-row update. This is the shape.
-CREATE TRIGGER trg_orders_audit ON orders AFTER UPDATE AS
-BEGIN
-  SET NOCOUNT ON;                       -- or the row count of the trigger leaks to the caller
-  INSERT INTO order_events (order_id, from_status, to_status, at, actor)
-  SELECT i.id, d.status, i.status, SYSUTCDATETIME(), SUSER_SNAME()
-  FROM inserted i
-  JOIN deleted  d ON d.id = i.id
-  WHERE i.status &lt;&gt; d.status;           -- only real transitions
-END</code></pre>
+<figure class="codex" data-lang="tsql">
+<figcaption>A trigger written the only way a trigger should be written: set-based.</figcaption>
+<pre><code>-- Set-based, so it is correct for a multi-row UPDATE. This is the shape.
+CREATE TRIGGER trg_orders_audit ON orders AFTER UPDATE AS   -- fires ONCE per statement…
+BEGIN                                                       -- …not once per row
+  SET NOCOUNT ON;                       -- or the trigger's row count leaks to the caller
+  INSERT INTO order_events (order_id, from_status, to_status, at, actor)  -- the audit row…
+  SELECT i.id,                          -- …built from a SELECT, not from variables
+         d.status,                      -- the OLD value, from `deleted`
+         i.status,                      -- the NEW value, from `inserted`
+         SYSUTCDATETIME(),              -- UTC, at full precision
+         SUSER_SNAME()                  -- who did it, according to the server
+  FROM inserted i                       -- one row per row the statement changed…
+  JOIN deleted  d ON d.id = i.id        -- …joined to its own before-image
+  WHERE i.status &lt;&gt; d.status;           -- only real transitions get an audit row
+END                                     -- end of the trigger body
+</code></pre>
+<div class="cx-conv">
+  <b>The mistake this shape avoids</b>
+  <ul>
+    <li>A trigger fires <strong>once per statement</strong>, and <code>inserted</code> and
+      <code>deleted</code> are <em>tables</em>. Writing
+      <code>SELECT @id = id FROM inserted</code> works perfectly for one row and silently audits one
+      arbitrary row out of a thousand-row update. It is the classic trigger bug.</li>
+    <li><code>SET NOCOUNT ON</code> stops the trigger's own &ldquo;1 row affected&rdquo; reaching the
+      client, where some drivers read it as the statement's result.</li>
+    <li>The trigger runs inside the writer's transaction: its cost is the writer's cost, and its
+      failure rolls the writer back. That is the argument for keeping it to one insert.</li>
+    <li><code>WHERE i.status &lt;&gt; d.status</code> is what stops an update that changed only an
+      address from writing a status-transition row. Note it would also skip a NULL-to-value change —
+      safe here because <code>status</code> is <code>NOT NULL</code>.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="tryit">
-  <pre><code>-- In the playground: a view is expanded, not stored.
-EXPLAIN QUERY PLAN SELECT * FROM v_order_totals WHERE order_id = 42;
--- You will see the underlying tables and the aggregates, not "read view".</code></pre>
+  <figure class="codex" data-lang="sql" data-run>
+<figcaption>Proof that a view is expanded rather than read.</figcaption>
+<pre><code>-- In the playground: a view is expanded into the query, not stored.
+EXPLAIN QUERY PLAN SELECT * FROM v_order_totals WHERE order_id = 42;  -- ask for the plan
+-- You will see the underlying TABLES and the aggregate, not a line saying "read view".
+</code></pre>
+<div class="cx-conv">
+  <b>What that tells you</b>
+  <ul>
+    <li>The plan mentions <code>order_lines</code>, not <code>v_order_totals</code>. The view was
+      substituted before planning, so it costs whatever its query costs.</li>
+    <li>Good news, mostly: the <code>WHERE order_id = 42</code> is pushed <em>into</em> the view's
+      query, so the aggregate runs over one order rather than all of them. That is the optimiser
+      doing exactly what you would hope.</li>
+    <li>It also means a view cannot make a slow query fast. If you need that, you need a
+      materialised view or a summary table
+      (<a href="32-materialisation-and-caching.html">chapter 32</a>).</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -250,7 +311,9 @@ EXPLAIN QUERY PLAN SELECT * FROM v_order_totals WHERE order_id = 42;
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

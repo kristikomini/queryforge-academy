@@ -81,17 +81,51 @@
 
 <p>Start with the table every legacy system has somewhere:</p>
 
-<pre><code>-- 0NF-ish. Everything about an order, flattened.
+<figure class="codex" data-lang="text">
+<figcaption>The starting point: one flat table, the shape every legacy system has somewhere.</figcaption>
+<pre><code>-- 0NF-ish. Everything about an order, flattened into one row per order.
 order_id | customer_name | customer_city | city_region | products              | total
 ---------+---------------+---------------+-------------+----------------------+-------
     1001 | Rossi SpA     | Modena        | Emilia-R.   | "A12 x2, B7 x1"      | 89.00
-    1002 | Rossi SpA     | Modena        | Emilia-R.   | "C3 x5"              | 45.00</code></pre>
+    1002 | Rossi SpA     | Modena        | Emilia-R.   | "C3 x5"              | 45.00
+</code></pre>
+<div class="cx-conv">
+  <b>How to read this, and what is already wrong</b>
+  <ul>
+    <li>This is a <em>result</em>, not a statement: pipes are column separators, one line per row.
+      Nothing here runs.</li>
+    <li><code>products</code> holds <strong>a list inside one value</strong>. You cannot join to it,
+      filter on it, or sum it without parsing text. That is the 1NF violation.</li>
+    <li><code>Rossi SpA</code> and <code>Modena</code> are repeated on every order. Rename the
+      customer and you must find every row — miss one and the database now holds two answers to the
+      same question. That is an <em>update anomaly</em>, and it is what the next two steps remove.</li>
+  </ul>
+</div>
+</figure>
 
 <p><strong>1NF — make values atomic.</strong> <code>products</code> holds a list, so it cannot be
 joined, filtered or summed. Split it into rows in a child table:</p>
 
+<figure class="codex" data-lang="text">
+<figcaption>1NF: the repeating list becomes rows in a child table.</figcaption>
 <pre><code>orders(order_id, customer_name, customer_city, city_region, total)
-order_lines(order_id, sku, quantity)          -- composite key (order_id, sku)</code></pre>
+order_lines(order_id, sku, quantity)          -- composite key (order_id, sku)
+</code></pre>
+<div class="cx-conv">
+  <b>How to read this notation</b>
+  <ul>
+    <li><code>table(col, col, …)</code> is the standard shorthand for a relation and its attributes.
+      It is not SQL — it is how a data model is sketched on a whiteboard, and being able to read it
+      is worth as much in an interview as being able to write the <code>CREATE TABLE</code>.</li>
+    <li><strong>Composite key</strong> <code>(order_id, sku)</code>: neither column alone identifies
+      a line, both together do. In SQL that is
+      <code>PRIMARY KEY (order_id, sku)</code>, and the column order decides which lookups the
+      resulting index can serve (<a href="26-index-design.html">chapter 26</a>).</li>
+    <li>What was one text value is now one row per product, so &ldquo;how many of A12 did we sell&rdquo;
+      becomes a <code>SUM</code> instead of a parsing problem.</li>
+  </ul>
+</div>
+</figure>
 
 <p><strong>2NF — remove partial dependencies.</strong> If <code>order_lines</code> also carried
 <code>product_name</code>, that depends on <code>sku</code> alone — part of the composite key, not
@@ -101,12 +135,29 @@ all of it. It moves to a <code>products</code> table.</p>
 <code>city_region</code> depends on <code>customer_city</code>, which depends on the customer, not
 on the order. Two hops from the key is one hop too many:</p>
 
-<pre><code>customers(customer_id, name, city_id)
-cities(city_id, name, region_id)
-regions(region_id, name)
-orders(order_id, customer_id, placed_at, total_cents)
-order_lines(order_id, line_no, product_id, quantity, unit_price_cents)
-products(product_id, sku, name, list_price_cents)</code></pre>
+<figure class="codex" data-lang="text">
+<figcaption>3NF: every fact sits in the table of the thing it is actually about.</figcaption>
+<pre><code>customers(customer_id, name, city_id)                    -- a customer is in one city
+cities(city_id, name, region_id)                         -- a city is in one region
+regions(region_id, name)                                 -- the region name lives here, once
+orders(order_id, customer_id, placed_at, total_cents)    -- an order points at its customer
+order_lines(order_id, line_no, product_id, quantity, unit_price_cents)  -- and at its products
+products(product_id, sku, name, list_price_cents)        -- the catalogue, independent of orders
+</code></pre>
+<div class="cx-conv">
+  <b>What the split bought, and what it cost</b>
+  <ul>
+    <li>Every non-key column now depends on <em>its own</em> key and nothing else. Renaming a region
+      is one <code>UPDATE</code> of one row, and there is nowhere for a second spelling to hide.</li>
+    <li><code>unit_price_cents</code> is deliberately duplicated from <code>products</code>. That is
+      not a normalisation failure: the price <em>at the time of the order</em> is a different fact
+      from the price today, and losing it would rewrite history every time the catalogue changes.</li>
+    <li>The cost is joins. Answering &ldquo;revenue by region&rdquo; now walks four tables — which is
+      exactly what indexes and <a href="08-joins.html">chapter 08</a> are for, and why
+      <a href="39-oltp-vs-olap.html">chapter 39</a> denormalises deliberately for reporting.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — the exception that is not a violation</div>
@@ -209,7 +260,9 @@ products(product_id, sku, name, list_price_cents)</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

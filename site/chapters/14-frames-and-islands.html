@@ -72,14 +72,37 @@
   </p>
 </div>
 
-<pre><code>-- amounts on the same date: 10, 20, 30
-SUM(x) OVER (ORDER BY d)                                  -- RANGE:  60, 60, 60
-SUM(x) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING)         -- ROWS:   10, 30, 60
+<figure class="codex" data-lang="sql">
+<figcaption>The default frame is <code>RANGE</code>, and on tied values it does something most people do not expect.</figcaption>
+<pre><code>-- Three rows, all on the SAME date d, with amounts 10, 20, 30:
+SUM(x) OVER (ORDER BY d)                            -- RANGE (default): 60, 60, 60
+SUM(x) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING)   -- ROWS:            10, 30, 60
 
 -- A 7-day moving average, done right:
-SELECT d, amount,
-       AVG(amount) OVER (ORDER BY d ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS ma7
-FROM daily;</code></pre>
+SELECT d, amount,                                   -- the raw day and value
+       AVG(amount) OVER (ORDER BY d                 -- ordered by date…
+           ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) -- …seven PHYSICAL rows, not seven days
+           AS ma7                                    -- the moving average column
+FROM daily;                                          -- one row per day, already aggregated
+</code></pre>
+<div class="cx-conv">
+  <b>Why the two results differ</b>
+  <ul>
+    <li><code>RANGE</code> frames by <strong>value</strong>: every row whose <code>d</code> ties with
+      the current one is a <em>peer</em> and is included. Three rows on the same date are all peers,
+      so all three see the whole 60.</li>
+    <li><code>ROWS</code> frames by <strong>position</strong>: exactly the rows before this one. That
+      gives the running total people actually mean.</li>
+    <li>So a running total on a table with several rows per day silently jumps by a whole day at a
+      time under the default. Write <code>ROWS</code> explicitly unless you specifically want peer
+      semantics — it is also generally faster.</li>
+    <li>&ldquo;7&nbsp;rows&rdquo; equals &ldquo;7&nbsp;days&rdquo; only if the table has exactly one row per
+      day and no gaps. If it can have gaps, join a date spine first
+      (<a href="12-ctes-and-recursion.html">chapter 12</a>) or use
+      <code>RANGE BETWEEN INTERVAL '6 days' PRECEDING …</code> where the engine supports it.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="table-wrap">
 <table>
@@ -102,12 +125,32 @@ FROM daily;</code></pre>
 
 <h2 id="lag">LAG, LEAD and the value-at functions</h2>
 
-<pre><code>SELECT d, amount,
-       LAG(amount)      OVER (ORDER BY d)        AS prev_day,
-       LEAD(amount)     OVER (ORDER BY d)        AS next_day,
-       amount - LAG(amount, 1, 0) OVER (ORDER BY d) AS delta,   -- 3rd arg = default
-       FIRST_VALUE(amount) OVER (ORDER BY d ROWS UNBOUNDED PRECEDING) AS first_ever
-FROM daily;</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>The value-at functions: look backwards, forwards, and at the start of the frame.</figcaption>
+<pre><code>SELECT d, amount,                                              -- the row's own values
+       LAG(amount)      OVER (ORDER BY d)        AS prev_day,  -- the previous row; NULL at the first
+       LEAD(amount)     OVER (ORDER BY d)        AS next_day,  -- the next row; NULL at the last
+       amount - LAG(amount, 1, 0) OVER (ORDER BY d) AS delta,  -- 3rd argument = default, so no NULL
+       FIRST_VALUE(amount) OVER (ORDER BY d                    -- the first value in the frame…
+                     ROWS UNBOUNDED PRECEDING) AS first_ever   -- …with the frame spelled out
+FROM daily;                                                    -- one row per day
+</code></pre>
+<div class="cx-conv">
+  <b>The NULLs, and the frame trap</b>
+  <ul>
+    <li><code>LAG(amount)</code> is NULL on the first row of each partition — there is no previous
+      row. Subtracting a NULL gives NULL, which is why <code>delta</code> would be empty on day one
+      without the third argument.</li>
+    <li><code>LAG(amount, 1, 0)</code> reads &ldquo;one row back, and 0 if there is not one&rdquo;.
+      The default must be type-compatible with the column.</li>
+    <li><code>FIRST_VALUE</code> and especially <code>LAST_VALUE</code> are
+      <strong>frame-sensitive</strong>. With the default frame, <code>LAST_VALUE</code> returns the
+      current row — almost never what was wanted. Spell out
+      <code>ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING</code> when you want the
+      partition's actual last value.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — <code>LAST_VALUE</code> almost never does what you expect</div>
@@ -132,20 +175,42 @@ FROM daily;</code></pre>
   </p>
 </div>
 
-<pre><code>-- day: 1 2 3 7 8 12
--- rn:  1 2 3 4 5  6
--- d-rn:0 0 0 3 3  6   ← constant within each island. Group by it.
+<figure class="codex" data-lang="sql">
+<figcaption>Gaps and islands: subtract the row number from the value, and every run collapses to one constant.</figcaption>
+<pre><code>-- day:  1 2 3 7 8 12
+-- rn:   1 2 3 4 5  6      ← the position in the ordered list
+-- d-rn: 0 0 0 3 3  6      ← constant WITHIN each run. That constant is the group key.
 
-WITH numbered AS (
-  SELECT d, ROW_NUMBER() OVER (ORDER BY d) AS rn FROM attendance
-),
-grouped AS (
-  SELECT d, d - rn AS grp FROM numbered          -- integer days; use date arithmetic otherwise
-)
-SELECT MIN(d) AS island_start, MAX(d) AS island_end, COUNT(*) AS length
-FROM grouped
-GROUP BY grp
-ORDER BY island_start;</code></pre>
+WITH numbered AS (                                     -- step 1: number the days in order
+  SELECT d, ROW_NUMBER() OVER (ORDER BY d) AS rn       -- 1, 2, 3 … with no gaps by definition
+  FROM attendance                                      -- one row per attended day
+),                                                     -- end of step 1
+grouped AS (                                           -- step 2: compute the island key
+  SELECT d, d - rn AS grp FROM numbered                -- integer days; date arithmetic otherwise
+)                                                      -- end of step 2
+SELECT MIN(d) AS island_start,                         -- the run's first day
+       MAX(d) AS island_end,                           -- its last day
+       COUNT(*) AS length                              -- and how long it was
+FROM grouped                                           -- read the keyed rows
+GROUP BY grp                                           -- one output row per island
+ORDER BY island_start;                                 -- chronological
+</code></pre>
+<div class="cx-conv">
+  <b>Why the subtraction works</b>
+  <ul>
+    <li>Inside a consecutive run, the day and the row number both increase by exactly one, so their
+      difference never changes. At a gap, the day jumps and the row number does not — so the
+      difference jumps too, and a new group starts.</li>
+    <li>The value of <code>grp</code> is meaningless; only its <em>constancy</em> matters. Do not
+      show it to a user.</li>
+    <li>With real dates, <code>d - rn</code> needs date arithmetic:
+      <code>d - rn * INTERVAL '1 day'</code> in PostgreSQL,
+      <code>DATEADD(day, -rn, d)</code> in SQL Server, <code>julianday(d) - rn</code> in SQLite.</li>
+    <li>This is the single most-asked &ldquo;hard&rdquo; SQL interview question. Recognising the shape
+      is the whole skill.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 The general version: a gap flag and a running sum</div>
@@ -154,26 +219,70 @@ ORDER BY island_start;</code></pre>
     show in an interview — is to mark where a new group <em>starts</em> and then take a running
     sum of those marks. It works for sessions, status runs, anything.
   </p>
-  <pre style="margin-bottom:0"><code>WITH flagged AS (
-  SELECT *,
-         CASE WHEN LAG(ended_at) OVER (PARTITION BY user_id ORDER BY started_at)
-                   &gt;= started_at - INTERVAL '30 minutes'
-              THEN 0 ELSE 1 END AS is_new_session
-  FROM events
-),
-sessions AS (
-  SELECT *, SUM(is_new_session) OVER (PARTITION BY user_id ORDER BY started_at
-                                      ROWS UNBOUNDED PRECEDING) AS session_id
-  FROM flagged
-)
-SELECT user_id, session_id, MIN(started_at), MAX(ended_at), COUNT(*)
-FROM sessions GROUP BY user_id, session_id;</code></pre>
+  <figure class="codex" data-lang="sql">
+<figcaption>Sessionisation: mark where a new run <em>starts</em>, then take a running sum of the marks.</figcaption>
+<pre><code>WITH flagged AS (                                          -- step 1: is this event a new session?
+  SELECT *,                                                -- keep every original column…
+         CASE WHEN LAG(ended_at) OVER (PARTITION BY user_id  -- …plus a flag: the previous event…
+                                       ORDER BY started_at)  -- …of the same user, in time order…
+                   &gt;= started_at - INTERVAL '30 minutes'     -- …ended within the timeout?
+              THEN 0 ELSE 1 END AS is_new_session            -- 0 = continues, 1 = starts a session
+  FROM events                                                -- the raw event stream
+),                                                           -- end of step 1
+sessions AS (                                                -- step 2: turn the marks into ids
+  SELECT *, SUM(is_new_session) OVER (PARTITION BY user_id   -- a RUNNING sum of the flags…
+                                      ORDER BY started_at    -- …in the same order…
+                                      ROWS UNBOUNDED PRECEDING) -- …ROWS, so no peer surprises
+                                      AS session_id          -- 1, 1, 1, 2, 2, 3 …
+  FROM flagged                                               -- reads step 1 by name
+)                                                            -- end of step 2
+SELECT user_id, session_id,                                  -- now group by the derived id
+       MIN(started_at), MAX(ended_at), COUNT(*)              -- when it began, ended, how many events
+FROM sessions GROUP BY user_id, session_id;                  -- one row per session
+</code></pre>
+<div class="cx-conv">
+  <b>The pattern, and where else it applies</b>
+  <ul>
+    <li>&ldquo;Mark the starts, then take a running sum&rdquo; converts a <em>boundary</em> condition
+      into a <em>group key</em>. It works for web sessions, status runs, price periods, machine
+      uptime — anything where a run ends when some condition breaks.</li>
+    <li><code>LAG(ended_at)</code> is NULL for a user's first event, so the comparison is UNKNOWN,
+      so <code>CASE</code> falls to <code>ELSE 1</code>: the first event correctly starts a session.
+      That is luck turned into design — check it deliberately rather than assuming it.</li>
+    <li><code>ROWS UNBOUNDED PRECEDING</code> rather than the default <code>RANGE</code>: two events
+      starting at the same instant would otherwise be peers and share a running sum, merging two
+      sessions into one.</li>
+    <li><code>INTERVAL '30 minutes'</code> is PostgreSQL and Oracle. SQL Server writes
+      <code>DATEADD(minute, -30, started_at)</code>.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="tryit">
-  <pre><code>-- Find every customer's longest run of consecutive months with at least one order.
--- This is gaps-and-islands with a month grain. Try it before reading the solution
--- in course/SOLUTIONS.md.</code></pre>
+  <figure class="codex" data-lang="sql">
+<figcaption>Your turn: the same shape, at a month grain.</figcaption>
+<pre><code>-- EXERCISE. Find every customer's longest run of consecutive months in which
+-- they placed at least one order.
+--
+-- It is gaps-and-islands with a month grain: truncate placed_at to the month,
+-- take the DISTINCT months per customer, number them, and subtract.
+-- Try it before reading the worked answer in course/SOLUTIONS.md.
+</code></pre>
+<div class="cx-conv">
+  <b>Hints, in the order you will need them</b>
+  <ul>
+    <li>Months are not integers, so &ldquo;subtract the row number&rdquo; needs a month-sized unit:
+      in SQLite, <code>strftime('%Y', m) * 12 + strftime('%m', m)</code> turns a month into a
+      countable integer.</li>
+    <li><code>DISTINCT</code> matters: a customer with four orders in March must contribute one
+      March, or the numbering is wrong before you start.</li>
+    <li>&ldquo;Longest&rdquo; means a second aggregation over the islands —
+      <code>MAX(length)</code> per customer, or <code>ROW_NUMBER()</code> ordered by length and
+      filtered to 1 if you also want the dates.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="rules">
@@ -224,7 +333,9 @@ FROM sessions GROUP BY user_id, session_id;</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

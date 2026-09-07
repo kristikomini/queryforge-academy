@@ -40,22 +40,41 @@
   </p>
 </div>
 
-<pre><code>WITH monthly AS (
-  SELECT customer_id,
-         DATE_TRUNC('month', placed_at) AS month,
-         SUM(total_cents)               AS spend
-  FROM orders
-  WHERE status &lt;&gt; 'cancelled'
-  GROUP BY customer_id, DATE_TRUNC('month', placed_at)
-),
-ranked AS (
-  SELECT *, RANK() OVER (PARTITION BY month ORDER BY spend DESC) AS pos
-  FROM monthly
-)
-SELECT month, customer_id, spend / 100.0 AS eur
-FROM ranked
-WHERE pos &lt;= 3
-ORDER BY month, pos;</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>Two CTEs in a row: name the aggregation, then name the ranking, then say what you want.</figcaption>
+<pre><code>WITH monthly AS (                                    -- step 1, given a name
+  SELECT customer_id,                                -- who
+         DATE_TRUNC('month', placed_at) AS month,    -- when, truncated to the month
+         SUM(total_cents)               AS spend     -- how much, in cents
+  FROM orders                                        -- the source table for this step
+  WHERE status &lt;&gt; 'cancelled'                        -- row filter, before grouping
+  GROUP BY customer_id, DATE_TRUNC('month', placed_at)  -- the expression, repeated: portable
+),                                                   -- end of step 1; the comma chains the next
+ranked AS (                                          -- step 2, reading step 1 by name
+  SELECT *,                                          -- everything monthly produced…
+         RANK() OVER (PARTITION BY month             -- …plus a position within each month
+                      ORDER BY spend DESC) AS pos    -- biggest spender is 1; ties share a rank
+  FROM monthly                                       -- reads the CTE above, by name
+)                                                    -- end of step 2
+SELECT month, customer_id, spend / 100.0 AS eur      -- cents → euros for display
+FROM ranked                                          -- the final query reads the last CTE
+WHERE pos &lt;= 3                                       -- top three per month: legal HERE
+ORDER BY month, pos;                                 -- chronological, best first within a month
+</code></pre>
+<div class="cx-conv">
+  <b>What the names buy, and one thing to watch</b>
+  <ul>
+    <li>Each CTE is a step with a name, so the query reads as a sequence of statements rather than
+      nested parentheses. That is the whole point: it is the same query, made reviewable.</li>
+    <li>A CTE is <strong>not</strong> a temporary table. Most engines inline it, so referencing
+      <code>monthly</code> twice may compute it twice. PostgreSQL before 12 materialised it always;
+      PostgreSQL 12+ chooses, and <code>MATERIALIZED</code> forces the old behaviour.</li>
+    <li><code>RANK()</code> and not <code>ROW_NUMBER()</code> is a decision: two customers tied for
+      second both get 2, and there is no third. Use <code>DENSE_RANK()</code> if you want a third
+      anyway.</li>
+  </ul>
+</div>
+</figure>
 
 <p>
   Written as nested derived tables that is the same logic with the reader's eye starting in the
@@ -103,21 +122,43 @@ ORDER BY month, pos;</code></pre>
   </p>
 </div>
 
-<pre><code>WITH RECURSIVE org AS (
+<figure class="codex" data-lang="sql" data-run>
+<figcaption>A recursive CTE walking a management chain: an anchor, a step, and a guard.</figcaption>
+<pre><code>WITH RECURSIVE org AS (                              -- RECURSIVE lets the CTE mention itself
   -- ANCHOR: the starting rows, evaluated once.
-  SELECT id, name, manager_id, 1 AS depth, CAST(name AS VARCHAR(1000)) AS path
-  FROM employees
-  WHERE manager_id IS NULL
+  SELECT id, name, manager_id,                       -- the row itself
+         1 AS depth,                                 -- level counter starts at 1
+         CAST(name AS VARCHAR(1000)) AS path         -- CAST fixes the column's declared width
+  FROM employees                                     -- the whole table is available…
+  WHERE manager_id IS NULL                           -- …but the anchor keeps only the top
 
-  UNION ALL
+  UNION ALL                                          -- ALL, not UNION: never deduplicate here
 
-  -- RECURSIVE: joins the PREVIOUS ITERATION'S rows, not the whole result.
-  SELECT e.id, e.name, e.manager_id, o.depth + 1, o.path || ' > ' || e.name
-  FROM employees e
-  JOIN org o ON e.manager_id = o.id
-  WHERE o.depth &lt; 20                      -- the cycle guard. Put one in. Always.
-)
-SELECT depth, path FROM org ORDER BY path;</code></pre>
+  -- RECURSIVE: joins the PREVIOUS ITERATION'S rows, not the whole result so far.
+  SELECT e.id, e.name, e.manager_id,                 -- the employee found this round
+         o.depth + 1,                                -- one level deeper than their manager
+         o.path || ' &gt; ' || e.name                   -- append to the breadcrumb string
+  FROM employees e                                   -- everyone, every iteration…
+  JOIN org o ON e.manager_id = o.id                  -- …restricted to "manager already found"
+  WHERE o.depth &lt; 20                                 -- the cycle guard. Put one in. Always.
+)                                                    -- end of the recursive CTE
+SELECT depth, path FROM org ORDER BY path;           -- read the finished set like a table
+</code></pre>
+<div class="cx-conv">
+  <b>Types and the two traps</b>
+  <ul>
+    <li><code>CAST(name AS VARCHAR(1000))</code> in the anchor is not decoration. The anchor decides
+      each column's <strong>declared type</strong>, and the recursive branch must fit it. Without the
+      cast, <code>path</code> is as wide as <code>name</code> and the query fails at depth two with
+      a truncation error.</li>
+    <li><code>UNION ALL</code>, never <code>UNION</code>: deduplicating each round is expensive and,
+      in a graph with several routes to the same node, wrong.</li>
+    <li>The guard is the difference between a query and an outage. A cycle in the data — an employee
+      who is transitively their own manager — is an infinite loop, and it is bad data, not bad SQL,
+      that puts it there. SQL Server also caps it with <code>OPTION (MAXRECURSION n)</code>.</li>
+  </ul>
+</div>
+</figure>
 
 <figure class="diagram">
   <svg viewBox="0 0 840 220" role="img" aria-labelledby="d12t d12d">
@@ -172,17 +213,40 @@ SELECT depth, path FROM org ORDER BY path;</code></pre>
 </div>
 
 <div class="tryit">
-  <pre><code>-- A date spine with no calendar table. Useful for filling gaps in reports:
--- every day in 2026, whether or not anything happened on it.
-WITH RECURSIVE days(d) AS (
-  SELECT DATE '2026-01-01'
-  UNION ALL
-  SELECT d + INTERVAL '1 day' FROM days WHERE d &lt; DATE '2026-12-31'
-)
-SELECT d, COALESCE(o.n, 0) AS orders
-FROM days
-LEFT JOIN (SELECT CAST(placed_at AS DATE) d, COUNT(*) n FROM orders GROUP BY 1) o
-       ON o.d = days.d;</code></pre>
+  <figure class="codex" data-lang="sql">
+<figcaption>Generating a date spine, so a report can show the days on which nothing happened.</figcaption>
+<pre><code>-- Every day in 2026, whether or not anything happened on it.
+WITH RECURSIVE days(d) AS (                       -- the column list names what the CTE produces
+  SELECT DATE '2026-01-01'                        -- anchor: the first day
+  UNION ALL                                       -- ALL: never deduplicate a recursive step
+  SELECT d + INTERVAL '1 day' FROM days           -- step: yesterday's row plus one day
+  WHERE d &lt; DATE '2026-12-31'                     -- the guard, and here also the end condition
+)                                                 -- end of the spine
+SELECT d, COALESCE(o.n, 0) AS orders              -- a day with no orders reads as 0, not blank
+FROM days                                         -- drive from the CALENDAR, not from the data
+LEFT JOIN (SELECT CAST(placed_at AS DATE) d,      -- truncate the timestamp to a date…
+                  COUNT(*) n                      -- …and count the orders on each
+           FROM orders GROUP BY 1) o              -- GROUP BY 1 = by the first select column
+       ON o.d = days.d;                           -- one row per day either way
+</code></pre>
+<div class="cx-conv">
+  <b>Why you drive from the calendar</b>
+  <ul>
+    <li>Grouping <code>orders</code> by day can only ever produce days that <em>have</em> orders. The
+      zero days are missing, and a chart with missing days is a chart that lies. Generating the days
+      and left-joining the data is the general fix.</li>
+    <li><code>d + INTERVAL '1 day'</code> is PostgreSQL. SQL Server writes
+      <code>DATEADD(day, 1, d)</code>; SQLite writes <code>date(d, '+1 day')</code>. The
+      <em>shape</em> is portable, the arithmetic is not.</li>
+    <li><code>GROUP BY 1</code> means &ldquo;by the first column of the select list&rdquo;. Compact,
+      standard, and worth knowing when you read other people's SQL — though naming the expression is
+      kinder to the next reader.</li>
+    <li>In production, a permanent <code>dim_date</code> table beats generating one every time: it
+      can carry holidays and working-day flags, and it can be indexed. The reference database has
+      one.</li>
+  </ul>
+</div>
+</figure>
 </div>
 
 <div class="box note">
@@ -245,7 +309,9 @@ LEFT JOIN (SELECT CAST(placed_at AS DATE) d, COUNT(*) n FROM orders GROUP BY 1) 
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

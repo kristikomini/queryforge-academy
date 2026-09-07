@@ -65,30 +65,67 @@
 </table>
 </div>
 
+<figure class="codex" data-lang="sql">
+<figcaption>Declarative range partitioning, and the constraint that surprises everyone.</figcaption>
 <pre><code>-- PostgreSQL 10+ declarative partitioning
-CREATE TABLE orders (
-  id BIGINT, placed_at TIMESTAMPTZ NOT NULL, customer_id INT, total_cents BIGINT
-) PARTITION BY RANGE (placed_at);
+CREATE TABLE orders (                                        -- the parent: no rows of its own
+  id BIGINT, placed_at TIMESTAMPTZ NOT NULL,                 -- the partition key must be NOT NULL
+  customer_id INT, total_cents BIGINT                        -- ordinary columns
+) PARTITION BY RANGE (placed_at);                            -- how rows are routed to children
 
-CREATE TABLE orders_2026_01 PARTITION OF orders
-  FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+CREATE TABLE orders_2026_01 PARTITION OF orders              -- one child…
+  FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');          -- …owning a half-open range
 
 -- The partition key MUST be part of the primary key. That is not a quirk: the
 -- engine cannot enforce global uniqueness across partitions without checking all
--- of them, which would defeat the point.
+-- of them, which would defeat the point of partitioning.
 </code></pre>
+<div class="cx-conv">
+  <b>What partitioning does and does not buy</b>
+  <ul>
+    <li><code>FROM … TO …</code> is half-open, exactly like a good <code>WHERE</code> clause: the
+      upper bound belongs to the next partition. Adjacent partitions therefore cannot overlap by
+      construction.</li>
+    <li>Partitioning is <strong>not</strong> a performance feature by itself. A well-indexed
+      unpartitioned table is usually faster for point queries. What it buys is
+      <em>manageability</em>: dropping a month, moving old data to cheap storage, and vacuuming or
+      rebuilding one slice at a time.</li>
+    <li>The primary key must include the partition key, so a globally unique <code>id</code> alone is
+      not possible. That is a genuine design cost, and it is the reason to decide this before the
+      table has a hundred million rows in it.</li>
+  </ul>
+</div>
+</figure>
 
 <h3>Partition elimination is the payoff — and it is conditional</h3>
 
-<pre><code>-- Reads ONE partition:
-SELECT * FROM orders WHERE placed_at &gt;= '2026-03-01' AND placed_at &lt; '2026-04-01';
+<figure class="codex" data-lang="sql">
+<figcaption>Partition elimination is the payoff &mdash; and it is conditional on the predicate.</figcaption>
+<pre><code>-- Reads ONE partition: the planner can prove which one from the predicate.
+SELECT * FROM orders                                            -- the parent table…
+WHERE placed_at &gt;= '2026-03-01' AND placed_at &lt; '2026-04-01';   -- a range on the key
 
--- Reads ALL of them: the key is wrapped, so the planner cannot prove which
--- partitions can be skipped. Exactly the sargability rule, one level up.
-SELECT * FROM orders WHERE YEAR(placed_at) = 2026;
+-- Reads ALL of them: the key is wrapped in a function, so the planner cannot
+-- prove which partitions can be skipped. The sargability rule, one level up.
+SELECT * FROM orders WHERE YEAR(placed_at) = 2026;              -- same answer, every partition
 
 -- Also reads all of them: no predicate on the partition key at all.
-SELECT * FROM orders WHERE customer_id = 42;</code></pre>
+SELECT * FROM orders WHERE customer_id = 42;                    -- a fine query, badly partitioned
+</code></pre>
+<div class="cx-conv">
+  <b>The rule this illustrates</b>
+  <ul>
+    <li>Partition elimination happens at <em>plan time</em> and needs a predicate the planner can
+      reason about: a bare comparison on the partition key. Wrap the key in anything and the
+      guarantee is gone.</li>
+    <li>The third query is the design question, not a bug: if most queries filter by customer and
+      not by date, then date is the wrong partition key — and possibly nothing should be
+      partitioned.</li>
+    <li>Check it, do not assume it. The plan names the partitions it will read; a plan listing all
+      of them is the whole feature failing silently.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box trap">
   <div class="box-title">⚠ Trap — partitioning can make queries slower</div>
@@ -107,13 +144,30 @@ SELECT * FROM orders WHERE customer_id = 42;</code></pre>
   The real reason range partitioning earns its complexity: retention becomes metadata, not work.
 </p>
 
-<pre><code>-- Retire January 2025 without a DELETE. This is a catalogue operation:
--- no rows are read, no log is generated, it completes in milliseconds.
-ALTER TABLE orders DETACH PARTITION orders_2025_01;      -- PostgreSQL
-DROP TABLE orders_2025_01;        -- or keep it, compressed, on cheaper storage
+<figure class="codex" data-lang="sql">
+<figcaption>The real payoff: retention becomes a catalogue operation instead of millions of deletes.</figcaption>
+<pre><code>-- Retire January 2025 without a DELETE. This is a catalogue operation: no rows
+-- are read, no log records are generated, and it completes in milliseconds.
+ALTER TABLE orders DETACH PARTITION orders_2025_01;   -- PostgreSQL: it becomes a plain table
+DROP TABLE orders_2025_01;                            -- …or keep it, compressed, on cheap storage
 
 -- SQL Server: SWITCH the partition into a staging table, then truncate that.
-ALTER TABLE orders SWITCH PARTITION 13 TO orders_archive;</code></pre>
+ALTER TABLE orders SWITCH PARTITION 13 TO orders_archive;   -- metadata only, instant
+</code></pre>
+<div class="cx-conv">
+  <b>Why this is worth the complexity</b>
+  <ul>
+    <li><code>DELETE FROM orders WHERE placed_at &lt; '2025-02-01'</code> on forty million rows is a
+      very large transaction: a very large log, a long lock, and dead space left behind.
+      <code>DETACH</code> and <code>SWITCH</code> change a catalogue entry.</li>
+    <li>The switched-in table must match <strong>exactly</strong> — same columns, same types, same
+      indexes, same filegroup, and a constraint proving its rows belong to that range. Getting that
+      right is most of the work, and it is why this is scripted rather than typed.</li>
+    <li>Detaching does not delete anything. That is a feature: the data is still there if the
+      retention decision turns out to have been wrong.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 Compare that with the alternative</div>
@@ -129,15 +183,36 @@ ALTER TABLE orders SWITCH PARTITION 13 TO orders_archive;</code></pre>
 
 <p>Most systems that think they need partitioning need this instead:</p>
 
+<figure class="codex" data-lang="sql">
+<figcaption>What most systems that think they need partitioning actually need: a batched delete.</figcaption>
 <pre><code>-- Batched, resumable, and it never holds a long transaction or escalates locks.
 -- Run it in a loop until it affects zero rows.
-WITH doomed AS (
-  SELECT id FROM orders
-  WHERE placed_at &lt; '2025-01-01' AND status IN ('delivered','cancelled')
-  ORDER BY id
-  LIMIT 5000
-)
-DELETE FROM orders WHERE id IN (SELECT id FROM doomed);</code></pre>
+WITH doomed AS (                                     -- choose a bounded set first…
+  SELECT id FROM orders                              -- only the keys are needed
+  WHERE placed_at &lt; '2025-01-01'                     -- old…
+    AND status IN ('delivered','cancelled')          -- …and finished
+  ORDER BY id                                        -- deterministic, and index-friendly
+  LIMIT 5000                                         -- the batch size: the whole point
+)                                                    -- end of the CTE
+DELETE FROM orders WHERE id IN (SELECT id FROM doomed);   -- delete exactly those rows
+</code></pre>
+<div class="cx-conv">
+  <b>Why the batch size is the whole design</b>
+  <ul>
+    <li>One statement deleting forty million rows is one transaction: the log must hold all of it,
+      the locks are held for all of it, and a failure at 95% rolls back everything. Five thousand at
+      a time is a series of short transactions, each cheap to undo.</li>
+    <li>It is <strong>resumable</strong>: interrupted at any point, the next run continues from
+      wherever it stopped, because the <code>WHERE</code> clause defines the work rather than a
+      cursor position.</li>
+    <li>Below the lock-escalation threshold — around 5000 row locks in SQL Server — the engine keeps
+      taking row locks instead of locking the table. Choosing 5000 rather than 50 000 is that
+      threshold, not superstition.</li>
+    <li>Add a short pause between batches on a busy system, so replication and other writers can
+      keep up.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Three details that make it safe</div>
@@ -235,7 +310,9 @@ DELETE FROM orders WHERE id IN (SELECT id FROM doomed);</code></pre>
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

@@ -85,29 +85,49 @@
 
 <h2 id="frameworks">The frameworks</h2>
 
-<pre><code>-- tSQLt (SQL Server) — tests are stored procedures, and it can FAKE a table so a
+<figure class="codex" data-lang="sql">
+<figcaption>Two test frameworks that run inside the database, so the thing under test is the real engine.</figcaption>
+<pre><code>-- tSQLt (SQL Server) — tests ARE stored procedures, and it can FAKE a table so a
 -- test does not depend on foreign keys or on data it did not create.
-EXEC tSQLt.NewTestClass 'OrdersTests';
-GO
-CREATE PROCEDURE OrdersTests.[test cancelling a shipped order is rejected]
-AS
-BEGIN
-  EXEC tSQLt.FakeTable 'dbo.orders';
-  INSERT INTO dbo.orders (id, status) VALUES (1, 'shipped');
-  EXEC tSQLt.ExpectException @ExpectedMessagePattern = '%cannot cancel%';
-  EXEC dbo.usp_CancelOrder @order_id = 1;
-END
-GO
+EXEC tSQLt.NewTestClass 'OrdersTests';                       -- a schema to hold the tests
+GO                                                           -- batch separator, not SQL
+CREATE PROCEDURE OrdersTests.[test cancelling a shipped order is rejected]  -- the NAME is the spec
+AS                                                           -- the procedure body follows
+BEGIN                                                        -- arrange, act, assert
+  EXEC tSQLt.FakeTable 'dbo.orders';                         -- replace it with a constraint-free copy
+  INSERT INTO dbo.orders (id, status) VALUES (1, 'shipped');  -- arrange: exactly the row we need
+  EXEC tSQLt.ExpectException @ExpectedMessagePattern = '%cannot cancel%';  -- assert BEFORE acting
+  EXEC dbo.usp_CancelOrder @order_id = 1;                    -- act: the thing under test
+END                                                          -- end of the test procedure
+GO                                                           -- send the batch
 
 -- pgTAP (PostgreSQL) — TAP-producing assertions, so it plugs into any CI runner.
-SELECT plan(3);
-SELECT has_table('orders');
-SELECT col_not_null('orders', 'customer_id');
-SELECT throws_ok(
-  $$ INSERT INTO order_lines (order_id, line_no, product_id, quantity, unit_price_cents)
-     VALUES (1, 99, 1, -5, 100) $$,
-  '23514', NULL, 'negative quantity is rejected');
-SELECT finish();</code></pre>
+SELECT plan(3);                                              -- declare how many assertions follow
+SELECT has_table('orders');                                  -- 1: the table exists
+SELECT col_not_null('orders', 'customer_id');                -- 2: the column is NOT NULL
+SELECT throws_ok(                                            -- 3: this statement must fail…
+  $$ INSERT INTO order_lines (order_id, line_no, product_id, quantity, unit_price_cents)  -- $$ … $$ is dollar quoting
+     VALUES (1, 99, 1, -5, 100) $$,                          -- …a negative quantity…
+  '23514', NULL, 'negative quantity is rejected');           -- …with SQLSTATE 23514
+SELECT finish();                                             -- did all three actually run?
+</code></pre>
+<div class="cx-conv">
+  <b>What makes these tests good rather than merely present</b>
+  <ul>
+    <li>They run against the <strong>real engine</strong>. A test double for a database tests your
+      idea of what the database does, which is exactly the thing that is wrong.</li>
+    <li><code>plan(3)</code> then <code>finish()</code> catches the worst failure mode in database
+      testing: a test that silently ran zero assertions and reported success.</li>
+    <li><code>throws_ok</code> asserts on the <strong>SQLSTATE</strong> <code>23514</code> (check
+      violation), not on the message. Messages are localised and change between versions; SQLSTATEs
+      are standard.</li>
+    <li>The test name is the specification. <code>[test cancelling a shipped order is rejected]</code>
+      appears verbatim in the failure output, so a red build is already a sentence.</li>
+    <li><code>$$ … $$</code> is PostgreSQL's dollar quoting: a string containing quotes, with nothing
+      to escape.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box note">
   <div class="box-title">Or just test from the application's test framework</div>
@@ -137,18 +157,37 @@ SELECT finish();</code></pre>
 
 <h2 id="ci">In CI</h2>
 
-<pre><code># One job, a real engine, migrations applied from scratch every time.
-services:
-  postgres:
-    image: postgres:17
-    env: { POSTGRES_PASSWORD: test }
-    options: &gt;-
-      --health-cmd pg_isready --health-interval 5s --health-retries 10
+<figure class="codex" data-lang="yaml">
+<figcaption>The CI job: a real engine, and migrations applied twice on purpose.</figcaption>
+<pre><code># One job, a real engine, migrations applied from scratch on every run.
+services:                             # containers the job can talk to
+  postgres:                           # the engine under test — not a mock
+    image: postgres:17                # pin the MAJOR version you run in production
+    env: { POSTGRES_PASSWORD: test }  # throwaway credentials for a throwaway database
+    options: &gt;-                       # wait until it is actually accepting connections…
+      --health-cmd pg_isready --health-interval 5s --health-retries 10   # …or step 1 fails
 
-steps:
+steps:                                # the job itself
   - run: ./migrate up                 # migrations run against an EMPTY database…
-  - run: ./migrate up                 # …and again: they must be idempotent
-  - run: npm test</code></pre>
+  - run: ./migrate up                 # …and again: they must be IDEMPOTENT
+  - run: npm test                     # only then, the tests
+</code></pre>
+<div class="cx-conv">
+  <b>The two lines that do the real work</b>
+  <ul>
+    <li>Running <code>./migrate up</code> <strong>twice</strong> is the cheapest possible test of
+      migration idempotency. A migration that fails on the second run will also fail the day a
+      deploy is retried after a timeout.</li>
+    <li>Applying migrations to an <em>empty</em> database every time proves that the schema can be
+      built from the repository alone. A schema that only exists because of a restored production
+      backup is not in version control, whatever the migrations folder claims.</li>
+    <li>The health check is not boilerplate: without it, the first migration races the container's
+      startup and the job fails intermittently, which is worse than failing always.</li>
+    <li>Pin the major version to the one production runs. A test suite that passes on PostgreSQL 17
+      and deploys to 13 has tested the wrong engine.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="box pro">
   <div class="box-title">🎓 Two CI checks nobody thinks of and everybody needs</div>
@@ -164,16 +203,41 @@ steps:
   </ul>
 </div>
 
-<pre><code>-- The invariant test, in one query. Every FK column without a leading index.
-SELECT c.conrelid::regclass AS tbl, a.attname AS col
-FROM pg_constraint c
-JOIN unnest(c.conkey) WITH ORDINALITY k(attnum, ord) ON TRUE
-JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
-WHERE c.contype = 'f' AND k.ord = 1
-  AND NOT EXISTS (
-    SELECT 1 FROM pg_index i
-    WHERE i.indrelid = c.conrelid AND i.indkey[0] = a.attnum);
--- Zero rows, or the build fails. See chapter 04 for why this one matters so much.</code></pre>
+<figure class="codex" data-lang="sql">
+<figcaption>A schema invariant as a query: every foreign key that has no index behind it.</figcaption>
+<pre><code>-- Every FK column that is not the leading column of some index. Zero rows, or fail.
+SELECT c.conrelid::regclass AS tbl,                    -- the oid, cast to a readable name
+       a.attname AS col                                -- the column's name
+FROM pg_constraint c                                   -- every constraint in the database
+JOIN unnest(c.conkey) WITH ORDINALITY k(attnum, ord)   -- expand the key array into rows…
+  ON TRUE                                              -- …a lateral join with no condition
+JOIN pg_attribute a ON a.attrelid = c.conrelid         -- resolve the column number…
+                   AND a.attnum   = k.attnum           -- …to a real column
+WHERE c.contype = 'f'                                  -- 'f' = foreign key
+  AND k.ord = 1                                        -- only the LEADING column matters
+  AND NOT EXISTS (                                     -- …and there must be no index…
+    SELECT 1 FROM pg_index i                         -- every index in the database…
+    WHERE i.indrelid = c.conrelid                      -- …on the same table…
+      AND i.indkey[0] = a.attnum);                     -- …that starts with this column
+-- Zero rows, or the build fails. Chapter 04 explains why this one matters so much.
+</code></pre>
+<div class="cx-conv">
+  <b>Why this belongs in CI and not in a code review</b>
+  <ul>
+    <li>An unindexed foreign key has no symptom until a parent <code>DELETE</code> scans the child
+      table while holding locks. It is invisible in review and obvious in an incident.</li>
+    <li>The test is a <em>query over the catalogue</em>, so it cannot go out of date: it checks the
+      schema that exists, not the schema somebody documented.</li>
+    <li><code>::regclass</code> casts an internal object id to its readable name — the difference
+      between an error message you can act on and one you have to look up.</li>
+    <li><code>WITH ORDINALITY</code> gives each array element its position, which is how
+      <code>k.ord = 1</code> can mean &ldquo;the leading column&rdquo;. Only the leading column can
+      serve a lookup, so a composite index starting elsewhere does not count.</li>
+    <li>The reference database ships exactly these as
+      <code>reference/labs/schema-invariants.sql</code>.</li>
+  </ul>
+</div>
+</figure>
 
 <div class="rules">
   <ol>
@@ -226,7 +290,9 @@ WHERE c.contype = 'f' AND k.ord = 1
 <script src="../assets/quizzes-2.js"></script>
 <script src="../assets/quizzes-3.js"></script>
 <script src="../assets/store.js"></script>
+<script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
+<script src="../assets/codex.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>
