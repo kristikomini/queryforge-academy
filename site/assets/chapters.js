@@ -48,7 +48,7 @@ const CHAPTERS = [
 
      They are numbered 0A–0J rather than renumbered into the 01–51 sequence on
      purpose: a chapter id is the key a learner's progress, notes and review
-     schedule are stored under, so renumbering fifty-two chapters to make room
+     schedule are stored under, so renumbering the fifty-two that already existed
      would silently reassign somebody's history to a different chapter. */
   {
     n: "0A", id: "00a-what-is-a-database", part: PARTS[1],

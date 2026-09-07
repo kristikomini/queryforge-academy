@@ -128,7 +128,7 @@ node tools/doctor.mjs
 | `site/generated` | `forge-db.js` ⇄ the schema, and the service-worker cache name ⇄ a content hash |
 | `code/covered-in` | Every `Covered in:` comment points at a file that exists |
 | `reference/labs` | Every lab is listed in its README |
-| `docs/counts` | **Every number adjacent to a counted noun** matches reality |
+| `docs/counts` | **Every number adjacent to a counted noun** matches reality — digits and words alike, within one sentence |
 | `site/code-anatomy` | **Every code line carries a comment**, every block has a caption and a language, and every token it uses is in the syntax dictionary |
 
 Three of these are deliberate improvements on the design this was ported from, and
@@ -138,7 +138,11 @@ both fix documented bugs in it:
   patterns, so any prose stating a count in wording nobody had registered was
   simply not checked — and three such sentences had drifted. This version finds
   *every* number next to a counted noun and requires it to match, with an
-  allowlist where each entry carries a reason.
+  allowlist where each entry carries a reason. It reads **words as well as
+  digits**, which it did not at first: after Part 0 landed, the home page still
+  greeted visitors with the old count spelled out as "Fifty-two", and the check
+  walked straight past it. The same lesson the inversion was for, in a new
+  spelling — found by looking at the deployed site rather than by the gate.
 - **The service-worker cache name is derived from a content hash**, not bumped by
   hand. Forgetting that bump is the single most common service-worker bug:
   returning visitors keep last month's chapters and nothing reports an error.
@@ -214,7 +218,8 @@ docs/ADVERTS.md           where the requirements came from
 docs/DEPLOY.md            how to publish it, and what each host needs
 
 vercel.json               Vercel      — static, no build step
-wrangler.jsonc            Cloudflare  — assets-only Worker
+wrangler.jsonc            Cloudflare  — static assets, plus worker.mjs
+worker.mjs                four lines: serve /index.html at /, without a redirect
 netlify.toml              Netlify     — static, no build step
 Dockerfile                the WHOLE platform, site + accounts API, in one container
 ```

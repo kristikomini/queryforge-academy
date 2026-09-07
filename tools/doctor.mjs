@@ -436,6 +436,11 @@ const COUNT_ALLOW = [
   /\bof \d+\b/,
 ];
 
+const WORD_TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50,
+                    sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+const WORD_ONES = { one: 1, two: 2, three: 3, four: 4, five: 5,
+                    six: 6, seven: 7, eight: 8, nine: 9 };
+
 async function checkCounts(man, quizzes) {
   checksRun.push("docs/counts");
   const truth = {
@@ -510,32 +515,66 @@ async function checkCounts(man, quizzes) {
         ordering is what makes "52 chapters, 529 questions, 456 golden rules"
         work: each number belongs to one noun, not to all three. Binding nouns
         to numbers instead produced nine false errors on that single sentence. */
-    for (const nm of text.matchAll(/(?<![\w.\/-])(\d{1,3}(?:[,  ]\d{3})*|\d+)(?![\w.\/%-])/g)) {
-      const n = parseInt(nm[1].replace(/[\s,]/g, ""), 10);
-      if (!Number.isFinite(n)) continue;
-
+    /*  One claim, checked the same way however it is spelled. `written` is what
+        the reader sees — "52" or "fifty-two" — and is quoted back in the error,
+        because being told your "62" is wrong when the page says "sixty-two" is
+        a worse error message than no error message. */
+    const bind = (n, start, end, written) => {
       /* Plausible "how many of these are there" range only. Anything else is a
          version, a duration, a page size — and demanding those match would be
          noise, which is how a gate gets ignored. */
-      if (n < 20 || n > 20000) continue;
-      if (n >= 1900 && n <= 2100) continue;              // a year, not a count
+      if (!Number.isFinite(n) || n < 20 || n > 20000) return;
+      if (n >= 1900 && n <= 2100) return;                // a year, not a count
 
-      const start = nm.index, end = nm.index + nm[1].length;
       let best = null, bestGap = Infinity;
       for (const nd of nouns) {
         const gap = nd.at >= end ? nd.at - end : start - (nd.at + nd.len);
         if (gap < 0 || gap > WINDOW) continue;
+
+        /*  A number and the noun it counts must be in the SAME SENTENCE.
+            Adding the word pass produced two false errors immediately, and
+            both were this: "One query, thirty seconds. Rules out…" — where
+            "Rules" is a verb in the next sentence — and "…two seconds and
+            forty.</p><h2>The rules</h2>", where the noun is a heading below.
+            Proximity alone cannot tell either of those from a real claim, and
+            a false error is how a gate gets ignored. */
+        const between = nd.at >= end
+          ? text.slice(end, nd.at)
+          : text.slice(nd.at + nd.len, start);
+        if (/[.!?;]\s/.test(between)) continue;
+        if (/<\/?(?:p|div|h[1-6]|li|td|tr|table|section|nav|figcaption)\b/i.test(between)) continue;
+
         if (gap < bestGap) { bestGap = gap; best = nd; }
       }
-      if (!best) continue;
-
-      if (isExempt(start, end)) continue;
+      if (!best) return;
+      if (isExempt(start, end)) return;
 
       const flat = text.slice(Math.max(0, start - 70), end + 70).replace(/\s+/g, " ").trim();
 
       if (n !== truth[best.noun])
         err("docs/counts",
-          `${rel(f)} has "${n}" beside "${best.word}" but there are ${truth[best.noun]} ${best.noun} — …${flat.slice(0, 130)}…`);
+          `${rel(f)} has "${written}" beside "${best.word}" but there are ${truth[best.noun]} ${best.noun} — …${flat.slice(0, 130)}…`);
+    };
+
+    /* Digits. */
+    for (const nm of text.matchAll(/(?<![\w.\/-])(\d{1,3}(?:[,  ]\d{3})*|\d+)(?![\w.\/%-])/g))
+      bind(parseInt(nm[1].replace(/[\s,]/g, ""), 10), nm.index, nm.index + nm[1].length, nm[1]);
+
+    /*  WORDS, and this is the second inversion of this check.
+
+        The home page opened with "Fifty-two chapters" for as long as it took
+        somebody to look at the deployed site, because the loop above sees only
+        digits — and a spelled-out number is exactly the "wording nobody had
+        registered" that the original, pattern-matching version of this check
+        was replaced for missing. The lesson repeated itself in a new spelling,
+        which is the most that can be said for it.
+
+        Twenty upwards only, matching the numeric floor above: below that a word
+        like "eight" is far more often prose than a count.                     */
+    for (const wm of text.matchAll(
+      /\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)(?:[-\s](one|two|three|four|five|six|seven|eight|nine))?\b/gi)) {
+      const n = WORD_TENS[wm[1].toLowerCase()] + (wm[2] ? WORD_ONES[wm[2].toLowerCase()] : 0);
+      bind(n, wm.index, wm.index + wm[0].length, wm[0]);
     }
   }
 

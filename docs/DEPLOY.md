@@ -73,10 +73,20 @@ the build command empty.
 npx wrangler deploy
 ```
 
-`wrangler.jsonc` declares an **assets-only** Worker: there is no `main`, so no
-Worker code runs at all and every request is served by Cloudflare's asset
-server. `html_handling` is set to `"none"` for exactly the reason `cleanUrls` is
-off on Vercel — the friendlier `"auto-trailing-slash"` redirects `.html` paths.
+`html_handling` is `"none"` for exactly the reason `cleanUrls` is off on Vercel —
+the friendlier `"auto-trailing-slash"` redirects `.html` paths, and this site's
+links and its service worker's precache list are all explicit `.html` paths.
+
+That one setting decides a second thing too, which cost this repository a broken
+home page on its first real deploy: **`"none"` also stops `/` being served from
+`/index.html`.** Every other URL worked; the root returned 404, and it was
+spotted by opening the site rather than by any check.
+
+So [`worker.mjs`](../worker.mjs) supplies the half that removes, in four lines:
+it rewrites a directory path to its `index.html` **internally**, with no redirect
+and no change to the URL. Cloudflare serves anything matching a file directly and
+only invokes the Worker when nothing matched, so `/` is very nearly the only URL
+on the site that reaches it.
 
 Only changed files are uploaded: the asset store is content-addressed, so a
 redeploy after editing one chapter moves one file, and a redeploy with nothing
@@ -159,6 +169,11 @@ the site to work:
 3. **Do not cache `sw.js`.** If the service worker is served from an HTTP cache,
    a new version cannot take over. The provided configurations all set
    `no-cache` on it.
+4. **Serve `/index.html` at `/`.** Almost every host does this unasked;
+   Cloudflare with `html_handling: "none"` is the exception this repository met,
+   and `worker.mjs` is the answer to it. Whatever the host, **open the bare
+   domain** before believing a deploy: it is the one URL a smoke test of named
+   pages will not cover.
 
 HTTPS is required for the service worker — that is a browser rule, not a choice
 of this site — with `localhost` the standard exception. Without HTTPS the site

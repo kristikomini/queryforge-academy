@@ -17,7 +17,7 @@
    list of 62 chapters would go stale on the first rename.
    =========================================================================== */
 
-const CACHE = "queryforge-v63edceac978d";   /* STAMPED by tools/stamp-sw.mjs */
+const CACHE = "queryforge-v944c575e53db";   /* STAMPED by tools/stamp-sw.mjs */
 
 /* Everything that is not a chapter. If a name here is wrong the install still
    completes — see the caught rejection below — so a typo cannot make the site

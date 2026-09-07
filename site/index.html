@@ -21,7 +21,7 @@
   <div class="hero">
     <h1>SQL, for the job you want</h1>
     <p class="lede">
-      Fifty-two chapters built backwards from real Italian <em>SQL / Database Developer</em>
+      62 chapters built backwards from real Italian <em>SQL / Database Developer</em>
       adverts, with a learning engine that measures whether you can <strong>recall</strong> this
       material — not whether you scrolled past it.
     </p>
@@ -55,7 +55,7 @@
       <h3 style="margin-top:0">Progress means retrieval</h3>
       <p class="small">
         A chapter is worth <strong>25% for reading</strong> and <strong>75% for the test score</strong>.
-        Read all fifty-two and answer nothing and you are capped at 25%. That is deliberate: the
+        Read all 62 chapters and answer nothing and you are capped at 25%. That is deliberate: the
         number on the top bar should mean something.
       </p>
     </div>
@@ -148,7 +148,12 @@
   /* --- headline counts, read from the data rather than typed into prose --- */
   var stats = document.getElementById("home-stats");
   var qn = window.LFQuiz ? window.LFQuiz.count() : 0;
-  [["Chapters", CH.length, "across eight parts"],
+  /*  "across n parts" sat here as literal text next to a computed count, under a
+      comment claiming these are read from the data. It drifted the moment Part 0
+      was added. Counted from the manifest now, like everything else: the numbered
+      parts, which is PARTS minus "Start here". */
+  var nParts = PARTS.filter(function (p) { return /^Part /.test(p); }).length;
+  [["Chapters", CH.length, "across " + nParts + " parts"],
    ["Questions", qn, "every one a flashcard too"],
    ["From an advert", CH.filter(function (c) { return c.req; }).length + " of " + CH.length, "the rest say why they are here"]]
    .forEach(function (s) {

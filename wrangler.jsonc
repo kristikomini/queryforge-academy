@@ -1,12 +1,6 @@
 {
   // ==========================================================================
-  //  Cloudflare Workers — static assets, no Worker script.
-  //
-  //  Assets-only: there is no "main", so every request is served from ./site by
-  //  Cloudflare's asset server and no Worker code runs at all. That is the
-  //  cheapest and most reliable shape for this site, because the site genuinely
-  //  is static: the chapters, the tests, the viva, the simulator and the SQL
-  //  playground all run in the browser.
+  //  Cloudflare Workers — static assets, plus four lines of Worker.
   //
   //      npx wrangler deploy          # from this directory
   //
@@ -17,19 +11,34 @@
   //  probes /api/health once per session — and says so on the account page
   //  rather than producing failed syncs. See docs/DEPLOY.md.
   //
-  //  html_handling is "none" ON PURPOSE, and it is the one setting here worth
-  //  arguing about. The friendlier "auto-trailing-slash" REDIRECTS /x.html to
-  //  /x. Every link in this site and every entry in the service worker's
-  //  precache list is an explicit .html path, so that would turn a precache of
-  //  99 files into 99 redirects — and a redirected response is exactly what a
-  //  service worker cannot store cleanly. "none" serves the paths as written.
+  //  THE TWO SETTINGS THAT ARGUE WITH EACH OTHER.
+  //
+  //  `html_handling` decides two unrelated things at once: whether "/" comes
+  //  from "/index.html", and whether "/x.html" redirects to "/x". This site
+  //  needs the first and must not have the second — every link in it is an
+  //  explicit .html path, because it is designed to open from a USB stick with
+  //  no server to rewrite anything, and the service worker precaches those
+  //  exact paths. A redirecting mode makes the precache store redirected
+  //  responses, and the browser refuses to serve one for a navigation, so the
+  //  site stops working offline.
+  //
+  //  So `html_handling` is "none", and worker.mjs supplies the half that
+  //  removes: it rewrites a directory path to its index.html INTERNALLY. This
+  //  was found the way these things usually are — the deployed site 404'd on
+  //  its own home page while every other URL worked.
+  //
+  //  The Worker is invoked only when a request matches no file, so every
+  //  chapter, script and stylesheet is still served straight from the asset
+  //  server and never reaches it.
   // ==========================================================================
   "$schema": "https://unpkg.com/wrangler/config-schema.json",
   "name": "queryforge-academy",
+  "main": "worker.mjs",
   "compatibility_date": "2026-09-06",
   "workers_dev": true,
   "assets": {
     "directory": "./site",
+    "binding": "ASSETS",
     "html_handling": "none",
     "not_found_handling": "none"
   }
