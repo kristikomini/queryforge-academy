@@ -1,0 +1,20 @@
+# Only api/ and site/ are copied into the image (see the Dockerfile), so most of
+# this is belt and braces — except App_Data, which is not: it holds the local
+# development database and its JWT signing key, and neither has any business in
+# a published image.
+.git/
+.github/
+.claude/
+.wrangler/
+.vercel/
+.netlify/
+api/App_Data/
+reference/forge.db
+node_modules/
+course/
+docs/
+tools/
+reference/
+*.md
+Dockerfile
+.dockerignore

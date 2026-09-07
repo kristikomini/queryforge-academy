@@ -1,0 +1,51 @@
+# =============================================================================
+#  Netlify. Static publish of site/, with no build step — there is nothing to
+#  build, and adding one would only create a way for the deploy to fail.
+#
+#  WHAT IS AND IS NOT DEPLOYED: everything except the accounts service, which
+#  needs a persistent process and a writable SQLite file. The site detects the
+#  absence of /api/ (account.js probes /api/health once per session) and says so
+#  on the account page rather than producing failed syncs. See docs/DEPLOY.md.
+#
+#  pretty_urls is OFF deliberately. It rewrites /x.html to /x, and every link in
+#  this site — and every entry in the service worker's precache list — is an
+#  explicit .html path. A redirect on those turns a precache into a set of
+#  redirected responses, which is exactly the failure the service worker exists
+#  to avoid.
+# =============================================================================
+
+[build]
+  publish = "site"
+  command = ""
+
+[build.processing]
+  skip_processing = true
+
+[build.processing.html]
+  pretty_urls = false
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "SAMEORIGIN"
+
+# The worker must never be served from cache, or a new version cannot take over.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, must-revalidate"
+
+# The engine is 700 KB and is versioned by its path, so it can be cached hard.
+[[headers]]
+  for = "/vendor/sql.js/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Chapters and assets change; let the browser revalidate. The service worker is
+# what makes this fast offline, not the HTTP cache.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

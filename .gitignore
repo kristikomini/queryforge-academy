@@ -14,3 +14,10 @@ reference/forge.db
 
 node_modules/
 .DS_Store
+
+# Deployment scratch. Each host's CLI writes a local state directory; none of it
+# belongs in the repository, and .vercel in particular holds a project id that
+# links a clone to somebody else's account.
+.wrangler/
+.vercel/
+.netlify/

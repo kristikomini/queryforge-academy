@@ -1,0 +1,36 @@
+{
+  // ==========================================================================
+  //  Cloudflare Workers — static assets, no Worker script.
+  //
+  //  Assets-only: there is no "main", so every request is served from ./site by
+  //  Cloudflare's asset server and no Worker code runs at all. That is the
+  //  cheapest and most reliable shape for this site, because the site genuinely
+  //  is static: the chapters, the tests, the viva, the simulator and the SQL
+  //  playground all run in the browser.
+  //
+  //      npx wrangler deploy          # from this directory
+  //
+  //  WHAT IS AND IS NOT DEPLOYED: everything except the accounts service.
+  //  api/server.mjs serves ./site AND /api/*; here Cloudflare serves the site
+  //  and there is no API, so sign-in, cross-device sync and the leaderboard
+  //  will report that they are unavailable. The site detects this — account.js
+  //  probes /api/health once per session — and says so on the account page
+  //  rather than producing failed syncs. See docs/DEPLOY.md.
+  //
+  //  html_handling is "none" ON PURPOSE, and it is the one setting here worth
+  //  arguing about. The friendlier "auto-trailing-slash" REDIRECTS /x.html to
+  //  /x. Every link in this site and every entry in the service worker's
+  //  precache list is an explicit .html path, so that would turn a precache of
+  //  99 files into 99 redirects — and a redirected response is exactly what a
+  //  service worker cannot store cleanly. "none" serves the paths as written.
+  // ==========================================================================
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "queryforge-academy",
+  "compatibility_date": "2026-09-06",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./site",
+    "html_handling": "none",
+    "not_found_handling": "none"
+  }
+}
