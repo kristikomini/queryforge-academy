@@ -17,14 +17,16 @@
    list of 62 chapters would go stale on the first rename.
    =========================================================================== */
 
-const CACHE = "queryforge-v944c575e53db";   /* STAMPED by tools/stamp-sw.mjs */
+const CACHE = "queryforge-va5d060c87b9b";   /* STAMPED by tools/stamp-sw.mjs */
 
-/* Everything that is not a chapter. If a name here is wrong the install still
-   completes — see the caught rejection below — so a typo cannot make the site
-   un-upgradeable. It is logged instead. */
+/* Everything that is not a chapter. Every name here is REQUIRED: a miss aborts
+   the install, deliberately — see the note in install() below. tools/doctor.mjs
+   and tools/stamp-sw.mjs both fail on a shell entry that does not exist, so a
+   typo is caught long before a browser ever sees it. */
 const SHELL = [
   "./",
   "index.html",
+  "404.html",
   "dashboard.html",
   "review.html",
   "exam.html",
@@ -79,21 +81,41 @@ const PRECACHE = SHELL.concat(CHAPTER_URLS);
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    /* Added INDIVIDUALLY with a caught rejection. cache.addAll() is atomic: one
-       404 anywhere and the whole install fails, so a single typo in the shell
-       list would make the site permanently un-upgradeable for everyone who
-       already has an old worker. The failures are logged and the install
-       completes. */
+
+    /* `cache: "reload"` bypasses the browser's HTTP cache, so a rebuild fetches
+       what the server has now rather than what this browser saw last week. */
+    const add = async (url) => {
+      try { await cache.add(new Request(url, { cache: "reload" })); return true; }
+      catch (e) { return false; }
+    };
+
+    /* THE SHELL IS REQUIRED, AND A FAILURE HERE MUST FAIL THE INSTALL.
+       activate() below deletes every other cache wholesale, so a worker that
+       activates over a half-filled cache has just thrown away the complete copy
+       and put a worse one in its place. Rejecting instead leaves the OLD worker
+       in charge of the OLD, complete cache, and the upgrade is retried on the
+       next visit. Nothing is lost by refusing to upgrade; a great deal is lost
+       by upgrading badly.
+
+       The previous version logged the failures and carried on, so install always
+       succeeded — one flaky response out of a hundred simultaneous requests was
+       enough to activate a worker over an emptied cache, and from then on every
+       page change fell through to the network. */
     const failed = [];
-    await Promise.all(PRECACHE.map(async (url) => {
-      try {
-        await cache.add(new Request(url, { cache: "reload" }));
-      } catch (e) {
-        failed.push(url);
-      }
-    }));
-    if (failed.length) console.warn("[sw] not precached:", failed);
-    console.info(`[sw] ${CACHE}: ${PRECACHE.length - failed.length}/${PRECACHE.length} cached`);
+    await Promise.all(SHELL.map(async (url) => { if (!(await add(url))) failed.push(url); }));
+    if (failed.length) {
+      throw new Error("[sw] shell incomplete, install aborted: " + failed.join(", "));
+    }
+
+    /* Chapters are best-effort, by contrast. One chapter missing from the offline
+       copy is a gap the fetch handler covers by going to the network; it is not
+       worth refusing an upgrade over. */
+    const missed = [];
+    await Promise.all(CHAPTER_URLS.map(async (url) => { if (!(await add(url))) missed.push(url); }));
+    if (missed.length) console.warn("[sw] chapters not precached:", missed);
+    console.info(`[sw] ${CACHE}: ${PRECACHE.length - missed.length}/${PRECACHE.length} cached`);
+
+    /* Only now, with the shell verified present. */
     await self.skipWaiting();
   })());
 });

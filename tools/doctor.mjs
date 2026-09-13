@@ -803,6 +803,55 @@ async function checkCodeAnatomy(dict) {
 
 console.log("\n  QueryForge doctor\n  " + "─".repeat(60));
 
+/* ------------------------------------------------------ theme boot --- */
+/* Every page must apply the saved theme BEFORE the browser's first paint.
+
+   site.js reads the preference, and site.js is loaded at the bottom of the
+   document — so on its own, a visitor whose saved choice disagrees with their
+   operating system gets the wrong theme painted first and corrected a moment
+   later: a visible flash on every navigation. The fix is a one-line inline
+   script in <head>, which runs during parse. Inline and not a file, because a
+   <script src> in <head> is a render-blocking request, and a round trip before
+   the first paint costs more than the flash it would prevent.
+
+   Two silent ways to rot, which is why this is gated rather than trusted: a new
+   page added without the snippet just flashes, and a snippet carrying the wrong
+   storage key reads a value nobody ever set — no error, no effect, and it looks
+   right in the source. So the key is compared against THEME_KEY in site.js
+   rather than assumed.
+
+   Regenerate with the shared tool:
+     php ../../Desktop/Academy/tools/head-theme.php site --key=queryforge.theme */
+async function checkThemeBoot() {
+  checksRun.push("site/theme-boot");
+
+  const siteJs = join(SITE, "assets", "site.js");
+  if (!existsSync(siteJs)) {
+    err("site/theme-boot", "site/assets/site.js is missing, so the theme key cannot be checked");
+    return;
+  }
+  const m = (await read(siteJs)).match(/THEME_KEY\s*=\s*"([^"]+)"/);
+  if (!m) {
+    err("site/theme-boot", "site.js no longer declares THEME_KEY, so the boot snippet is unverifiable");
+    return;
+  }
+  const want = `localStorage.getItem("${m[1]}")`;
+
+  for (const page of await walk(SITE, (p) => p.endsWith(".html"))) {
+    const html = await read(page);
+    const head = html.indexOf("</head>");
+    const boot = html.indexOf("<script data-theme-boot>");
+
+    if (boot < 0)
+      err("site/theme-boot", `${rel(page)} has no theme-boot snippet, so it flashes the wrong theme`);
+    else if (head < 0 || boot > head)
+      /* Outside <head> it still runs, just too late to be worth anything. */
+      err("site/theme-boot", `${rel(page)} has the theme-boot snippet after </head>, which defeats it`);
+    else if (!html.includes(want))
+      err("site/theme-boot", `${rel(page)} boots a different storage key than site.js writes — expected ${want}`);
+  }
+}
+
 const man = await loadManifest();
 const quizzes = await loadQuizzes();
 const dict = await loadSyntax();
@@ -819,6 +868,7 @@ await checkCoveredIn();
 await checkLabs();
 await checkCounts(man, quizzes);
 await checkCodeAnatomy(dict);
+await checkThemeBoot();
 
 const errors = findings.filter((f) => f.level === "ERROR");
 const warns = findings.filter((f) => f.level === "WARN");

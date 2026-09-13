@@ -35,11 +35,27 @@
   "name": "queryforge-academy",
   "main": "worker.mjs",
   "compatibility_date": "2026-09-06",
-  "workers_dev": true,
+  // Served from a custom domain on testdemo.it, which is already a Cloudflare zone.
+  // custom_domain creates the DNS record on deploy, so there is nothing to add by
+  // hand — and it means no workers.dev subdomain is needed at all.
+  "routes": [
+    { "pattern": "sql.testdemo.it", "custom_domain": true }
+  ],
+  "workers_dev": false,
   "assets": {
     "directory": "./site",
     "binding": "ASSETS",
     "html_handling": "none",
+    // "none", NOT "404-page", even though site/404.html now exists.
+    //
+    // The two are not interchangeable. With "404-page" the asset layer answers a
+    // NAVIGATION miss by itself and the Worker is never invoked — which also means
+    // "/" never reaches worker.mjs's index.html rewrite, so the home page breaks
+    // while curl and fetch() (which are not navigations) keep looking healthy.
+    // "none" lets every miss fall through to worker.mjs, which serves site/404.html
+    // itself and keeps a truthful 404 status: a branded page returned as 200 is a
+    // soft 404, which search engines index and which hides broken links from
+    // anyone testing with curl.
     "not_found_handling": "none"
   }
 }
