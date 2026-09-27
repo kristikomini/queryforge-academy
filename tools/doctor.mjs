@@ -427,6 +427,14 @@ const COUNT_ALLOW = [
   //  and "Site chapters: [25] · [26] · [27]" must exempt all of them.
   /chapters?\s*[:·]?\s*\[?\d+\]?(?:\s*(?:,|and|–|-|to|&|·|\|)\s*\[?\d+\]?)*/i,
   /\bpart \d/i,
+  //  A MODULE's own number, which identifies it and counts nothing — the exact
+  //  analogue of `part \d` above. It needs exempting because a module's heading
+  //  sits a few characters from its "Site chapters:" line, so "# Module 21 ·
+  //  Migrations under load" put 21 inside the window of the word "chapters" and
+  //  was read as a claim that there are 21 of them. Scoped to the number in
+  //  `Module NN` alone, so the chapter numbers on the line below are still
+  //  checked by the cross-reference pattern above and nothing else is silenced.
+  /\bmodule \d+/i,
   // Sizes, durations, and counts of rows or columns inside a worked example.
   /\d+ (?:KB|MB|GB|TB|ms|s|µs|ns)\b/,
   /\d+ rows?/i, /\d+ columns?/i,

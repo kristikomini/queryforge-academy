@@ -28,7 +28,7 @@ real `.html` file — you can also just open `site/index.html` from disk.
 | **`site/`** | The platform. 62 chapters, 639 questions, 518 golden rules, a spaced-repetition engine, a viva, a timed mock interview, a real SQL playground, an Italian language layer, a glossary and a CV linter. Static HTML and vanilla JS. Works from `file://`. |
 | **`api/`** | The accounts service. Zero-dependency Node host over SQLite, with **all of its logic in `api/sql/*.sql`**. Carries progress between devices, and doubles as portfolio code. |
 | **`reference/`** | A commented order-fulfilment **database** — state machine, optimistic concurrency, transactional outbox — plus graded labs and runnable demos. |
-| **`course/`** | The golden rules, the priority tiers, and worked solutions to the labs. |
+| **`course/`** | The deep half: twenty-four modules in a fixed five-part shape, plus the golden rules, the priority tiers, and worked solutions to the labs. |
 | **`tools/`** | The integrity gate and the generators. |
 | **`docs/DEPLOY.md`** | How to publish it: Vercel, Cloudflare, Netlify, Pages, or a container with the accounts service. |
 
@@ -213,6 +213,7 @@ reference/                the reference database
   demos/                    runnable demonstrations of invisible behaviour
 
 course/                   GOLDEN-RULES.md (generated), TIERS.md, SOLUTIONS.md
+  modules/                  the deep modules, in the five-part shape
 tools/                    doctor.mjs, viva-deck.mjs, stamp-sw.mjs, serve.mjs
 docs/ADVERTS.md           where the requirements came from
 docs/DEPLOY.md            how to publish it, and what each host needs

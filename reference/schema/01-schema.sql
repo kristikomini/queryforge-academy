@@ -11,7 +11,7 @@
 --
 --  Covered in: site/chapters/04-ddl-and-constraints.html
 --              site/chapters/24-concurrency-patterns.html
---              course/module-02-modelling/README.md
+--              course/modules/module-02-modelling/README.md
 -- =============================================================================
 
 PRAGMA foreign_keys = ON;   -- SQLite does NOT enforce FKs unless you ask. See ch. 04.
@@ -194,7 +194,8 @@ CREATE INDEX ix_events_order ON order_events (order_id, at);
 -- is no transaction across both. Send first and the save may fail; save first and
 -- the send may fail. The outbox makes the message part of the SAME transaction as
 -- the data, and a separate worker delivers it afterwards — at-least-once, so the
--- consumer must be idempotent. See chapter 24 and course/module-08-outbox.
+-- consumer must be idempotent. See chapter 24 and
+-- course/modules/module-03-concurrency/README.md.
 CREATE TABLE outbox (
   id            INTEGER PRIMARY KEY,
   topic         TEXT    NOT NULL,
