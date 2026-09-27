@@ -56,7 +56,7 @@
 
 <h2 id="first">The join, written out</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="6">
 <figcaption>One order, with the name of the customer who placed it.</figcaption>
 <pre><code>SELECT o.id,                     -- from orders: which order
        o.placed_at,              -- from orders: when
@@ -86,7 +86,7 @@ LIMIT 10;                        -- …ten of them
 
 <h2 id="inner">What an inner join throws away</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="10">
 <figcaption>The same question asked twice, and the customers who vanish between the two.</figcaption>
 <pre><code>-- INNER: only customers who HAVE orders appear. No orders → the customer disappears.
 SELECT c.name, o.id                 -- one row per (customer, order) PAIR
@@ -119,7 +119,7 @@ LEFT JOIN orders AS o               -- …but now the left side is PRESERVED
 
 <h2 id="on-where">The mistake everybody makes once</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="13">
 <figcaption>Moving one line from <code>ON</code> to <code>WHERE</code> quietly turns an outer join into an inner one.</figcaption>
 <pre><code>-- Every customer, and their 2026 orders. Customers with none still appear.
 SELECT c.name, o.id                          -- the customer, and an order id or NULL

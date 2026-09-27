@@ -108,7 +108,7 @@ SELECT ... ORDER BY total_cents DESC OFFSET 0 ROWS              -- the standard,
 
 <h2 id="ties">The tie-breaker, and why paging without one is broken</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="10">
 <figcaption>Two queries that look equivalent. One of them can return the same row on two different pages.</figcaption>
 <pre><code>-- Non-deterministic: several orders share a date, and their relative order is
 -- whatever the engine felt like. Page 1 and page 2 can overlap, or miss a row.
@@ -139,7 +139,7 @@ LIMIT 20;                                  -- now "the first 20" means one speci
 
 <h2 id="offset">OFFSET, and why page 500 is slow</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="3">
 <figcaption>Skipping rows works, and gets more expensive with every page.</figcaption>
 <pre><code>SELECT id, placed_at FROM orders   -- the same query as above…
 ORDER BY placed_at DESC, id DESC   -- a fixed total order, as established above

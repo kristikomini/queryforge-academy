@@ -197,7 +197,7 @@ CREATE INDEX ix ON orders (status, placed_at)  -- the same key…
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Partial indexes: index the 1% of rows anybody actually queries for.</figcaption>
 <pre><code>CREATE INDEX ix_orders_failed ON orders (placed_at)   -- the column queries sort and filter on…
   WHERE status = 'failed';                            -- …over only the rows that are failed
@@ -248,7 +248,7 @@ CREATE INDEX ix_outbox_pending ON outbox (created_at) -- oldest-first claiming�
   </ol>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="10">
 <figcaption>Finding the indexes you are paying for and not using.</figcaption>
 <pre><code>-- SQL Server: indexes that are written to and never read.
 SELECT OBJECT_NAME(s.object_id) AS tbl,           -- id → readable table name

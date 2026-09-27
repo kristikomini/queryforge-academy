@@ -52,7 +52,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="5">
 <figcaption>Optimistic concurrency: no lock, no waiting, and the row count is the answer.</figcaption>
 <pre><code>-- The reference database's orders table carries a version column for exactly this.
 UPDATE orders                                 -- one row, changed in place
@@ -104,7 +104,7 @@ WHERE  id = ? AND version = ?;                -- only if it is still the version
 
 <h2 id="pessimistic">Pessimistic locking, and SKIP LOCKED</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption>Pessimistic locking, and the two modifiers that make it usable in production.</figcaption>
 <pre><code>-- Take the lock while READING, and hold it to the end of the transaction.
 BEGIN;                                               -- the lock lives as long as this
@@ -150,7 +150,7 @@ SELECT ... FOR UPDATE SKIP LOCKED;  -- ignore locked rows and take the next free
 
 <h2 id="queue">A work queue in a table, done properly</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="12">
 <figcaption>A work queue in a table: claiming exactly one job, atomically, with no race and no double processing.</figcaption>
 <pre><code>-- PostgreSQL: claim ONE job atomically.
 UPDATE outbox                                 -- claim by WRITING, not by reading
@@ -266,7 +266,7 @@ WHERE  o.published_at IS NULL;                -- unpublished jobs only
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="11-13">
 <figcaption>The transactional outbox: state change, audit trail and the message to publish, in one transaction.</figcaption>
 <pre><code>BEGIN;                                         -- three writes, one unit
   UPDATE orders SET status = 'shipped',        -- the state change…
@@ -309,7 +309,7 @@ COMMIT;                                        -- all three, or none of them
   is not the code:
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Three defences against overselling the last item &mdash; and the strongest one is not the code.</figcaption>
 <pre><code>-- 1. THE CONSTRAINT. Even if every other defence fails, the database refuses.
 CONSTRAINT ck_stock_nonneg CHECK (on_hand &gt;= 0)   -- declared once, enforced always
@@ -351,7 +351,7 @@ SELECT on_hand FROM stock WHERE product_id = :id FOR UPDATE;   -- take the lock,
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="7">
 <figcaption>The constraint refusing to be talked round, and the conditional update that simply declines.</figcaption>
 <pre><code>-- The blunt version: the database refuses outright.
 UPDATE stock SET on_hand = on_hand - 1000 WHERE product_id = 1;  -- more than we have

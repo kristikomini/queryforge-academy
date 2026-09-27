@@ -99,7 +99,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="9">
 <figcaption>The same question three times: the version that cannot work, the version that does, and the version that scales to three conditions.</figcaption>
 <pre><code>-- FAILS: `spend` does not exist yet when WHERE runs. WHERE is step 2, SELECT is step 5.
 SELECT customer_id, SUM(total_cents) AS spend   -- the alias is created HERE…
@@ -167,7 +167,7 @@ SELECT * FROM (                                 -- the outer query sees a finish
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="6">
 <figcaption>Where a date filter goes decides which question you asked &mdash; and neither version is an error.</figcaption>
 <pre><code>-- Every customer, with their 2026 orders. Zero-order customers INCLUDED.
 SELECT c.name, COUNT(o.id) AS orders_2026    -- COUNT(o.id) counts non-NULL ids: 0 for no match

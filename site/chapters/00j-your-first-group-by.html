@@ -53,7 +53,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="4">
 <figcaption>The whole idea, in one query: how many orders each customer has placed.</figcaption>
 <pre><code>SELECT customer_id,               -- the grouping key: one output row per distinct value
        COUNT(*) AS orders         -- the aggregate: how many rows fell into this group
@@ -113,7 +113,7 @@ ORDER BY n DESC;                            -- commonest status first
 
 <h2 id="error">The error that teaches the rule</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>Asking for a column the group cannot answer for &mdash; and the two ways to fix it.</figcaption>
 <pre><code>-- ERROR: which placed_at? The group has hundreds, and no rule for choosing.
 SELECT customer_id, placed_at, COUNT(*)   -- placed_at is neither grouped nor aggregated
@@ -147,7 +147,7 @@ FROM orders GROUP BY customer_id, placed_at;        -- almost certainly not what
 
 <h2 id="having">Filtering groups, not rows</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="5,7">
 <figcaption>Two filters in one query, each doing a job the other cannot.</figcaption>
 <pre><code>SELECT customer_id,                                        -- the rows to group
        COUNT(*)         AS orders,          -- how many, after the WHERE filter

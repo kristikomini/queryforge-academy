@@ -74,7 +74,7 @@
 </table>
 </div>
 
-<figure class="codex" data-lang="text">
+<figure class="codex" data-lang="text" data-focus="4">
 <figcaption>A backup schedule, read as the recovery it buys you.</figcaption>
 <pre><code>-- A typical schedule and what it costs you
 Sunday 02:00   FULL                 -- the base: everything, once a week
@@ -117,7 +117,7 @@ Every  15 min  LOG                  -> RPO = 15 minutes worst case
 
 <h2 id="pitr">Point-in-time recovery</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="6">
 <figcaption>Point-in-time recovery: restoring to the moment before somebody ran a <code>DELETE</code> without a <code>WHERE</code>.</figcaption>
 <pre><code>-- SQL Server: restore the chain, leaving the database RECOVERING until the last step.
 RESTORE DATABASE forge FROM DISK = 'full.bak'   WITH NORECOVERY;  -- the base…

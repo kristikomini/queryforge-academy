@@ -50,7 +50,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="7">
 <figcaption>The fifteen seconds that prevent a restore: count first, then delete inside a transaction.</figcaption>
 <pre><code>-- 1. What am I about to touch?
 SELECT COUNT(*) FROM orders                              -- the SAME predicate as the delete…
@@ -99,7 +99,7 @@ COMMIT;                                                   -- only now is it perm
   affected. Three dialects, three spellings, one idea:
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="8">
 <figcaption>Getting back what the write actually did &mdash; three dialects, three spellings, one idea.</figcaption>
 <pre><code>-- PostgreSQL, SQLite 3.35+, MariaDB
 INSERT INTO customers (email, name, city_id) VALUES (?, ?, ?)  -- ? are bound parameters
@@ -150,7 +150,7 @@ RETURNING id INTO :out_id;                                     -- into an output
 
 <h2 id="update-from">UPDATE from another table</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="17">
 <figcaption>Updating one table from another: two dialect spellings, and the portable one that is also correct at the edges.</figcaption>
 <pre><code>-- PostgreSQL: the extra table goes in a FROM clause on the UPDATE.
 UPDATE orders o                                              -- the table being changed
@@ -250,7 +250,7 @@ SET total_cents = COALESCE(                                  -- no lines → NUL
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="5">
 <figcaption>Run it, read the row count, roll it back &mdash; the whole habit in five lines.</figcaption>
 <pre><code>BEGIN;                                                    -- nothing below is permanent yet
   UPDATE orders SET status = 'cancelled'                  -- a deliberately sweeping change…

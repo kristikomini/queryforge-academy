@@ -107,7 +107,7 @@ order_id | customer_name | customer_city | city_region | products              |
 <p><strong>1NF — make values atomic.</strong> <code>products</code> holds a list, so it cannot be
 joined, filtered or summed. Split it into rows in a child table:</p>
 
-<figure class="codex" data-lang="text">
+<figure class="codex" data-lang="text" data-focus="2">
 <figcaption>1NF: the repeating list becomes rows in a child table.</figcaption>
 <pre><code>orders(order_id, customer_name, customer_city, city_region, total)
 order_lines(order_id, sku, quantity)          -- composite key (order_id, sku)
@@ -136,7 +136,7 @@ all of it. It moves to a <code>products</code> table.</p>
 <code>city_region</code> depends on <code>customer_city</code>, which depends on the customer, not
 on the order. Two hops from the key is one hop too many:</p>
 
-<figure class="codex" data-lang="text">
+<figure class="codex" data-lang="text" data-focus="2-3">
 <figcaption>3NF: every fact sits in the table of the thing it is actually about.</figcaption>
 <pre><code>customers(customer_id, name, city_id)                    -- a customer is in one city
 cities(city_id, name, region_id)                         -- a city is in one region

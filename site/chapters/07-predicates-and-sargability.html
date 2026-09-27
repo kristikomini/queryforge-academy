@@ -141,7 +141,7 @@ WHERE total_cents &gt; 50000          -- sargable: the same question, maths move
 </figure>
 
 <h3>3 · A leading wildcard</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>Way three: a leading wildcard, which asks the index a question it cannot answer.</figcaption>
 <pre><code>WHERE name LIKE '%rossi%'          -- scan: an index is sorted by prefix, and there is no prefix
 WHERE name LIKE 'rossi%'           -- seek: this IS a prefix, so it is a range over the index
@@ -169,7 +169,7 @@ WHERE name LIKE 'rossi%'           -- seek: this IS a prefix, so it is a range o
 </p>
 
 <h3>4 · Implicit conversion — the invisible one</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="5">
 <figcaption>Way four, the invisible one: a type mismatch the engine fixes by converting your column instead of your literal.</figcaption>
 <pre><code>-- vat_number is VARCHAR. The literal below is a NUMBER.
 WHERE vat_number = 12345678901     -- the engine converts the COLUMN, on every row, to compare
@@ -213,7 +213,7 @@ WHERE vat_number = '12345678901'   -- sargable: text compared to text, no conver
   the engine often falls back to a scan.
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="5-7">
 <figcaption><code>OR</code> across two different columns, and the rewrite that gives the optimiser two seeks instead of one scan.</figcaption>
 <pre><code>-- Frequently a scan: no single index has BOTH columns as its leading key.
 WHERE email = ? OR phone = ?       -- ? is a bound parameter: the driver sends the value separately
@@ -277,7 +277,7 @@ SELECT ... WHERE phone = ?         -- uses the index on phone
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="5">
 <figcaption>See it for yourself: two ways to ask for January, and two different plans.</figcaption>
 <pre><code>-- Run both in the playground and compare. (EXPLAIN QUERY PLAN in SQLite,
 -- EXPLAIN ANALYZE in PostgreSQL, "Include Actual Execution Plan" in SSMS.)

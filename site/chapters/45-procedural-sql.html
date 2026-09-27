@@ -54,7 +54,7 @@
 
 <h2 id="tsql">T-SQL, the shape you will meet</h2>
 
-<figure class="codex" data-lang="tsql">
+<figure class="codex" data-lang="tsql" data-focus="8">
 <figcaption>A complete T-SQL procedure: concurrency, the state machine, three distinct failures and an outbox &mdash; all in one transaction.</figcaption>
 <pre><code>CREATE OR ALTER PROCEDURE dbo.usp_ShipOrder   -- OR ALTER: keeps existing permissions
   @order_id INT,                              -- which order…
@@ -145,7 +145,7 @@ END                                        -- end of the procedure
 
 <h2 id="plsql">PL/SQL, the same thing in Oracle</h2>
 
-<figure class="codex" data-lang="plsql">
+<figure class="codex" data-lang="plsql" data-focus="1">
 <figcaption>The same procedure in Oracle &mdash; and the one thing PL/SQL genuinely has that T-SQL does not.</figcaption>
 <pre><code>CREATE OR REPLACE PACKAGE orders_pkg AS       -- the SPEC: the public interface
   -- Anything not declared here is private to the body — real encapsulation, and
@@ -232,7 +232,7 @@ END orders_pkg;                              -- end of the package body
 
 <h2 id="cursors">Cursors, and the honest use for them</h2>
 
-<figure class="codex" data-lang="tsql">
+<figure class="codex" data-lang="tsql" data-focus="2">
 <figcaption>If you must write a cursor, declare it cheaply &mdash; and write down why.</figcaption>
 <pre><code>-- If you must, at least tell the engine what you are doing:
 DECLARE c CURSOR LOCAL FAST_FORWARD READ_ONLY FOR SELECT ...;  -- the cheapest cursor there is

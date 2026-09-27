@@ -97,7 +97,7 @@
 
 <h2 id="rownum">The Oracle trap worth knowing</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="10">
 <figcaption>The Oracle trap worth knowing: <code>ROWNUM</code> is assigned before the sort.</figcaption>
 <pre><code>-- WRONG. ROWNUM is assigned as rows are PRODUCED, before ORDER BY runs, so this
 -- takes an arbitrary 10 rows and then sorts those ten. The classic Oracle mistake.
@@ -168,7 +168,7 @@ SELECT * FROM orders ORDER BY total_cents DESC FETCH FIRST 10 ROWS ONLY;  -- say
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="4">
 <figcaption>One question, four dialects: write it in each without looking, then check.</figcaption>
 <pre><code>-- "Top 5 customers by 2026 revenue, excluding cancelled orders."
 

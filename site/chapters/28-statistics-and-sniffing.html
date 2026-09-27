@@ -86,7 +86,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2,6">
 <figcaption>Seeing what the optimiser believes, and telling it to look again.</figcaption>
 <pre><code>-- Look at what it BELIEVES about the data
 DBCC SHOW_STATISTICS('dbo.orders', 'ix_orders_status');   -- SQL Server: the histogram itself
@@ -208,7 +208,7 @@ ANALYZE TABLE orders;                                     -- MySQL: the same ide
 
 <h2 id="cache">The plan cache</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="10">
 <figcaption>The plan cache: which statements cost the most <em>in total</em>.</figcaption>
 <pre><code>-- SQL Server: sort by TOTAL cost, never by average.
 SELECT TOP 20                                               -- the twenty worst offenders

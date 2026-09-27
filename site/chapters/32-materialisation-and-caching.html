@@ -106,7 +106,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>A materialised view does store data &mdash; which is exactly why it can be stale.</figcaption>
 <pre><code>-- PostgreSQL: refreshed on a schedule, and readers are never blocked.
 CREATE MATERIALIZED VIEW mv_monthly_sales AS          -- the result is STORED, not recomputed
@@ -149,7 +149,7 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_monthly_sales;  -- rebuild without blo
   The pattern that does scale is to refresh only what changed:
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption>Incremental refresh: recompute only the slice that changed.</figcaption>
 <pre><code>-- Recompute only the affected slice, inside one transaction. Naturally idempotent,
 -- so re-running it after a failure is safe. See chapter 20.

@@ -138,7 +138,7 @@ SELECT * FROM order_lines WHERE order_id = 2;                -- 3
 <h2 id="others">The other four ORM shapes you will meet</h2>
 
 <h3>1 · The Cartesian explosion from over-eager loading</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>The fix for N+1, and the fan-out it causes when applied twice.</figcaption>
 <pre><code>-- .Include(o => o.Lines).Include(o => o.Payments)
 -- becomes ONE query joining BOTH collections: 2 lines × 3 payments = 6 rows per
@@ -170,7 +170,7 @@ SELECT * FROM order_lines WHERE order_id = 2;                -- 3
 </p>
 
 <h3>3 · Client-side evaluation</h3>
-<figure class="codex" data-lang="csharp">
+<figure class="codex" data-lang="csharp" data-focus="3">
 <figcaption>Client-side evaluation: a filter the ORM could not translate, applied after fetching everything.</figcaption>
 <pre><code>// A filter the ORM cannot translate is sometimes applied IN MEMORY —
 // after fetching the whole table. EF Core 3+ throws instead, which is a mercy.
@@ -202,7 +202,7 @@ SELECT * FROM order_lines WHERE order_id = 2;                -- 3
 
 <h2 id="see">Seeing what it really sends</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="11">
 <figcaption>Seeing what the ORM really sends: from the application first, from the database when you must.</figcaption>
 <pre><code>-- The application side (ask for this first — it is the fastest route):
 --   EF Core:     LogTo(Console.WriteLine) with EnableSensitiveDataLogging

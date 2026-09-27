@@ -41,7 +41,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption>Least privilege, written as roles &mdash; and what is deliberately absent from them.</figcaption>
 <pre><code>-- Grant to ROLES, assign roles to users. Never grant to a person: people leave,
 -- roles do not, and a role is a sentence about a job rather than about a name.
@@ -91,7 +91,7 @@ GRANT app_readwrite TO svc_orders_api;                        -- the service acc
   forgets. RLS moves the rule into the database, where it cannot be forgotten:
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption>Row-level security: the tenant filter that cannot be forgotten, because it is not in the query.</figcaption>
 <pre><code>-- PostgreSQL
 ALTER TABLE orders ENABLE ROW LEVEL SECURITY;         -- from now on, policies apply
@@ -195,7 +195,7 @@ CREATE SECURITY POLICY TenantFilter                            -- the policy obj
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption>Erasure that satisfies GDPR without destroying the accounts: pseudonymisation.</figcaption>
 <pre><code>-- The person disappears; the accounting does not.
 UPDATE customers                                      -- the person's own row…
@@ -228,7 +228,7 @@ WHERE id = :id;                                       -- one person, by key
 
 <h2 id="masking">Masking, and what it is worth</h2>
 
-<figure class="codex" data-lang="tsql">
+<figure class="codex" data-lang="tsql" data-focus="3">
 <figcaption>Masking: a presentation feature that is often mistaken for a security control.</figcaption>
 <pre><code>-- SQL Server dynamic data masking: non-privileged users see a masked value.
 ALTER TABLE customers ALTER COLUMN email               -- an existing column…

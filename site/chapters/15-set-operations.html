@@ -91,7 +91,7 @@
     tool.</li>
 </ul>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption><code>EXCEPT</code> as a table diff &mdash; the fastest reconciliation query you will ever write.</figcaption>
 <pre><code>-- Reconciliation: exactly what differs between two tables, NULLs included.
 SELECT * FROM staging_customers   -- everything that arrived…
@@ -132,7 +132,7 @@ FROM (SELECT * FROM customers EXCEPT SELECT * FROM staging_customers) b; -- …a
 <p>A staple of screening tests. Know at least two, and know which is portable.</p>
 
 <h3>1 · <code>ROW_NUMBER</code> — portable, and the one to give first</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="9">
 <figcaption>De-duplication, method one: <code>ROW_NUMBER</code>. Portable, and the answer to give first.</figcaption>
 <pre><code>WITH d AS (                                          -- name the duplicates before deleting anything
   SELECT id,                                         -- the key is all the delete needs
@@ -159,7 +159,7 @@ WHERE id IN (SELECT id FROM d WHERE rn &gt; 1);         -- everything that is no
 </figure>
 
 <h3>2 · <code>MIN(id)</code> per group — works on any engine, including ancient ones</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Method two: <code>MIN(id)</code> per group &mdash; works on engines too old for window functions.</figcaption>
 <pre><code>DELETE FROM customers                                       -- the write…
 WHERE id NOT IN (SELECT MIN(id) FROM customers              -- …of every row that is not…
@@ -183,7 +183,7 @@ WHERE id NOT IN (SELECT MIN(id) FROM customers              -- …of every row t
 </figure>
 
 <h3>3 · A physical row identifier — when there is no key at all</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption>Method three: when the rows are identical and there is no key at all, delete by physical location.</figcaption>
 <pre><code>-- PostgreSQL. The rows are IDENTICAL, so nothing tells them apart but where they sit.
 DELETE FROM t a                                  -- alias the table being deleted from
@@ -207,7 +207,7 @@ WHERE a.ctid &gt; b.ctid                            -- ctid is the physical row 
 </figure>
 
 <h3>4 · Rebuild the table — for very large clean-ups</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Method four: for very large clean-ups, rebuild the table instead of deleting from it.</figcaption>
 <pre><code>CREATE TABLE customers_new AS                    -- a brand-new table…
   SELECT DISTINCT * FROM customers;              -- …containing each distinct row once
@@ -250,7 +250,7 @@ WHERE a.ctid &gt; b.ctid                            -- ctid is the physical row 
   while leaving every <code>SUM</code> and <code>COUNT</code> wrong.
 </p>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="8">
 <figcaption><code>DISTINCT</code> as a symptom: the same question, once with the plaster and once with the diagnosis.</figcaption>
 <pre><code>-- SYMPTOM: DISTINCT here is hiding a fan-out, not expressing a requirement.
 SELECT DISTINCT c.id, c.name                     -- deduplicates AFTER the damage is done

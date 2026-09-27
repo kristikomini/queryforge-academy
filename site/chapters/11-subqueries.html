@@ -56,7 +56,7 @@
 
 <h2 id="three">EXISTS, IN and JOIN: the same question, three ways</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="11-12">
 <figcaption>&ldquo;Customers who have ordered&rdquo;, three ways &mdash; two of which are the same question and one of which is not.</figcaption>
 <pre><code>-- 1. SEMI-JOIN with EXISTS. No duplicates, and it stops at the first match found.
 SELECT c.* FROM customers c                          -- only customer columns come back
@@ -113,7 +113,7 @@ JOIN orders o ON o.customer_id = c.id;               -- needs DISTINCT to match 
 
 <h2 id="correlated">Correlated subqueries, and when they hurt</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="5">
 <figcaption>A correlated scalar subquery: one value, computed once per outer row.</figcaption>
 <pre><code>-- The most recent order date per customer, as a correlated scalar subquery.
 SELECT c.name,                                        -- one row per customer
@@ -147,7 +147,7 @@ FROM customers c;                                     -- the outer query drives 
 <div class="box trap">
   <div class="box-title">⚠ Trap — the same subquery three times</div>
   <p>This shape is extremely common and is three correlated executions per row:</p>
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="2-4">
 <figcaption>The anti-pattern this chapter is really about: the same subquery, three times, per row.</figcaption>
 <pre><code>SELECT c.name,                                                          -- one row per customer
   (SELECT COUNT(*)         FROM orders o WHERE o.customer_id = c.id) AS n,      -- pass 1
@@ -176,7 +176,7 @@ FROM customers c;                                                       -- × ev
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="6">
 <figcaption>The same report, aggregated once: three columns, one pass over <code>orders</code>.</figcaption>
 <pre><code>SELECT c.name,                                    -- still one row per customer
        COALESCE(o.n, 0)     AS n,                 -- no orders → NULL from the LEFT JOIN → 0
@@ -218,7 +218,7 @@ LEFT JOIN (                                       -- a derived table, evaluated 
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="6">
 <figcaption><code>LATERAL</code> and <code>CROSS APPLY</code>: a subquery that runs once per row and can return several.</figcaption>
 <pre><code>-- PostgreSQL / MySQL 8 / Oracle
 SELECT c.name, o.id, o.placed_at            -- columns from BOTH sides, unlike a scalar subquery
@@ -263,7 +263,7 @@ CROSS APPLY (SELECT TOP (3) id, placed_at   -- TOP goes before the columns in T-
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="7">
 <figcaption>The same &ldquo;latest order per customer&rdquo;, ranked rather than sought &mdash; run both and compare the plans.</figcaption>
 <pre><code>-- Window function: rank EVERYTHING, then filter.
 SELECT * FROM (                                          -- the wrapper exists only to filter rn

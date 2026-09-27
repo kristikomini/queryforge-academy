@@ -58,7 +58,7 @@
 
 <h2 id="waits">Wait statistics: what is the server waiting for?</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>The first question in any triage: what is the server actually waiting for?</figcaption>
 <pre><code>-- SQL Server: the top waits since the last restart or clear.
 SELECT TOP 12 wait_type,                          -- what kind of wait…
@@ -125,7 +125,7 @@ GROUP BY 1,2,3 ORDER BY count DESC;                   -- …commonest wait first
 
 <h2 id="topn">The top-ten list</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="8">
 <figcaption>The top-ten list, sorted by total cost &mdash; never by average.</figcaption>
 <pre><code>-- Sort by TOTAL, never by average. See chapter 28 for why.
 -- PostgreSQL
@@ -175,7 +175,7 @@ ORDER BY qs.total_elapsed_time DESC;                       -- biggest total elap
 
 <h2 id="blocking">The blocking chain</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption>The blocking chain, and how to find its head.</figcaption>
 <pre><code>-- SQL Server: who is blocked, and by whom
 SELECT r.session_id,                              -- the waiting session

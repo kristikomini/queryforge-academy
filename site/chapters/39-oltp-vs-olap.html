@@ -162,7 +162,7 @@
 </table>
 </div>
 
-<figure class="codex" data-lang="text">
+<figure class="codex" data-lang="text" data-focus="5-6">
 <figcaption>A slowly changing dimension, type 2 &mdash; and why the warehouse invents its own keys.</figcaption>
 <pre><code>-- Type 2 in practice. The SURROGATE key is what makes it work:
 dim_customer
@@ -216,7 +216,7 @@ dim_customer
 </p>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="8">
 <figcaption>The smallest possible star query, over the reference database's real date dimension.</figcaption>
 <pre><code>-- The reference database already has a dim_date. This is the shape of every
 -- warehouse query you will ever write: facts, joined to dimensions, grouped.

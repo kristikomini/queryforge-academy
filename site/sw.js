@@ -17,7 +17,7 @@
    list of 62 chapters would go stale on the first rename.
    =========================================================================== */
 
-const CACHE = "queryforge-v429b85c6f6eb";   /* STAMPED by tools/stamp-sw.mjs */
+const CACHE = "queryforge-ve971af39ba1d";   /* STAMPED by tools/stamp-sw.mjs */
 
 /* Everything that is not a chapter. Every name here is REQUIRED: a miss aborts
    the install, deliberately — see the note in install() below. tools/doctor.mjs

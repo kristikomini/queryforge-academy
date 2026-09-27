@@ -77,7 +77,7 @@ FROM customers;           -- WHERE to look: the table. The ; ends the statement.
 
 <h2 id="star">The asterisk, and why it is a habit to unlearn</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption><code>SELECT *</code>: right while exploring, wrong in anything that will be kept.</figcaption>
 <pre><code>SELECT * FROM customers;        -- every column, in the table's own declared order
 SELECT id, name FROM customers; -- the two you actually need, in the order you want them
@@ -101,7 +101,7 @@ SELECT id, name FROM customers; -- the two you actually need, in the order you w
 
 <h2 id="alias">Aliases: naming things in the result</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="3">
 <figcaption>Renaming a column for the reader, and naming a computed one because it has no name of its own.</figcaption>
 <pre><code>SELECT name        AS customer,       -- rename in the RESULT; the table is untouched
        email       AS contact,        -- AS is optional, and worth writing anyway

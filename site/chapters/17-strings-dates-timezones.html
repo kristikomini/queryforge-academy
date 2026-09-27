@@ -66,7 +66,7 @@
   repeating because date filtering is where it happens most:
 </p>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="5-6">
 <figcaption>Four ways to ask for one day. Three of them read the whole table.</figcaption>
 <pre><code>WHERE YEAR(placed_at) = 2026                        -- scan: a function on the indexed column
 WHERE CAST(placed_at AS DATE) = '2026-03-14'        -- scan: CAST is a function too
@@ -137,7 +137,7 @@ WHERE placed_at &gt;= DATE '2026-03-14'                -- seek: a plain lower bo
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Converting a stored UTC instant into local time, in the two dialects you are most likely to meet.</figcaption>
 <pre><code>-- PostgreSQL: the conversion is a first-class operation.
 SELECT placed_at AT TIME ZONE 'Europe/Rome'   -- IANA name: knows about daylight saving…
@@ -240,7 +240,7 @@ POSITION('x' IN s)                 -- CHARINDEX('x', s) in T-SQL, INSTR(s, 'x') 
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql">
+  <figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Normalising a messy imported column: the pattern you will use in every data-loading job.</figcaption>
 <pre><code>SELECT                                                                 -- the cleaned columns
   NULLIF(TRIM(LOWER(email)), '')                       AS email_norm,  -- lower, trim, blank→NULL

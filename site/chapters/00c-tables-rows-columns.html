@@ -73,7 +73,7 @@
   column really being a date, forever, without checking.
 </p>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="5">
 <figcaption>Asking the engine to describe a table, rather than guessing from its data.</figcaption>
 <pre><code>-- SQLite: a dot-command, so no semicolon. Shows the CREATE TABLE as written.
 .schema customers           -- prints the table's definition as it was written
@@ -107,7 +107,7 @@ SELECT name, type FROM pragma_table_info('customers');   -- SQLite
   is unique and never <code>NULL</code>.
 </p>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="9">
 <figcaption>The same table, with and without the one line that makes its rows addressable.</figcaption>
 <pre><code>-- Without a key. Perfectly legal, and quietly unusable.
 CREATE TABLE bad_customers (          -- no way to say "this row and not that one"
@@ -148,7 +148,7 @@ CREATE TABLE good_customers (         -- the same table, made addressable
   order stores the customer's <em>id</em>, and the engine can be told to enforce that the customer exists.
 </p>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="3-4">
 <figcaption>A child table pointing at its parent, with the pointer enforced by the engine.</figcaption>
 <pre><code>CREATE TABLE orders (                             -- the child table
   id           INTEGER PRIMARY KEY,               -- this order's own identity
@@ -184,7 +184,7 @@ CREATE TABLE good_customers (         -- the same table, made addressable
   input of another, forever.
 </p>
 
-<figure class="codex" data-lang="text">
+<figure class="codex" data-lang="text" data-focus="5">
 <figcaption>What a result set looks like, and the three things to read off it before anything else.</figcaption>
 <pre><code>id | name        | city    | orders
 ---+-------------+---------+-------

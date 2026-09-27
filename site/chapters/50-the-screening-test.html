@@ -62,7 +62,7 @@
 </p>
 
 <h3>1 · Second-highest value</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="4">
 <figcaption>1 &middot; Second-highest value &mdash; the most-asked SQL interview question there is.</figcaption>
 <pre><code>-- DENSE_RANK, because "second highest salary" means the second DISTINCT value.
 SELECT DISTINCT salary_cents FROM (            -- the outer query just filters…
@@ -87,7 +87,7 @@ WHERE r = 2;                                   -- "the second distinct value"
 </figure>
 
 <h3>2 · Nth per group (top-N per group)</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="4">
 <figcaption>2 &middot; Top-N per group &mdash; and the one detail they are actually listening for.</figcaption>
 <pre><code>WITH r AS (SELECT o.*,                            -- every order column…
                   ROW_NUMBER() OVER (PARTITION BY customer_id   -- …numbered per customer…
@@ -113,7 +113,7 @@ SELECT * FROM r WHERE rn = 1;                     -- rn is an ordinary column ou
 </figure>
 
 <h3>3 · Find and delete duplicates</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="5">
 <figcaption>3 &middot; Find and delete duplicates &mdash; look before you delete, then fix the cause.</figcaption>
 <pre><code>WITH d AS (SELECT id,                                          -- only the key is needed
                   ROW_NUMBER() OVER (PARTITION BY LOWER(email) -- case-insensitive grouping
@@ -138,7 +138,7 @@ SELECT * FROM d WHERE rn &gt; 1;         -- LOOK first: these are the rows that 
 </figure>
 
 <h3>4 · Rows in A not in B</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>4 &middot; Rows in A not in B &mdash; the single most-tested fact in SQL.</figcaption>
 <pre><code>SELECT c.* FROM customers c                      -- one row per customer, never duplicated
 WHERE NOT EXISTS (SELECT 1 FROM orders o         -- SELECT 1: only existence matters
@@ -160,7 +160,7 @@ WHERE NOT EXISTS (SELECT 1 FROM orders o         -- SELECT 1: only existence mat
 </figure>
 
 <h3>5 · Running total</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="4">
 <figcaption>5 &middot; Running total &mdash; and why the frame has to be written out.</figcaption>
 <pre><code>SELECT placed_at, total_cents,                   -- the raw row…
        SUM(total_cents) OVER (PARTITION BY customer_id  -- …plus a total per customer…
@@ -186,7 +186,7 @@ FROM orders;                                            -- same rows out as in
 </figure>
 
 <h3>6 · Month-on-month change</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="7">
 <figcaption>6 &middot; Month-on-month change &mdash; where the division guard is the point.</figcaption>
 <pre><code>WITH m AS (SELECT strftime('%Y-%m', placed_at) mo,    -- '2026-03': TEXT, and it sorts right
                   SUM(total_cents) t                  -- the month's total, in cents
@@ -215,7 +215,7 @@ FROM m ORDER BY mo;                                    -- chronological
 </figure>
 
 <h3>7 · Pivot without PIVOT</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2-3">
 <figcaption>7 &middot; Pivot without <code>PIVOT</code>.</figcaption>
 <pre><code>SELECT strftime('%Y-%m', placed_at) mo,                       -- the row axis: month
        COUNT(CASE WHEN status = 'delivered' THEN 1 END) delivered,  -- non-matches → NULL…
@@ -238,7 +238,7 @@ FROM orders GROUP BY mo;                                      -- one row per mon
 </figure>
 
 <h3>8 · Gaps and islands</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="1">
 <figcaption>8 &middot; Gaps and islands &mdash; recognise the shape, then reproduce it.</figcaption>
 <pre><code>-- Consecutive runs: group by (value − row_number). Chapter 14.
 -- Inside a run both increase by one, so the difference is constant; at a gap it
@@ -258,7 +258,7 @@ FROM orders GROUP BY mo;                                      -- one row per mon
 </figure>
 
 <h3>9 · Hierarchy</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption>9 &middot; Hierarchy &mdash; three parts, and the one everybody forgets.</figcaption>
 <pre><code>-- Recursive CTE with an anchor, UNION ALL, and a depth guard. Chapter 12.
 -- Anchor: the rows with no parent. Step: join the table to the CTE itself.
@@ -278,7 +278,7 @@ FROM orders GROUP BY mo;                                      -- one row per mon
 </figure>
 
 <h3>10 · Customers above average</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="6">
 <figcaption>10 &middot; Customers above average &mdash; where the right answer starts with a question.</figcaption>
 <pre><code>SELECT customer_id, SUM(total_cents) spend      -- each customer's total…
 FROM orders GROUP BY customer_id                -- …one row each
@@ -303,7 +303,7 @@ HAVING SUM(total_cents) &gt; (SELECT AVG(t) FROM   -- …compared to the average
 </figure>
 
 <h3>11 · Fill the gaps in a date series</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption>11 &middot; Fill the gaps in a date series &mdash; and the trap in the obvious fix.</figcaption>
 <pre><code>-- LEFT JOIN from a calendar table or a recursive date spine, with COALESCE(n, 0).
 -- The trap is putting the date filter in WHERE and re-inner-joining. Chapter 06.
@@ -325,7 +325,7 @@ HAVING SUM(total_cents) &gt; (SELECT AVG(t) FROM   -- …compared to the average
 </figure>
 
 <h3>12 · “Optimise this query”</h3>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption>12 &middot; &ldquo;Optimise this query&rdquo; &mdash; where the method is the answer.</figcaption>
 <pre><code>-- Almost always one of: a function on the filtered column, a correlated subquery
 -- repeated three times, a fan-out hidden by DISTINCT, or SELECT *. Chapter 29.

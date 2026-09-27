@@ -168,7 +168,7 @@ DENSE_RANK()  ->    1     1     2     3   -- ties share, and no rank is skipped
 
 <h2 id="topn">Top-N per group: the canonical use</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="9">
 <figcaption>Top-N per group, the canonical shape: rank inside a CTE, filter outside it.</figcaption>
 <pre><code>-- The most recent order per customer.
 WITH ranked AS (                                     -- the CTE exists so rn has somewhere to live
@@ -211,7 +211,7 @@ SELECT * FROM ranked WHERE rn = 1;                   -- now rn is an ordinary co
 
 <h2 id="dedupe">De-duplication, done properly</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="10">
 <figcaption>De-duplication as one statement: number the duplicates, delete everything that is not number one.</figcaption>
 <pre><code>-- Keep the newest row per email address; delete the rest. No temp table.
 WITH dupes AS (                                      -- name the duplicates before touching them
@@ -259,7 +259,7 @@ WHERE id IN (SELECT id FROM dupes WHERE rn &gt; 1);     -- everything that is no
   typo gets into one of them. Standard SQL lets you name it once:
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="6">
 <figcaption>Naming a window once, so three functions cannot drift apart.</figcaption>
 <pre><code>SELECT customer_id, placed_at,                    -- the raw columns
        ROW_NUMBER()     OVER w AS nth,            -- all three share the same window…
@@ -300,7 +300,7 @@ ORDER BY customer_id, placed_at;                  -- the presentation order, unr
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="6">
 <figcaption>Three window functions over one shared window, in a single pass.</figcaption>
 <pre><code>-- Every customer's orders: numbered, as a share of their spend, and the gap in days.
 SELECT customer_id, id, placed_at,                          -- the raw columns, unchanged

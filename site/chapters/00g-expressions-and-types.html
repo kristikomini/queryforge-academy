@@ -53,7 +53,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2-3">
 <figcaption>The trap, in two lines: the same division, one character apart.</figcaption>
 <pre><code>SELECT total_cents,                       -- 12550, an INTEGER (cents)
        total_cents / 100   AS wrong_eur,  -- 125   ← INTEGER ÷ INTEGER truncates. Cents gone.
@@ -110,7 +110,7 @@ FROM orders LIMIT 5;                      -- five rows is enough to see it
 
 <h2 id="null-arithmetic">NULL propagates through everything</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="4">
 <figcaption>What happens when a value you did not have takes part in a calculation.</figcaption>
 <pre><code>SELECT 100 + NULL          AS arithmetic,   -- NULL. Unknown plus a hundred is unknown.
        'Rossi' || NULL     AS concatenation, -- NULL: one unknown erases the whole string
@@ -164,7 +164,7 @@ FROM orders LIMIT 5;                                            -- again, five r
 
 <h2 id="case">CASE: an if-statement that is an expression</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="5">
 <figcaption>Turning a value into a label, without leaving SQL.</figcaption>
 <pre><code>SELECT id,                                              -- the order…
        total_cents,                                     -- …and the amount, unmodified

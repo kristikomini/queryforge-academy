@@ -82,7 +82,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>The rule that makes <code>GROUP BY</code> strict: after grouping, a column with many values has no single value to show.</figcaption>
 <pre><code>-- ERROR in every standards-compliant engine: WHICH placed_at?
 SELECT customer_id, placed_at, SUM(total_cents)  -- placed_at is neither grouped nor aggregated
@@ -151,7 +151,7 @@ FROM orders GROUP BY customer_id;                                               
 
 <h2 id="having">HAVING is not a second WHERE</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="6,9">
 <figcaption><code>WHERE</code> and <code>HAVING</code> in one query, each doing the job only it can do.</figcaption>
 <pre><code>-- Customers who spent over €1000 in 2026, across at least three orders.
 SELECT customer_id,                                     -- the grouping key
@@ -201,7 +201,7 @@ HAVING COUNT(*) &gt;= 3                     -- filters GROUPS: impossible before
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="4,7">
 <figcaption>Conditional aggregation: three counts and a total from one pass over the table.</figcaption>
 <pre><code>SELECT                                                                  -- four answers, one pass
   customer_id,                                                    -- the grouping key
@@ -250,7 +250,7 @@ FROM orders GROUP BY customer_id;   -- and the same one row per customer
   Subtotals in one pass, rather than three queries glued together with <code>UNION ALL</code>:
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption><code>ROLLUP</code>: detail rows, subtotals and a grand total from one scan.</figcaption>
 <pre><code>-- Total per region, per region+city, and a grand total — one pass over the data.
 SELECT region, city, SUM(total_cents) AS spend  -- region and city are NULL on the total rows
@@ -286,7 +286,7 @@ GROUP BY ROLLUP (region, city);                 -- groups by (region, city), the
 </p>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="7-8">
 <figcaption>The report shape screening tests actually ask for: monthly revenue, order count and average order value.</figcaption>
 <pre><code>-- Monthly revenue, order count and average order value for 2026, biggest month first.
 SELECT strftime('%Y-%m', placed_at)          AS month,        -- '2026-03': TEXT, and it sorts right

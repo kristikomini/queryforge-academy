@@ -83,7 +83,7 @@
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="10-11">
 <figcaption>The <code>orders</code> table with its state machine written into the schema, where no application bug can bypass it.</figcaption>
 <pre><code>CREATE TABLE orders (                        -- DDL: define a new table
   id           INTEGER PRIMARY KEY,          -- surrogate key; unique and NOT NULL for free
@@ -162,7 +162,7 @@ CREATE INDEX ix_orders_customer ON orders (customer_id);  -- makes the FK check,
   error message that mentions it tells the support engineer nothing.
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="5">
 <figcaption>The same constraint, twice: once anonymous, once with a name you can read in an error log.</figcaption>
 <pre><code>-- Not this: the engine invents a name like CK__orders__3213E83F2.
 ALTER TABLE orders ADD CHECK (total_cents &gt;= 0);          -- valid, and unmaintainable

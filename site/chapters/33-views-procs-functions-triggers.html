@@ -118,7 +118,7 @@
 
 <h2 id="functions">Functions: the one that matters</h2>
 
-<figure class="codex" data-lang="tsql">
+<figure class="codex" data-lang="tsql" data-focus="8">
 <figcaption>Two kinds of function with the same keyword: one is a per-row disaster, the other is a parameterised view.</figcaption>
 <pre><code>-- SCALAR — avoid in a SELECT list or a WHERE clause over many rows.
 CREATE FUNCTION dbo.fn_OrderTotal(@id INT) RETURNS BIGINT AS  -- returns ONE value
@@ -203,7 +203,7 @@ CROSS APPLY dbo.fn_OrderTotals() t WHERE t.order_id = o.id;   -- …called once 
   </p>
 </div>
 
-<figure class="codex" data-lang="tsql">
+<figure class="codex" data-lang="tsql" data-focus="11-12">
 <figcaption>A trigger written the only way a trigger should be written: set-based.</figcaption>
 <pre><code>-- Set-based, so it is correct for a multi-row UPDATE. This is the shape.
 CREATE TRIGGER trg_orders_audit ON orders AFTER UPDATE AS   -- fires ONCE per statement…
@@ -239,7 +239,7 @@ END                                     -- end of the trigger body
 </figure>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>Proof that a view is expanded rather than read.</figcaption>
 <pre><code>-- In the playground: a view is expanded into the query, not stored.
 EXPLAIN QUERY PLAN SELECT * FROM v_order_totals WHERE order_id = 42;  -- ask for the plan

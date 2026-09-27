@@ -80,7 +80,7 @@ WHERE total_cents &gt; 50000;                   -- …and the question asked of 
 
 <h2 id="combining">AND, OR and the brackets that decide the meaning</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="8-9">
 <figcaption>The same three conditions, with and without brackets &mdash; two completely different questions.</figcaption>
 <pre><code>-- WRONG, almost certainly: AND binds tighter than OR, so this reads as
 --   status = 'shipped'  OR  (status = 'delivered' AND total_cents > 50000)
@@ -116,7 +116,7 @@ WHERE status IN ('shipped', 'delivered')             -- same meaning, one clause
 
 <h2 id="ranges">Ranges, lists and patterns</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="12">
 <figcaption>Three shorthands you will use every day &mdash; and the one that is a trap on timestamps.</figcaption>
 <pre><code>-- A LIST: one column, several acceptable values.
 SELECT * FROM orders WHERE status IN ('shipped', 'delivered');   -- ORs, spelled compactly
@@ -160,7 +160,7 @@ SELECT * FROM customers WHERE name LIKE '%rossi%';   -- contains rossi: reads ev
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>The wrong way and the only way to ask &ldquo;is this empty?&rdquo;</figcaption>
 <pre><code>SELECT * FROM orders WHERE shipped_at = NULL;      -- ALWAYS zero rows. Not an error.
 SELECT * FROM orders WHERE shipped_at IS NULL;     -- correct: the unshipped orders
@@ -186,7 +186,7 @@ SELECT * FROM orders WHERE status &lt;&gt; 'cancelled';  -- rows where status IS
 
 <h2 id="performance">The habit that keeps a filter fast</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="7-8">
 <figcaption>Two ways to ask for March. One can use an index; the other cannot.</figcaption>
 <pre><code>-- Not sargable: the column is wrapped in a function, so the index on it is useless.
 SELECT * FROM orders                                  -- the table…

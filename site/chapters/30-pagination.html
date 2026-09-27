@@ -40,7 +40,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Offset pagination, and the arithmetic that makes page 5001 slow.</figcaption>
 <pre><code>SELECT * FROM orders ORDER BY placed_at DESC    -- sort the whole table…
 OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;     -- …then discard the first 100 000
@@ -81,7 +81,7 @@ OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;     -- …then discard the first 100
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="9">
 <figcaption>Keyset pagination: &ldquo;carry on from where I left off&rdquo;, at the same cost for every page.</figcaption>
 <pre><code>-- Page 1: no bookmark yet, so just take the first twenty.
 SELECT id, placed_at, total_cents FROM orders   -- the columns the list needs
@@ -129,7 +129,7 @@ LIMIT 20;                                       -- the next page, at constant co
   </ol>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="1">
 <figcaption>The index that makes keyset pagination constant-cost.</figcaption>
 <pre><code>CREATE INDEX ix_orders_page ON orders (placed_at DESC, id DESC);  -- the sort, materialised
 -- Now every page is ONE seek plus twenty sequential index entries.
@@ -194,7 +194,7 @@ LIMIT 20;                                       -- the next page, at constant co
 
 <h2 id="cursor">API cursors are keyset pagination with a wrapper</h2>
 
-<figure class="codex" data-lang="text">
+<figure class="codex" data-lang="text" data-focus="4">
 <figcaption>An API cursor is a keyset bookmark with a wrapper around it.</figcaption>
 <pre><code>-- Encode the bookmark opaquely, so clients cannot construct one and so you can
 -- change the sort order later without breaking them.
@@ -230,7 +230,7 @@ LIMIT 20;                                       -- the next page, at constant co
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="9">
 <figcaption>Compare what each has to read, in the playground.</figcaption>
 <pre><code>-- Offset: the engine produces everything up to the offset and discards it.
 EXPLAIN QUERY PLAN                                              -- ask for the plan…

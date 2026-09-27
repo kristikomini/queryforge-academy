@@ -89,7 +89,7 @@
 
 <h2 id="insert">INSERT: putting rows in</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>Three shapes of insert: one row, several rows, and rows from a query.</figcaption>
 <pre><code>-- One row. ALWAYS name the columns.
 INSERT INTO notes (title, body, priority)          -- which columns you are supplying…
@@ -134,7 +134,7 @@ FROM (SELECT DISTINCT status FROM orders) s;       -- one note per distinct orde
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="8">
 <figcaption>The habit: write the <code>SELECT</code> first, then change one word.</figcaption>
 <pre><code>-- 1. Look at exactly the rows you are about to change.
 SELECT id, title, priority FROM notes              -- SELECT, not UPDATE, first…
@@ -165,7 +165,7 @@ SELECT changes() AS rows_changed;                  -- SQLite; @@ROWCOUNT in T-SQ
 
 <h2 id="delete">DELETE, and the transaction that makes it reversible</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="3">
 <figcaption>The complete safe-delete ritual: count, open, delete, check, decide.</figcaption>
 <pre><code>SELECT COUNT(*) FROM notes WHERE priority = 5;   -- 1. how many? Expect a number you recognise.
 

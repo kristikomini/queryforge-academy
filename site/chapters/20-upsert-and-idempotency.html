@@ -198,7 +198,7 @@ WHEN NOT MATCHED THEN INSERT (email, name, city_id)          -- it does not exis
 <p><strong>1 · A natural business key with a unique constraint.</strong> The most robust, because
 the database enforces it whatever the application does.</p>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="3">
 <figcaption>Idempotency by constraint: the reference database's payment table, and the re-delivered webhook it survives.</figcaption>
 <pre><code>-- The payments table in the reference database does exactly this:
 external_ref TEXT NOT NULL,                          -- the payment provider's own id
@@ -229,7 +229,7 @@ ON CONFLICT (external_ref) DO NOTHING;                              -- second de
 <p><strong>2 · A watermark.</strong> For incremental loads: record the highest source timestamp or
 id you have processed, and next time start from there.</p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="9">
 <figcaption>The watermark pattern: load what is new, and record how far you got, in one transaction.</figcaption>
 <pre><code>-- Load only what is new since last time, and record the new high-water mark
 -- INSIDE THE SAME TRANSACTION as the load.
@@ -276,7 +276,7 @@ COMMIT;                                                   -- now both are perman
 
 <p><strong>3 · Delete-then-insert by partition.</strong> For a full daily reload of one slice:</p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2-3">
 <figcaption>Delete-then-insert by slice: idempotent by construction.</figcaption>
 <pre><code>BEGIN;                                                     -- one unit
   DELETE FROM fact_sales WHERE sale_date = ?;              -- the whole slice, whatever is in it
@@ -304,7 +304,7 @@ COMMIT;                                                    -- readers see old or
 
 <h2 id="bulk-upsert">Upserting a batch, not a row</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="9-10">
 <figcaption>Upserting a batch: one set-based statement, and a filter that skips rows nothing changed in.</figcaption>
 <pre><code>-- Load a staging table first, then ONE set-based upsert. Row-at-a-time upsert
 -- from application code is the N+1 problem wearing a different hat.
@@ -347,7 +347,7 @@ ON CONFLICT (email) DO UPDATE                                -- same conflict cl
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="9">
 <figcaption>Prove it in the playground: the same insert, twice, with and without the conflict clause.</figcaption>
 <pre><code>-- First, prove the constraint is real:
 INSERT INTO payments (order_id, amount_cents, method, external_ref)  -- a payment already recorded

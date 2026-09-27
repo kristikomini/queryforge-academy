@@ -52,7 +52,7 @@
 </div>
 
 <h2 id="one">1 · A function wrapping the filtered column</h2>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Pattern 1: a function wrapping the filtered column.</figcaption>
 <pre><code>WHERE YEAR(placed_at) = 2026                                   -- scan: computed per row
 WHERE placed_at &gt;= '2026-01-01' AND placed_at &lt; '2027-01-01'   -- seek: a range over stored values
@@ -72,7 +72,7 @@ WHERE placed_at &gt;= '2026-01-01' AND placed_at &lt; '2027-01-01'   -- seek: a 
 <p class="small muted">The commonest single cause. See <a href="07-predicates-and-sargability.html">chapter 07</a>.</p>
 
 <h2 id="two">2 · Implicit conversion</h2>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Pattern 2: implicit conversion &mdash; the one with no visible symptom.</figcaption>
 <pre><code>WHERE vat_number = 12345678901     -- column is VARCHAR: converts EVERY row, loses the index
 WHERE vat_number = '12345678901'   -- text to text: no conversion, index seek
@@ -101,7 +101,7 @@ WHERE vat_number = '12345678901'   -- text to text: no conversion, index seek
 </p>
 
 <h2 id="four">4 · N+1</h2>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption>Pattern 4: N+1 &mdash; one query to get the list, then one per item.</figcaption>
 <pre><code>SELECT id FROM orders WHERE customer_id = 42;      -- 1 query, 500 rows back
 -- then, in an application loop, 500 times:
@@ -133,7 +133,7 @@ SELECT * FROM order_lines WHERE order_id = ?;      -- 500 more queries, one per 
 </div>
 
 <h2 id="five">5 · A cursor or a row-by-row loop</h2>
-<figure class="codex" data-lang="tsql">
+<figure class="codex" data-lang="tsql" data-focus="8">
 <figcaption>Pattern 5: a cursor doing what one statement could do.</figcaption>
 <pre><code>-- Anything shaped like this in T-SQL or PL/SQL:
 DECLARE c CURSOR FOR                                    -- declare a row-at-a-time reader…
@@ -194,7 +194,7 @@ END                                                     -- …and repeat, thousa
 </p>
 
 <h2 id="seven">7 · <code>OR</code> across different columns</h2>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3-5">
 <figcaption>Pattern 7: <code>OR</code> across different columns.</figcaption>
 <pre><code>WHERE email = ? OR phone = ?                    -- no single index leads with both columns
 -- becomes:
@@ -217,7 +217,7 @@ SELECT ... WHERE phone = ?;                     -- …one seek, on the phone ind
 </figure>
 
 <h2 id="eight">8 · <code>OFFSET</code> deep in a result set</h2>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="1">
 <figcaption>Pattern 8: <code>OFFSET</code> deep in a result set.</figcaption>
 <pre><code>ORDER BY placed_at DESC OFFSET 100000 ROWS FETCH NEXT 20 ROWS ONLY;  -- page 5001
 -- The engine produces 100 020 rows and throws 100 000 of them away.

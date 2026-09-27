@@ -126,7 +126,7 @@ FROM daily;                                          -- one row per day, already
 
 <h2 id="lag">LAG, LEAD and the value-at functions</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption>The value-at functions: look backwards, forwards, and at the start of the frame.</figcaption>
 <pre><code>SELECT d, amount,                                              -- the row's own values
        LAG(amount)      OVER (ORDER BY d)        AS prev_day,  -- the previous row; NULL at the first
@@ -205,7 +205,7 @@ FROM daily;                                                    -- one row per da
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="10">
 <figcaption>Gaps and islands: subtract the row number from the value, and every run collapses to one constant.</figcaption>
 <pre><code>-- day:  1 2 3 7 8 12
 -- rn:   1 2 3 4 5  6      ← the position in the ordered list
@@ -249,7 +249,7 @@ ORDER BY island_start;                                 -- chronological
     show in an interview — is to mark where a new group <em>starts</em> and then take a running
     sum of those marks. It works for sessions, status runs, anything.
   </p>
-  <figure class="codex" data-lang="sql">
+  <figure class="codex" data-lang="sql" data-focus="10">
 <figcaption>Sessionisation: mark where a new run <em>starts</em>, then take a running sum of the marks.</figcaption>
 <pre><code>WITH flagged AS (                                          -- step 1: is this event a new session?
   SELECT *,                                                -- keep every original column…

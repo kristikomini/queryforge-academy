@@ -95,7 +95,7 @@
   right choice for working through the course on a laptop, and for keeping your own scratch database.
 </p>
 
-<figure class="codex" data-lang="bash">
+<figure class="codex" data-lang="bash" data-focus="4">
 <figcaption>Installing SQLite and opening a database file, on each platform.</figcaption>
 <pre><code># macOS — already installed. On Windows: winget install SQLite.SQLite
 # Debian/Ubuntu: sudo apt install sqlite3      # Fedora: sudo dnf install sqlite
@@ -148,7 +148,7 @@ SELECT COUNT(*) FROM orders;   -- and now some actual SQL: how many rows are the
   engine it says so, and this is the command.
 </p>
 
-<figure class="codex" data-lang="bash">
+<figure class="codex" data-lang="bash" data-focus="2">
 <figcaption>A throwaway PostgreSQL, and a throwaway SQL Server. Both gone when you stop the container.</figcaption>
 <pre><code># PostgreSQL: starts in about two seconds, listens on the standard port.
 docker run --rm -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:17   # one line, one engine

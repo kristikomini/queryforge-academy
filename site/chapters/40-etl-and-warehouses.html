@@ -81,7 +81,7 @@
 
 <h2 id="incremental">Incremental loading</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="8">
 <figcaption>Incremental loading: the watermark pattern, with the two details that decide whether it is correct.</figcaption>
 <pre><code>-- The watermark pattern, with the two details that matter.
 BEGIN;                                                   -- load and marker, together
@@ -155,7 +155,7 @@ COMMIT;                                                  -- both, or neither
 
 <h2 id="quality">Data quality: test the pipeline, not just the code</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="10">
 <figcaption>Test the pipeline, not just the code: the four checks that catch most incidents.</figcaption>
 <pre><code>-- Run these AFTER every load. Each one has caused a real incident by being absent.
 -- 1. Nothing arrived — the job "succeeded" against an empty extract.

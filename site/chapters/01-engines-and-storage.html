@@ -153,7 +153,7 @@
 
 <div class="tryit">
   <p>In the <a href="../playground.html">playground</a>, compare what the engine has to touch:</p>
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="3">
 <figcaption>Two queries with the same <code>WHERE</code> clause and the same rows, moving very different numbers of bytes.</figcaption>
 <pre><code>-- Both answer the same business question: "what is on order 42?"
 SELECT * FROM order_lines WHERE order_id = 42;          -- every column of every matching row

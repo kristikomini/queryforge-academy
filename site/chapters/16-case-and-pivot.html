@@ -32,7 +32,7 @@
 
 <h2 id="case">CASE: the only conditional you need</h2>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="9">
 <figcaption>Both spellings of <code>CASE</code>, and the one thing the short form cannot do.</figcaption>
 <pre><code>-- SEARCHED CASE: any predicate, evaluated top to bottom, FIRST match wins.
 SELECT id,                                                 -- the row's key
@@ -87,7 +87,7 @@ CASE status WHEN 'draft'   THEN 'Bozza'                    -- status = 'draft'
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4-6">
 <figcaption>A pivot with no <code>PIVOT</code> keyword: one column per city, each summing only its own rows.</figcaption>
 <pre><code>-- Portable everywhere, readable, and the answer to give in an interview.
 SELECT                                                           -- the report columns follow
@@ -150,7 +150,7 @@ ORDER BY month;                                                                 
   <code>jan, feb, mar…</code>:
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="9">
 <figcaption>Unpivot: turning twelve month columns back into twelve rows.</figcaption>
 <pre><code>-- Portable: one branch per source column, stapled together with UNION ALL.
 SELECT product_id, 1 AS month, jan AS qty FROM sales_wide WHERE jan IS NOT NULL  -- January
@@ -183,7 +183,7 @@ WHERE m.qty IS NOT NULL;                                           -- drop the e
 
 <h2 id="coalesce">COALESCE and NULLIF in reports</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="10">
 <figcaption><code>COALESCE</code> and <code>NULLIF</code> doing the three jobs they exist for in reports.</figcaption>
 <pre><code>SELECT                                                       -- the report columns follow
   -- A display name, from the first source that has one:
@@ -229,7 +229,7 @@ FROM customers c ...                                          -- (joined to the 
 <h2 id="reporting">The reporting shape you will be asked for</h2>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="8-9">
 <figcaption>The archetypal reporting query: counts, a percentage and revenue, in one scan.</figcaption>
 <pre><code>-- "Monthly order status breakdown with percentages" — the query behind half the
 -- dashboards you will ever be asked to write. One scan, no subqueries.

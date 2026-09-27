@@ -66,7 +66,7 @@
 </table>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="5">
 <figcaption>Declarative range partitioning, and the constraint that surprises everyone.</figcaption>
 <pre><code>-- PostgreSQL 10+ declarative partitioning
 CREATE TABLE orders (                                        -- the parent: no rows of its own
@@ -100,7 +100,7 @@ CREATE TABLE orders_2026_01 PARTITION OF orders              -- one child…
 
 <h3>Partition elimination is the payoff — and it is conditional</h3>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption>Partition elimination is the payoff &mdash; and it is conditional on the predicate.</figcaption>
 <pre><code>-- Reads ONE partition: the planner can prove which one from the predicate.
 SELECT * FROM orders                                            -- the parent table…
@@ -145,7 +145,7 @@ SELECT * FROM orders WHERE customer_id = 42;                    -- a fine query,
   The real reason range partitioning earns its complexity: retention becomes metadata, not work.
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption>The real payoff: retention becomes a catalogue operation instead of millions of deletes.</figcaption>
 <pre><code>-- Retire January 2025 without a DELETE. This is a catalogue operation: no rows
 -- are read, no log records are generated, and it completes in milliseconds.
@@ -184,7 +184,7 @@ ALTER TABLE orders SWITCH PARTITION 13 TO orders_archive;   -- metadata only, in
 
 <p>Most systems that think they need partitioning need this instead:</p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="8">
 <figcaption>What most systems that think they need partitioning actually need: a batched delete.</figcaption>
 <pre><code>-- Batched, resumable, and it never holds a long transaction or escalates locks.
 -- Run it in a loop until it affects zero rows.

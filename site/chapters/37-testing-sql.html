@@ -86,7 +86,7 @@
 
 <h2 id="frameworks">The frameworks</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="5">
 <figcaption>Two test frameworks that run inside the database, so the thing under test is the real engine.</figcaption>
 <pre><code>-- tSQLt (SQL Server) — tests ARE stored procedures, and it can FAKE a table so a
 -- test does not depend on foreign keys or on data it did not create.
@@ -158,7 +158,7 @@ SELECT finish();                                             -- did all three ac
 
 <h2 id="ci">In CI</h2>
 
-<figure class="codex" data-lang="yaml">
+<figure class="codex" data-lang="yaml" data-focus="11">
 <figcaption>The CI job: a real engine, and migrations applied twice on purpose.</figcaption>
 <pre><code># One job, a real engine, migrations applied from scratch on every run.
 services:                             # containers the job can talk to
@@ -204,7 +204,7 @@ steps:                                # the job itself
   </ul>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="11">
 <figcaption>A schema invariant as a query: every foreign key that has no index behind it.</figcaption>
 <pre><code>-- Every FK column that is not the leading column of some index. Zero rows, or fail.
 SELECT c.conrelid::regclass AS tbl,                    -- the oid, cast to a readable name

@@ -107,7 +107,7 @@
 
 <p>Renaming <code>customers.name</code> to <code>full_name</code>, safely — four deploys:</p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="9-11">
 <figcaption>Renaming a column without downtime: expand, backfill, migrate, contract &mdash; four deploys, never one.</figcaption>
 <pre><code>-- 1 · EXPAND. Add the new column. Old code is completely unaffected by it.
 ALTER TABLE customers ADD COLUMN full_name VARCHAR(200) NULL;  -- NULLable: metadata-only, instant

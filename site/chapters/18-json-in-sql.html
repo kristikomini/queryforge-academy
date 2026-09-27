@@ -69,7 +69,7 @@
 
 <h2 id="dialects">Reading it, four ways</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Reading a value out of a JSON document, in the four dialects you will meet.</figcaption>
 <pre><code>-- PostgreSQL (jsonb — the binary, indexable one; prefer it to json)
 SELECT data -&gt;&gt; 'email'                    AS email,   -- ->> returns TEXT, -> returns jsonb
@@ -121,7 +121,7 @@ SELECT JSON_VALUE(data, '$.email') FROM events;        -- the same function name
 
 <h2 id="indexing">Indexing inside a document</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="6">
 <figcaption>Indexing inside a document &mdash; whole-document, one path, or a computed column.</figcaption>
 <pre><code>-- PostgreSQL: a GIN index supports containment (@>) over the WHOLE document.
 CREATE INDEX ix_events_data ON events                    -- one index, any key…
@@ -164,7 +164,7 @@ CREATE INDEX ix_events_email ON events (email);          -- an ordinary index on
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption>The best of both: a real, typed, indexable column that cannot drift from the document.</figcaption>
 <pre><code>-- PostgreSQL 12+: a stored generated column. Always in step, indexable, typed.
 ALTER TABLE events                                 -- change the table definition…
@@ -190,7 +190,7 @@ CREATE INDEX ix_events_email ON events (email);      -- and now an ordinary inde
 
 <h2 id="shredding">Turning a document into rows</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="5">
 <figcaption>Shredding: turning a document's array into rows you can join, filter and aggregate.</figcaption>
 <pre><code>-- PostgreSQL: expand an array into rows, then treat it as a normal table.
 SELECT e.id, t.tag                                          -- one row per (event, tag)
@@ -227,7 +227,7 @@ FROM OPENJSON(@payload, '$.lines')                          -- the array of line
 </figure>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql">
+  <figure class="codex" data-lang="sql" data-focus="8">
 <figcaption>The same idea in SQLite &mdash; and an index that turns the scan into a search.</figcaption>
 <pre><code>-- SQLite (the playground) has the JSON1 functions built in:
 SELECT json_extract(data, '$.email')     AS email,    -- returns TEXT for a string path

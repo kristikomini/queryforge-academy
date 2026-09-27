@@ -32,7 +32,7 @@
 
 <h2 id="getting">Getting a plan</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>How to ask each engine for a plan &mdash; and which of these actually run the query.</figcaption>
 <pre><code>-- PostgreSQL. ANALYZE actually RUNS it and reports real numbers, not estimates.
 EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) SELECT ...;   -- BUFFERS: cache hits vs disk reads
@@ -185,7 +185,7 @@ SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY);   -- …then read it back as rows
 </ol>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql" data-run>
+  <figure class="codex" data-lang="sql" data-run data-focus="13">
 <figcaption>Two plans, side by side: an index that already sorts, and a sort the engine has to do itself.</figcaption>
 <pre><code>-- Question one: one customer's orders, newest first.
 EXPLAIN QUERY PLAN                                            -- ask for the plan…

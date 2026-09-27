@@ -41,7 +41,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="17">
 <figcaption>Two CTEs in a row: name the aggregation, then name the ranking, then say what you want.</figcaption>
 <pre><code>WITH monthly AS (                                    -- step 1, given a name
   SELECT customer_id,                                -- who
@@ -123,7 +123,7 @@ ORDER BY month, pos;                                 -- chronological, best firs
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="17">
 <figcaption>A recursive CTE walking a management chain: an anchor, a step, and a guard.</figcaption>
 <pre><code>WITH RECURSIVE org AS (                              -- RECURSIVE lets the CTE mention itself
   -- ANCHOR: the starting rows, evaluated once.
@@ -214,7 +214,7 @@ SELECT depth, path FROM org ORDER BY path;           -- read the finished set li
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql">
+  <figure class="codex" data-lang="sql" data-focus="9">
 <figcaption>Generating a date spine, so a report can show the days on which nothing happened.</figcaption>
 <pre><code>-- Every day in 2026, whether or not anything happened on it.
 WITH RECURSIVE days(d) AS (                       -- the column list names what the CTE produces

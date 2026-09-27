@@ -171,7 +171,7 @@ SELECT * FROM users WHERE email = ?      -- or $1, @email, :email — the driver
   must be fixed before parsing. So this does not work:
 </p>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="1">
 <figcaption>What a parameter cannot do, and why it fails so quietly in one of the two cases.</figcaption>
 <pre><code>ORDER BY ?          -- binds a STRING: it sorts by a constant and silently does nothing
 SELECT * FROM ?     -- a syntax error, because the shape must be known before parsing
@@ -200,7 +200,7 @@ SELECT * FROM ?     -- a syntax error, because the shape must be known before pa
   </p>
 </div>
 
-<figure class="codex" data-lang="js">
+<figure class="codex" data-lang="js" data-focus="2-4">
 <figcaption>The only correct shape for a dynamic sort: an allow-list, with no escaping anywhere.</figcaption>
 <pre><code>// The only correct shape. Note there is no escaping anywhere in it.
 const SORTABLE = { date: "o.placed_at",              // the map IS the security boundary…
@@ -232,7 +232,7 @@ db.query(sql, [pageSize]);                                // …and VALUES are s
 
 <h2 id="safe-dynamic">Safe dynamic SQL inside the database</h2>
 
-<figure class="codex" data-lang="tsql">
+<figure class="codex" data-lang="tsql" data-focus="10-12">
 <figcaption>Safe dynamic SQL inside the database: <code>sp_executesql</code> takes parameters, <code>EXEC</code> does not.</figcaption>
 <pre><code>-- sp_executesql takes parameters. EXEC(@sql) does not — that is the entire
 -- difference, and it is why one is safe and the other is not.

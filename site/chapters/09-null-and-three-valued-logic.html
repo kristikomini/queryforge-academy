@@ -153,7 +153,7 @@ WHERE NOT EXISTS (SELECT 1 FROM orders o          -- correct, and null-safe
 </figure>
 
 <h3>3 · Aggregates ignore NULL — except <code>COUNT(*)</code></h3>
-<figure class="codex" data-lang="text">
+<figure class="codex" data-lang="text" data-focus="5">
 <figcaption>The third place, and the one that quietly produces wrong reports: what each aggregate does with a NULL.</figcaption>
 <pre><code>-- Four rows in the column `amount`: 10, 20, NULL, 30
 COUNT(*)        -- 4    counts ROWS. Never NULL, never affected by the values.
@@ -196,7 +196,7 @@ AVG(amount)     -- 20   = 60/3, NOT 60/4  ← the one that produces wrong report
   SQL Server behaviour. If you need "at most one active row per customer", use a
   <strong>filtered/partial unique index</strong> instead of relying on null semantics:
 </p>
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption>&ldquo;At most one active cart per customer&rdquo; &mdash; enforced by a partial index rather than by hoping about NULLs.</figcaption>
 <pre><code>CREATE UNIQUE INDEX uq_one_active_cart      -- a UNIQUE index is a constraint that is also fast
   ON carts (customer_id)                    -- the key: one entry per customer…
@@ -226,7 +226,7 @@ AVG(amount)     -- 20   = 60/3, NOT 60/4  ← the one that produces wrong report
 </p>
 
 <h3>6 · Concatenation and arithmetic propagate</h3>
-<figure class="codex" data-lang="text">
+<figure class="codex" data-lang="text" data-focus="4">
 <figcaption>The sixth place: NULL propagates through arithmetic and concatenation &mdash; except where a function is defined not to.</figcaption>
 <pre><code>'Rossi' || NULL       -- NULL in PostgreSQL, SQL Server, SQLite: one unknown poisons the whole
                       -- (Oracle treats '' as NULL and concatenation ignores it — a real difference)
@@ -262,7 +262,7 @@ CONCAT('Rossi', NULL) -- 'Rossi' — CONCAT() is DEFINED to treat NULL as an emp
 </div>
 
 <div class="tryit">
-  <figure class="codex" data-lang="sql">
+  <figure class="codex" data-lang="sql" data-focus="3">
 <figcaption><code>NULLIF</code> as a division guard: no <code>CASE</code>, no error, and an honest answer.</figcaption>
 <pre><code>-- Divide-by-zero without a CASE, and without an exception.
 SELECT delivered_count * 1.0                 -- * 1.0 forces REAL: integer division would truncate
