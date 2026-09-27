@@ -32,6 +32,28 @@
 
 <h2 id="order">Column order is the whole game</h2>
 
+<figure class="diagram">
+  <svg viewBox="0 0 840 250" role="img" aria-labelledby="d26t d26d">
+    <title id="d26t">An index on three columns serves only its leftmost prefixes</title>
+    <desc id="d26d">An index sorted by a, then b, then c can answer a query filtering on a, on a and b, or on all three. It cannot seek for a query that filters only on b, or only on c, because those values are scattered throughout the index rather than gathered together.</desc>
+    <rect class="d-box-a" x="40" y="34" width="330" height="40" rx="8"/>
+    <text class="d-t-b" x="205" y="59" text-anchor="middle">INDEX (a, b, c)</text>
+    <text class="d-t-s" x="390" y="59">sorted by a, then b within a, then c within b</text>
+
+    <text class="d-t-c" x="40" y="106">SERVED BY A SEEK</text>
+    <rect class="d-box-g" x="40" y="118" width="150" height="30" rx="6"/><text class="d-t-m" x="52" y="138">WHERE a = ?</text>
+    <rect class="d-box-g" x="200" y="118" width="190" height="30" rx="6"/><text class="d-t-m" x="212" y="138">WHERE a = ? AND b = ?</text>
+    <rect class="d-box-g" x="400" y="118" width="250" height="30" rx="6"/><text class="d-t-m" x="412" y="138">WHERE a = ? AND b = ? AND c = ?</text>
+
+    <text class="d-t-c" x="40" y="182">NOT SERVED</text>
+    <rect class="d-box-b" x="40" y="194" width="150" height="30" rx="6"/><text class="d-t-m" x="52" y="214">WHERE b = ?</text>
+    <rect class="d-box-b" x="200" y="194" width="150" height="30" rx="6"/><text class="d-t-m" x="212" y="214">WHERE c = ?</text>
+    <rect class="d-box-b" x="360" y="194" width="190" height="30" rx="6"/><text class="d-t-m" x="372" y="214">WHERE b = ? AND c = ?</text>
+    <text class="d-t-s" x="566" y="214">b is scattered through the index</text>
+  </svg>
+  <figcaption>The rule is mechanical: read the index columns left to right and stop at the first one your query does not filter on.</figcaption>
+</figure>
+
 <div class="box kid">
   <div class="box-title">🧒 Simple</div>
   <p style="margin-bottom:0">
@@ -82,7 +104,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>Column order: equality first, then the range or the sort. One sentence answers most index-design questions.</figcaption>
 <pre><code>-- For: SELECT ... WHERE status = 'shipped' AND placed_at >= ? ORDER BY placed_at
 CREATE INDEX ix ON orders (status, placed_at);   -- equality column first, range column second
@@ -120,7 +142,7 @@ CREATE INDEX ix ON orders (status, placed_at);   -- equality column first, range
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption><code>INCLUDE</code>: payload columns that remove the lookup without widening the key.</figcaption>
 <pre><code>-- SQL Server: INCLUDE puts columns in the LEAF level only, not in the key.
 CREATE INDEX ix_orders_status_cov        -- name it after what it serves
@@ -326,6 +348,7 @@ ORDER BY pg_relation_size(indexrelid) DESC;                    -- …largest fir
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

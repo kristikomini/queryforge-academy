@@ -210,6 +210,40 @@ WHERE  o.published_at IS NULL;                -- unpublished jobs only
 
 <h2 id="outbox">The transactional outbox</h2>
 
+<figure class="diagram">
+  <svg viewBox="0 0 840 260" role="img" aria-labelledby="d24t d24d">
+    <title id="d24t">The dual write, and the outbox that removes it</title>
+    <desc id="d24d">Writing to the database and publishing to a broker are two systems with no transaction across them, so a crash between the two leaves them disagreeing. The outbox writes the message into the same database, in the same transaction as the data, and a separate worker publishes it afterwards.</desc>
+    <defs><marker id="mk24" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill"/></marker></defs><defs><marker id="mk24b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill"/></marker></defs>
+    <text class="d-t-c" x="20" y="30">THE DUAL WRITE</text>
+    <rect class="d-box" x="40" y="44" width="130" height="44" rx="8"/>
+    <text class="d-t-b" x="105" y="71" text-anchor="middle">save order</text>
+    <rect class="d-box" x="300" y="44" width="150" height="44" rx="8"/>
+    <text class="d-t-b" x="375" y="71" text-anchor="middle">publish event</text>
+    <path class="d-line-b" d="M175 66 H295" marker-end="url(#mk24b)"/>
+    <text class="d-t-b" x="235" y="56" text-anchor="middle">✕</text>
+    <text class="d-t-s" x="470" y="60">crash here and the order exists</text>
+    <text class="d-t-s" x="470" y="78">but nobody was ever told</text>
+
+    <line class="d-line" x1="20" y1="112" x2="820" y2="112"/>
+
+    <text class="d-t-c" x="20" y="146">THE OUTBOX</text>
+    <rect class="d-box-a" x="40" y="160" width="330" height="72" rx="9"/>
+    <text class="d-t-c" x="205" y="180" text-anchor="middle">ONE LOCAL TRANSACTION</text>
+    <rect class="d-box" x="58" y="190" width="140" height="30" rx="6"/>
+    <text class="d-t-m" x="68" y="210">save order</text>
+    <rect class="d-box" x="212" y="190" width="140" height="30" rx="6"/>
+    <text class="d-t-m" x="222" y="210">insert outbox</text>
+
+    <path class="d-line-a" d="M375 196 H455" marker-end="url(#mk24)"/>
+    <rect class="d-box-g" x="460" y="174" width="150" height="44" rx="8"/>
+    <text class="d-t-b" x="535" y="201" text-anchor="middle">worker publishes</text>
+    <text class="d-t-s" x="625" y="196">at-least-once, so the</text>
+    <text class="d-t-s" x="625" y="214">consumer must be idempotent</text>
+  </svg>
+  <figcaption>Both writes now succeed together or fail together, because they are the same transaction. Delivery is moved to a worker that can safely retry.</figcaption>
+</figure>
+
 <div class="box kid">
   <div class="box-title">🧒 Simple</div>
   <p style="margin-bottom:0">
@@ -397,6 +431,7 @@ SELECT changes();   -- 0. No error, no oversell, and the caller can say why.
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

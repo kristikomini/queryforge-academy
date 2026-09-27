@@ -32,6 +32,33 @@
 
 <h2 id="sargable">The word they will use: sargable</h2>
 
+<figure class="diagram">
+  <svg viewBox="0 0 840 250" role="img" aria-labelledby="d7t d7d">
+    <title id="d7t">Why wrapping the column in a function turns a seek into a scan</title>
+    <desc id="d7d">The index is sorted by the stored column value. A comparison against the bare column names a contiguous stretch of it, so the engine jumps there and reads only that stretch. Wrapping the column in a function compares something the index does not store, so every entry has to be read and tested.</desc>
+    <defs><marker id="mk7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill"/></marker></defs>
+    <text class="d-t-c" x="20" y="34">SARGABLE</text>
+    <text class="d-t-m" x="20" y="58">placed_at &gt;= '2026-01-01'</text>
+    <text class="d-t-m" x="20" y="76">        AND &lt; '2027-01-01'</text>
+    <rect class="d-box" x="300" y="30" width="500" height="46" rx="8"/>
+    <rect class="d-box-a" x="470" y="30" width="150" height="46" rx="8"/>
+    <text class="d-t-s" x="310" y="58">index, sorted by placed_at →</text>
+    <text class="d-t-b" x="545" y="59" text-anchor="middle">read</text>
+    <path class="d-line-a" d="M545 96 V80" marker-end="url(#mk7)"/>
+    <text class="d-t-s" x="545" y="112" text-anchor="middle">one contiguous stretch: a few page reads, whatever the table size</text>
+
+    <line class="d-line" x1="20" y1="140" x2="820" y2="140"/>
+
+    <text class="d-t-c" x="20" y="178">NOT SARGABLE</text>
+    <text class="d-t-m" x="20" y="202">strftime('%Y', placed_at)</text>
+    <text class="d-t-m" x="20" y="220">        = '2026'</text>
+    <rect class="d-box-b" x="300" y="174" width="500" height="46" rx="8"/>
+    <text class="d-t-b" x="550" y="203" text-anchor="middle">every entry read and tested</text>
+    <text class="d-t-s" x="550" y="240" text-anchor="middle">the index stores placed_at, not strftime(placed_at) — so it cannot be searched</text>
+  </svg>
+  <figcaption>Both return the same rows. Only one of them can use the index, and nothing in the SQL looks wrong.</figcaption>
+</figure>
+
 <div class="box kid">
   <div class="box-title">🧒 Simple</div>
   <p style="margin-bottom:0">
@@ -56,7 +83,7 @@
 <h2 id="four">The four ways people destroy an index</h2>
 
 <h3>1 · A function on the column</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="5-6">
 <figcaption>Way one to destroy an index: wrap the column in a function.</figcaption>
 <pre><code>-- NOT SARGABLE: the index stores placed_at, not YEAR(placed_at).
 WHERE YEAR(placed_at) = 2026          -- the engine must compute YEAR() for every row first
@@ -95,7 +122,7 @@ WHERE placed_at &gt;= DATE '2026-01-01'  -- lower bound, inclusive — an index 
 </div>
 
 <h3>2 · Arithmetic on the column</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>Way two: arithmetic on the column instead of on the constant.</figcaption>
 <pre><code>WHERE total_cents / 100 &gt; 500      -- NOT sargable: a division per row, then a comparison
 WHERE total_cents &gt; 50000          -- sargable: the same question, maths moved to the constant
@@ -347,6 +374,7 @@ WHERE strftime('%Y-%m', placed_at) = '2026-01';         -- a FUNCTION on the col
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

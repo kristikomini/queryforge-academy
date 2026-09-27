@@ -32,6 +32,40 @@
 
 <h2 id="unknown">NULL is not a value. It is the absence of one.</h2>
 
+<figure class="diagram">
+  <svg viewBox="0 0 840 230" role="img" aria-labelledby="d9t d9d">
+    <title id="d9t">The asymmetry between WHERE and CHECK over UNKNOWN</title>
+    <desc id="d9d">A comparison yields TRUE, FALSE or UNKNOWN. WHERE keeps a row only when the result is TRUE, so UNKNOWN is discarded like FALSE. CHECK rejects a row only when the result is FALSE, so UNKNOWN is accepted. The same expression over the same null has opposite effects in the two clauses.</desc>
+    <text class="d-t-c" x="130" y="34" text-anchor="middle">THE COMPARISON SAYS</text>
+    <text class="d-t-c" x="430" y="34" text-anchor="middle">WHERE keeps it?</text>
+    <text class="d-t-c" x="690" y="34" text-anchor="middle">CHECK allows it?</text>
+
+    <rect class="d-box-g" x="40" y="50" width="180" height="42" rx="8"/>
+    <text class="d-t-b" x="130" y="77" text-anchor="middle">TRUE</text>
+    <rect class="d-box-g" x="340" y="50" width="180" height="42" rx="8"/>
+    <text class="d-t-b" x="430" y="77" text-anchor="middle">kept</text>
+    <rect class="d-box-g" x="600" y="50" width="180" height="42" rx="8"/>
+    <text class="d-t-b" x="690" y="77" text-anchor="middle">allowed</text>
+
+    <rect class="d-box-b" x="40" y="102" width="180" height="42" rx="8"/>
+    <text class="d-t-b" x="130" y="129" text-anchor="middle">FALSE</text>
+    <rect class="d-box-b" x="340" y="102" width="180" height="42" rx="8"/>
+    <text class="d-t-b" x="430" y="129" text-anchor="middle">dropped</text>
+    <rect class="d-box-b" x="600" y="102" width="180" height="42" rx="8"/>
+    <text class="d-t-b" x="690" y="129" text-anchor="middle">rejected</text>
+
+    <rect class="d-box-w" x="40" y="154" width="180" height="42" rx="8"/>
+    <text class="d-t-b" x="130" y="181" text-anchor="middle">UNKNOWN</text>
+    <rect class="d-box-b" x="340" y="154" width="180" height="42" rx="8"/>
+    <text class="d-t-b" x="430" y="181" text-anchor="middle">dropped</text>
+    <rect class="d-box-g" x="600" y="154" width="180" height="42" rx="8"/>
+    <text class="d-t-b" x="690" y="181" text-anchor="middle">allowed</text>
+    <text class="d-t-s" x="430" y="218" text-anchor="middle">the null row vanishes from the query</text>
+    <text class="d-t-s" x="690" y="218" text-anchor="middle">the null row is written to the table</text>
+  </svg>
+  <figcaption>The bottom row is the one that surprises people: <code>CHECK (price &gt; 0)</code> does not stop a null price, and <code>WHERE price &gt; 0</code> will never find it again.</figcaption>
+</figure>
+
 <div class="box kid">
   <div class="box-title">🧒 Simple</div>
   <p style="margin-bottom:0">
@@ -75,7 +109,7 @@
 <h2 id="six">Six places NULL changes the answer</h2>
 
 <h3>1 · <code>= NULL</code> never matches</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>The first place NULL changes the answer: equality cannot test it.</figcaption>
 <pre><code>WHERE shipped_at = NULL      -- ALWAYS empty — even for rows where shipped_at really is NULL
 WHERE shipped_at IS NULL     -- correct: IS NULL is the only operator that can see a NULL
@@ -95,7 +129,7 @@ WHERE shipped_at IS NULL     -- correct: IS NULL is the only operator that can s
 </figure>
 
 <h3>2 · <code>NOT IN</code> collapses</h3>
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="2">
 <figcaption>The second place: one NULL anywhere in the subquery empties the whole result.</figcaption>
 <pre><code>-- If ANY row of the subquery is NULL, this returns ZERO rows. Silently.
 WHERE id NOT IN (SELECT customer_id FROM orders)  -- customer_id nullable? empty result.
@@ -332,6 +366,7 @@ FROM daily_stats;                            -- one row per day, already aggrega
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

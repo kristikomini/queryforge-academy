@@ -73,7 +73,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="3">
 <figcaption>The default frame is <code>RANGE</code>, and on tied values it does something most people do not expect.</figcaption>
 <pre><code>-- Three rows, all on the SAME date d, with amounts 10, 20, 30:
 SUM(x) OVER (ORDER BY d)                            -- RANGE (default): 60, 60, 60
@@ -165,6 +165,35 @@ FROM daily;                                                    -- one row per da
 </div>
 
 <h2 id="islands">Gaps and islands</h2>
+
+<figure class="diagram">
+  <svg viewBox="0 0 840 250" role="img" aria-labelledby="d14t d14d">
+    <title id="d14t">Why date minus row number finds runs of consecutive days</title>
+    <desc id="d14d">The distinct days are numbered in order. Inside a run of consecutive days the date and the row number increase together, so their difference does not change. At a gap the date jumps while the row number does not, so the difference changes. Grouping by that difference gives one group per run.</desc>
+    <text class="d-t-c" x="60" y="34">DAY</text>
+    <text class="d-t-c" x="250" y="34">ROW_NUMBER</text>
+    <text class="d-t-c" x="450" y="34">DAY − ROW_NUMBER</text>
+    <text class="d-t-c" x="680" y="34">GROUP</text>
+
+    <text class="d-t-m" x="60" y="66">Mar 01</text><text class="d-t-m" x="290" y="66">1</text><text class="d-t-m" x="500" y="66">Feb 28</text>
+    <text class="d-t-m" x="60" y="92">Mar 02</text><text class="d-t-m" x="290" y="92">2</text><text class="d-t-m" x="500" y="92">Feb 28</text>
+    <text class="d-t-m" x="60" y="118">Mar 03</text><text class="d-t-m" x="290" y="118">3</text><text class="d-t-m" x="500" y="118">Feb 28</text>
+    <rect class="d-box-a" x="640" y="48" width="130" height="82" rx="7"/>
+    <text class="d-t-b" x="705" y="84" text-anchor="middle">island 1</text>
+    <text class="d-t-s" x="705" y="104" text-anchor="middle">three days</text>
+
+    <line class="d-line" x1="40" y1="140" x2="600" y2="140" stroke-dasharray="4 4"/>
+    <text class="d-t-s" x="610" y="144">← gap: no orders on 04, 05</text>
+
+    <text class="d-t-m" x="60" y="176">Mar 06</text><text class="d-t-m" x="290" y="176">4</text><text class="d-t-m" x="500" y="176">Mar 02</text>
+    <text class="d-t-m" x="60" y="202">Mar 07</text><text class="d-t-m" x="290" y="202">5</text><text class="d-t-m" x="500" y="202">Mar 02</text>
+    <rect class="d-box-k" x="640" y="158" width="130" height="56" rx="7"/>
+    <text class="d-t-b" x="705" y="181" text-anchor="middle">island 2</text>
+    <text class="d-t-s" x="705" y="201" text-anchor="middle">two days</text>
+    <text class="d-t-s" x="40" y="238">The third column is constant inside a run and changes at every gap. That is the entire trick.</text>
+  </svg>
+  <figcaption>Once you have seen the third column, the technique stops being something to memorise.</figcaption>
+</figure>
 
 <div class="box kid">
   <div class="box-title">🧒 Simple</div>
@@ -337,6 +366,7 @@ FROM sessions GROUP BY user_id, session_id;                  -- one row per sess
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

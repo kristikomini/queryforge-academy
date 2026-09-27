@@ -92,7 +92,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql" data-run>
+<figure class="codex" data-lang="sql" data-run data-focus="8">
 <figcaption>The two joins with no keyword: &ldquo;has at least one&rdquo; and &ldquo;has none&rdquo;, written three ways.</figcaption>
 <pre><code>-- SEMI-JOIN: customers who have ordered. One row each, however many orders.
 SELECT c.* FROM customers c                 -- only the LEFT table's columns come back
@@ -335,6 +335,7 @@ ORDER BY n DESC;                            -- busiest first; n is the SELECT al
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

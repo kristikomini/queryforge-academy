@@ -33,6 +33,34 @@
 
 <h2 id="truncate">Never wrap the column</h2>
 
+<figure class="diagram">
+  <svg viewBox="0 0 840 230" role="img" aria-labelledby="d17t d17d">
+    <title id="d17t">Why BETWEEN loses the last day of a range</title>
+    <desc id="d17d">A date literal means midnight at the start of that day. BETWEEN is inclusive at both ends, so a range ending on the thirty-first stops at midnight and every row timestamped later that day falls outside it. A half-open range ending at the first of the next month includes the whole day.</desc>
+    <defs><marker id="mk17" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill"/></marker></defs>
+    <line class="d-line" x1="60" y1="96" x2="800" y2="96"/>
+    <text class="d-t-m" x="60" y="126">Jan 01</text>
+    <text class="d-t-m" x="600" y="126">Jan 31</text>
+    <text class="d-t-m" x="740" y="126">Feb 01</text>
+    <line class="d-line" x1="70" y1="88" x2="70" y2="104"/>
+    <line class="d-line" x1="620" y1="88" x2="620" y2="104"/>
+    <line class="d-line" x1="750" y1="88" x2="750" y2="104"/>
+
+    <circle class="d-fill-a" cx="680" cy="96" r="5"/>
+    <text class="d-t-s" x="680" y="150" text-anchor="middle">an order placed 09:14 on the 31st</text>
+
+    <rect class="d-box-b" x="70" y="40" width="550" height="26" rx="6"/>
+    <text class="d-t-b" x="345" y="58" text-anchor="middle">BETWEEN '2026-01-01' AND '2026-01-31'</text>
+    <text class="d-t-s" x="636" y="50">stops at midnight —</text>
+    <text class="d-t-s" x="636" y="68">the order is missed</text>
+
+    <rect class="d-box-g" x="70" y="178" width="680" height="26" rx="6"/>
+    <text class="d-t-b" x="410" y="196" text-anchor="middle">&gt;= '2026-01-01' AND &lt; '2026-02-01'</text>
+    <path class="d-line-a" d="M680 172 V108" marker-end="url(#mk17)"/>
+  </svg>
+  <figcaption>The bug survives review because <code>BETWEEN</code> reads like English, and survives testing whenever the test data happens to be timestamped midnight.</figcaption>
+</figure>
+
 <p>
   This is <a href="07-predicates-and-sargability.html">chapter 07</a> again, and it is worth
   repeating because date filtering is where it happens most:
@@ -305,6 +333,7 @@ FROM staging_customers;                                                -- the ra
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

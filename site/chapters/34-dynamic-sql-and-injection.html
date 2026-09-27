@@ -33,6 +33,40 @@
 
 <h2 id="how">How injection actually works</h2>
 
+<figure class="diagram">
+  <svg viewBox="0 0 840 250" role="img" aria-labelledby="d34t d34d">
+    <title id="d34t">One channel versus two</title>
+    <desc id="d34d">When a value is concatenated into the statement, the value and the code arrive at the parser as one string, so the parser decides what is syntax using characters the attacker chose. With a parameter the statement is parsed first with a placeholder and the value is bound afterwards into a slot that is never parsed as syntax.</desc>
+    <defs><marker id="mk34" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill"/></marker></defs><defs><marker id="mk34b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill"/></marker></defs>
+    <text class="d-t-c" x="20" y="30">CONCATENATED — ONE CHANNEL</text>
+    <rect class="d-box-b" x="40" y="44" width="330" height="40" rx="8"/>
+    <text class="d-t-m" x="55" y="69">"… WHERE email = '" + input</text>
+    <path class="d-line-b" d="M375 64 H455" marker-end="url(#mk34b)"/>
+    <rect class="d-box" x="460" y="44" width="150" height="40" rx="8"/>
+    <text class="d-t-b" x="535" y="69" text-anchor="middle">PARSER</text>
+    <text class="d-t-s" x="625" y="58">decides what is syntax</text>
+    <text class="d-t-s" x="625" y="76">from the attacker's characters</text>
+
+    <line class="d-line" x1="20" y1="112" x2="820" y2="112"/>
+
+    <text class="d-t-c" x="20" y="146">PARAMETERISED — TWO CHANNELS</text>
+    <rect class="d-box-a" x="40" y="160" width="330" height="34" rx="8"/>
+    <text class="d-t-m" x="55" y="182">… WHERE email = ?</text>
+    <path class="d-line-a" d="M375 177 H455" marker-end="url(#mk34)"/>
+    <rect class="d-box" x="460" y="152" width="150" height="34" rx="8"/>
+    <text class="d-t-b" x="535" y="174" text-anchor="middle">PARSER</text>
+    <text class="d-t-s" x="625" y="174">the plan is fixed first</text>
+
+    <rect class="d-box-g" x="40" y="204" width="330" height="34" rx="8"/>
+    <text class="d-t-m" x="55" y="226">input, as a value</text>
+    <path class="d-line" d="M375 221 H455" marker-end="url(#mk34)"/>
+    <rect class="d-box" x="460" y="204" width="150" height="34" rx="8"/>
+    <text class="d-t-b" x="535" y="226" text-anchor="middle">BOUND</text>
+    <text class="d-t-s" x="625" y="226">never parsed as syntax</text>
+  </svg>
+  <figcaption>This is why parameterisation is not a stricter kind of escaping: the value cannot become code, because the code was already decided before it arrived.</figcaption>
+</figure>
+
 <div class="box kid">
   <div class="box-title">🧒 Simple</div>
   <p style="margin-bottom:0">
@@ -43,7 +77,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="text">
+<figure class="codex" data-lang="text" data-focus="2">
 <figcaption>The vulnerable pattern, and the two inputs everybody is shown once and then never forgets.</figcaption>
 <pre><code>-- The vulnerable pattern, in any language:
 sql = "SELECT * FROM users WHERE email = '" + input + "'"
@@ -95,7 +129,7 @@ sql = "SELECT * FROM users WHERE email = '" + input + "'"
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2">
 <figcaption>The fix: a separate channel for values, which is also faster.</figcaption>
 <pre><code>-- Correct, everywhere:
 SELECT * FROM users WHERE email = ?      -- or $1, @email, :email — the driver decides
@@ -326,6 +360,7 @@ SET @sql = N'SELECT * FROM ' + QUOTENAME(@table_name);   -- SQL Server
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

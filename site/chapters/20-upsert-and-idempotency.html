@@ -33,6 +33,39 @@
 
 <h2 id="race">“Check then insert” is a race, not a pattern</h2>
 
+<figure class="diagram">
+  <svg viewBox="0 0 840 250" role="img" aria-labelledby="d20t d20d">
+    <title id="d20t">Why check-then-insert is a race</title>
+    <desc id="d20d">Two sessions both check whether a row exists, both correctly find that it does not, and both then insert it. The gap between the check and the insert is the window. No isolation level below serialisable closes it, because the row that would have to be locked does not exist yet.</desc>
+    <line class="d-line" x1="120" y1="40" x2="120" y2="210"/>
+    <line class="d-line" x1="600" y1="40" x2="600" y2="210"/>
+    <text class="d-t-c" x="120" y="30" text-anchor="middle">SESSION A</text>
+    <text class="d-t-c" x="600" y="30" text-anchor="middle">SESSION B</text>
+    <text class="d-t-c" x="360" y="30" text-anchor="middle">TIME ↓</text>
+
+    <rect class="d-box" x="20" y="52" width="200" height="30" rx="6"/>
+    <text class="d-t-m" x="30" y="72">SELECT … WHERE ref = 'X'</text>
+    <text class="d-t-s" x="240" y="72">not found</text>
+
+    <rect class="d-box" x="500" y="94" width="200" height="30" rx="6"/>
+    <text class="d-t-m" x="510" y="114">SELECT … WHERE ref = 'X'</text>
+    <text class="d-t-s" x="712" y="114">also not found</text>
+
+    <rect class="d-box-g" x="20" y="136" width="200" height="30" rx="6"/>
+    <text class="d-t-m" x="30" y="156">INSERT … 'X'</text>
+    <text class="d-t-s" x="240" y="156">succeeds</text>
+
+    <rect class="d-box-b" x="500" y="178" width="200" height="30" rx="6"/>
+    <text class="d-t-m" x="510" y="198">INSERT … 'X'</text>
+    <text class="d-t-s" x="712" y="198">duplicate row</text>
+
+    <rect class="d-box-w" x="255" y="86" width="190" height="46" rx="8"/>
+    <text class="d-t-b" x="350" y="106" text-anchor="middle">THE WINDOW</text>
+    <text class="d-t-s" x="350" y="124" text-anchor="middle">nothing to lock yet</text>
+  </svg>
+  <figcaption>The fix is not a higher isolation level. It is a <code>UNIQUE</code> constraint, which turns the second insert from a duplicate row into an error you can catch.</figcaption>
+</figure>
+
 <div class="box kid">
   <div class="box-title">🧒 Simple</div>
   <p style="margin-bottom:0">
@@ -42,7 +75,7 @@
   </p>
 </div>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="2-3">
 <figcaption>The race everybody writes at least once: check, then act, with a gap in between.</figcaption>
 <pre><code>-- The bug, written by everyone at least once:
 SELECT id FROM customers WHERE email = ?;              -- statement 1: "not found"
@@ -80,7 +113,7 @@ INSERT INTO customers (email, name) VALUES (?, ?);     -- statement 2: so insert
 
 <h2 id="upsert">The four spellings</h2>
 
-<figure class="codex" data-lang="sql">
+<figure class="codex" data-lang="sql" data-focus="4">
 <figcaption>The four spellings of upsert, and what differs between them.</figcaption>
 <pre><code>-- PostgreSQL, SQLite 3.24+ — the clearest of the four
 INSERT INTO customers (email, name, city_id)                 -- the row we propose…
@@ -395,6 +428,7 @@ ON CONFLICT (external_ref) DO NOTHING;                               -- …handl
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

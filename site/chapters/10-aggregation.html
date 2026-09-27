@@ -32,6 +32,34 @@
 
 <h2 id="grain">Grouping changes the grain</h2>
 
+<figure class="diagram">
+  <svg viewBox="0 0 840 240" role="img" aria-labelledby="d10t d10d">
+    <title id="d10t">GROUP BY changes the grain of the result</title>
+    <desc id="d10d">Six order rows belonging to three customers become three rows, one per customer. After the change one output row stands for several input rows, which is why a column that was not grouped no longer has a single value to show.</desc>
+    <defs><marker id="mk10" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill"/></marker></defs>
+    <text class="d-t-c" x="150" y="30" text-anchor="middle">GRAIN: ONE ROW PER ORDER</text>
+    <rect class="d-box-a" x="60" y="44" width="180" height="26" rx="5"/><text class="d-t-m" x="70" y="62">c1   order 1    40</text>
+    <rect class="d-box-a" x="60" y="74" width="180" height="26" rx="5"/><text class="d-t-m" x="70" y="92">c1   order 2    60</text>
+    <rect class="d-box-k" x="60" y="104" width="180" height="26" rx="5"/><text class="d-t-m" x="70" y="122">c2   order 3    25</text>
+    <rect class="d-box-k" x="60" y="134" width="180" height="26" rx="5"/><text class="d-t-m" x="70" y="152">c2   order 4    75</text>
+    <rect class="d-box-p" x="60" y="164" width="180" height="26" rx="5"/><text class="d-t-m" x="70" y="182">c3   order 5    10</text>
+    <rect class="d-box-p" x="60" y="194" width="180" height="26" rx="5"/><text class="d-t-m" x="70" y="212">c3   order 6    90</text>
+
+    <path class="d-line-a" d="M260 130 H360" marker-end="url(#mk10)"/>
+    <text class="d-t-b" x="310" y="120" text-anchor="middle">GROUP BY</text>
+    <text class="d-t-b" x="310" y="150" text-anchor="middle">customer_id</text>
+
+    <text class="d-t-c" x="600" y="30" text-anchor="middle">GRAIN: ONE ROW PER CUSTOMER</text>
+    <rect class="d-box-a" x="500" y="59" width="200" height="26" rx="5"/><text class="d-t-m" x="510" y="77">c1   SUM 100</text>
+    <rect class="d-box-k" x="500" y="119" width="200" height="26" rx="5"/><text class="d-t-m" x="510" y="137">c2   SUM 100</text>
+    <rect class="d-box-p" x="500" y="179" width="200" height="26" rx="5"/><text class="d-t-m" x="510" y="197">c3   SUM 100</text>
+    <text class="d-t-s" x="716" y="77">← two input rows</text>
+    <text class="d-t-s" x="716" y="137">← two input rows</text>
+    <text class="d-t-s" x="716" y="197">← two input rows</text>
+  </svg>
+  <figcaption>Ask “what does one row mean now?” after every <code>GROUP BY</code>. Every rule about what is legal in <code>SELECT</code> follows from the answer.</figcaption>
+</figure>
+
 <div class="box kid">
   <div class="box-title">🧒 Simple</div>
   <p style="margin-bottom:0">
@@ -341,6 +369,7 @@ ORDER BY revenue_eur DESC;                                    -- ORDER BY runs l
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

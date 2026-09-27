@@ -52,7 +52,37 @@
 
 <h2 id="n1">N+1, from the database side</h2>
 
-<figure class="codex" data-lang="csharp">
+<figure class="diagram">
+  <svg viewBox="0 0 840 240" role="img" aria-labelledby="d38t d38d">
+    <title id="d38t">Why N plus one never appears in a slow query report</title>
+    <desc id="d38d">Loading a list and then touching a related entity inside the loop issues one query for the list and one more for every row. Each of those queries is fast, so none of them crosses a slow query threshold and the average duration looks excellent, while the page waits for all of them in turn.</desc>
+    <defs><marker id="mk38" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill"/></marker></defs>
+    <text class="d-t-c" x="20" y="30">ONE QUERY WITH A JOIN</text>
+    <rect class="d-box-g" x="40" y="44" width="260" height="38" rx="8"/>
+    <text class="d-t-m" x="52" y="68">orders JOIN customers</text>
+    <text class="d-t-s" x="320" y="60">one round trip</text>
+    <text class="d-t-s" x="320" y="78">total: one query</text>
+
+    <line class="d-line" x1="20" y1="106" x2="820" y2="106"/>
+
+    <text class="d-t-c" x="20" y="140">THE SAME PAGE, LAZY-LOADED</text>
+    <rect class="d-box" x="40" y="152" width="200" height="28" rx="6"/>
+    <text class="d-t-m" x="52" y="172">SELECT … FROM orders</text>
+    <text class="d-t-s" x="250" y="172">the list: 2 ms</text>
+
+    <rect class="d-box-b" x="40" y="188" width="200" height="22" rx="5"/>
+    <text class="d-t-m" x="52" y="204">SELECT … customer 1</text>
+    <rect class="d-box-b" x="250" y="188" width="200" height="22" rx="5"/>
+    <text class="d-t-m" x="262" y="204">SELECT … customer 2</text>
+    <rect class="d-box-b" x="460" y="188" width="200" height="22" rx="5"/>
+    <text class="d-t-m" x="472" y="204">SELECT … customer 3</text>
+    <text class="d-t-b" x="680" y="204">… once per row</text>
+    <text class="d-t-s" x="20" y="232">Every one of them takes about two milliseconds, so not one crosses a slow-query threshold. Sort by CALL COUNT to see it.</text>
+  </svg>
+  <figcaption>The defect is invisible to every per-query report and obvious the moment you sort by how often a query ran.</figcaption>
+</figure>
+
+<figure class="codex" data-lang="csharp" data-focus="4">
 <figcaption>N+1, from both sides of the boundary: four innocent lines, and what the database receives.</figcaption>
 <pre><code>// The code. It looks completely innocent.
 var orders = db.Orders.Where(o =&gt; o.CustomerId == 42).ToList();  // ToList() runs the query
@@ -301,6 +331,7 @@ ORDER BY qs.execution_count DESC;                      -- most-executed first
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

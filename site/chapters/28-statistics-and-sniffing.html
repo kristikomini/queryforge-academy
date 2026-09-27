@@ -32,6 +32,40 @@
 
 <h2 id="stats">The optimiser is guessing, and statistics are the guess</h2>
 
+<figure class="diagram">
+  <svg viewBox="0 0 840 240" role="img" aria-labelledby="d28t d28d">
+    <title id="d28t">A wrong estimate is a wrong plan, not a slow one</title>
+    <desc id="d28d">The optimiser picks a plan from its estimate of how many rows each step will produce. When the estimate matches reality it chooses a nested loops join and that is correct. When statistics are stale the same estimate is tiny while the real input is enormous, so it still chooses nested loops and the plan is built on a false premise.</desc>
+    <defs><marker id="mk28" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="d-fill"/></marker></defs>
+    <text class="d-t-c" x="20" y="30">STATISTICS FRESH</text>
+    <rect class="d-box" x="40" y="44" width="150" height="36" rx="7"/>
+    <text class="d-t-m" x="52" y="67">estimate: 40</text>
+    <path class="d-line" d="M195 62 H255" marker-end="url(#mk28)"/>
+    <rect class="d-box-g" x="260" y="44" width="170" height="36" rx="7"/>
+    <text class="d-t-b" x="345" y="67" text-anchor="middle">nested loops</text>
+    <path class="d-line" d="M435 62 H495" marker-end="url(#mk28)"/>
+    <rect class="d-box" x="500" y="44" width="150" height="36" rx="7"/>
+    <text class="d-t-m" x="512" y="67">actual: 41</text>
+    <text class="d-t-s" x="668" y="67">correct, and fast</text>
+
+    <line class="d-line" x1="20" y1="112" x2="820" y2="112"/>
+
+    <text class="d-t-c" x="20" y="146">STATISTICS STALE</text>
+    <rect class="d-box-w" x="40" y="160" width="150" height="36" rx="7"/>
+    <text class="d-t-m" x="52" y="183">estimate: 40</text>
+    <path class="d-line" d="M195 178 H255" marker-end="url(#mk28)"/>
+    <rect class="d-box-b" x="260" y="160" width="170" height="36" rx="7"/>
+    <text class="d-t-b" x="345" y="183" text-anchor="middle">nested loops</text>
+    <path class="d-line" d="M435 178 H495" marker-end="url(#mk28)"/>
+    <rect class="d-box-b" x="500" y="160" width="150" height="36" rx="7"/>
+    <text class="d-t-m" x="512" y="183">actual: 4 000 000</text>
+    <text class="d-t-s" x="668" y="178">same plan, chosen for</text>
+    <text class="d-t-s" x="668" y="196">data that is not there</text>
+    <text class="d-t-s" x="20" y="228">The optimiser did not hesitate. It was confident, and it was working from a description of last month's data.</text>
+  </svg>
+  <figcaption>This is why the first thing to read in a plan is the gap between estimated and actual rows — it names the step whose premise was false.</figcaption>
+</figure>
+
 <div class="box kid">
   <div class="box-title">🧒 Simple</div>
   <p style="margin-bottom:0">
@@ -274,6 +308,7 @@ ORDER BY total_exec_time DESC LIMIT 20;                     -- again: total, not
 <script src="../assets/syntax.js"></script>
 <script src="../assets/site.js"></script>
 <script src="../assets/codex.js"></script>
+<script src="../assets/highlight.js"></script>
 <script src="../assets/quiz.js"></script>
 <script src="../assets/learn.js"></script>
 <script src="../assets/notes.js"></script>

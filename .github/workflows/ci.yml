@@ -36,7 +36,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
-      - name: The integrity gate — 11 checks
+      # No count in this label: doctor.mjs prints how many checks it ran, and a
+      # number duplicated here has no gate behind it. This one said 11 while the
+      # gate ran 13 and nothing could notice. One source, as everywhere else.
+      - name: The integrity gate
         run: node tools/doctor.mjs
 
   # --------------------------------------------------------------------- api

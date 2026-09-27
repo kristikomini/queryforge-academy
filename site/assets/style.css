@@ -45,6 +45,24 @@
   --code-bg:   #f2f4fa;
   --code-ink:  #26303f;
   --code-line: #e2e6f0;
+  /* Code colour (assets/highlight.js). One entry per KIND in the token
+  dictionary, so the palette and the anatomy table classify a word the same
+  way. Comments are dimmed on purpose: every line in this course carries one,
+  which is right, and left at full strength it competes with the SQL. */
+  --hl-com:  #6e7893;
+  --hl-com-key: #5a6480;
+  --hl-cl:   #17357f;
+  --hl-kw:   #2b53c4;
+  --hl-fn:   #6231b8;
+  --hl-ty:   #0f6b42;
+  --hl-str:  #0a6a70;
+  --hl-num:  #8a5200;
+  --hl-op:   #566079;
+  --hl-opw:  #a8326d;
+  --hl-id:   #7b5aa6;
+  --hl-va:   #8a5200;
+  --hl-key-bg:  rgba(47, 91, 215, .10);
+  --hl-key-bar: #2f5bd7;
 
   --radius: 12px;
   --radius-sm: 8px;
@@ -89,6 +107,21 @@
     --code-bg:   #131826;
     --code-ink:  #d7deec;
     --code-line: #262c42;
+    /* Code colour, dark. Same kinds, lifted off the darker --code-bg. */
+    --hl-com:  #7f89a6;
+    --hl-com-key: #9aa4bf;
+    --hl-cl:   #9fb6ff;
+    --hl-kw:   #7d9bff;
+    --hl-fn:   #c0a6ff;
+    --hl-ty:   #6ddfa8;
+    --hl-str:  #5fd0d6;
+    --hl-num:  #f0b45f;
+    --hl-op:   #9aa4bd;
+  --hl-opw:  #f2a0c8;
+    --hl-id:   #c9a6e8;
+    --hl-va:   #f0b45f;
+    --hl-key-bg:  rgba(125, 155, 255, .15);
+    --hl-key-bar: #7d9bff;
 
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
@@ -125,6 +158,21 @@
   --code-bg:   #131826;
   --code-ink:  #d7deec;
   --code-line: #262c42;
+  /* Code colour, dark. Same kinds, lifted off the darker --code-bg. */
+  --hl-com:  #7f89a6;
+  --hl-com-key: #9aa4bf;
+  --hl-cl:   #9fb6ff;
+  --hl-kw:   #7d9bff;
+  --hl-fn:   #c0a6ff;
+  --hl-ty:   #6ddfa8;
+  --hl-str:  #5fd0d6;
+  --hl-num:  #f0b45f;
+  --hl-op:   #9aa4bd;
+  --hl-opw:  #f2a0c8;
+  --hl-id:   #c9a6e8;
+  --hl-va:   #f0b45f;
+  --hl-key-bg:  rgba(125, 155, 255, .15);
+  --hl-key-bar: #7d9bff;
 
   --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 28px rgba(0, 0, 0, .35);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4);
@@ -570,6 +618,52 @@ figure.codex > figcaption {
 figure.codex > figcaption b, figure.codex > figcaption strong { color: var(--ink); }
 figure.codex > pre {
   margin: 0; border: 0; border-radius: 0; background: var(--code-bg);
+}
+
+/* --------------------------------------------------- code colour and focus
+   Rendered by assets/highlight.js, which wraps existing characters in spans
+   and never adds or removes one. The classes mirror the KINDS in
+   assets/syntax.js, so a token that the anatomy table calls a clause is the
+   token this palette paints as a clause. */
+
+.hl-com { color: var(--hl-com); font-style: italic; }
+.hl-cl  { color: var(--hl-cl);  font-weight: 600; }
+.hl-kw  { color: var(--hl-kw); }
+.hl-fn  { color: var(--hl-fn); }
+.hl-ty  { color: var(--hl-ty); }
+.hl-str { color: var(--hl-str); }
+.hl-num { color: var(--hl-num); }
+.hl-op  { color: var(--hl-op); }
+.hl-opw { color: var(--hl-opw); }
+.hl-id  { color: var(--hl-id); }
+.hl-va  { color: var(--hl-va); }
+/* Literals, hints, directives and tool names are rare enough that a shade of
+   their own would be noise rather than information. */
+.hl-li, .hl-hi, .hl-di, .hl-to { color: var(--hl-kw); }
+
+/*  display:inline is LOAD-BEARING, not a default being restated. The newline
+    between two line spans is a text node outside them; make these blocks and
+    the newline renders twice, and code.innerText — what the copy button
+    hands the reader — gains a blank line between every line of SQL. */
+.hl-ln { display: inline; }
+
+/*  The line that carries the lesson. The negative margin exactly cancels the
+    bar plus the padding, so the line does NOT shift right: these examples
+    align their trailing comments into a column, and nudging one line out of
+    that column to emphasise it would cost more than the emphasis is worth. */
+.hl-key {
+  border-left: 3px solid var(--hl-key-bar);
+  background: var(--hl-key-bg);
+  margin-left: -9px;
+  padding-left: 6px;
+  padding-right: 5px;
+  border-radius: 0 4px 4px 0;
+}
+/* On the focus line the comment is part of the point, so it is dimmed less. */
+.hl-key .hl-com { color: var(--hl-com-key); }
+
+@media print {
+  .hl-key { background: none; border-left: 3px solid #666; }
 }
 
 /* Hand-written notes: the conversions and type surprises specific to THIS
